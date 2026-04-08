@@ -1,0 +1,1 @@
+This is the adaptive AR app designed to assist users with a v8 engine subassembly, aimed at reducing their cognitive efforts. 
