@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c242a23446a15c942b2aea907c01160a, type: 3}
+  m_Name: Step_0_Demo
+  m_EditorClassIdentifier: 
+  stepTitle: 'Demo: Insert the crankshaft (click Got It when ready)'
+  stepDescription: 
+  ghostPrefab: {fileID: 2276785170046358372, guid: 8262644a8b2683b4a892731a65a0c2f6, type: 3}
+  instructionAudio: {fileID: 8300000, guid: 4f92ce7ef07a39e4ba4276e4ce6cde42, type: 3}
+  arrowPrefab: {fileID: 3081404500710717755, guid: 33a51a345f3376349ac135d33fdd4cf9, type: 3}
