@@ -1,213 +1,123 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using TryAR.MarkerTracking;
 
 public class StepManager : MonoBehaviour
 {
     [Header("UI")]
     public TextMeshProUGUI captionText;
-    public Button confirmPlacementButton;
+    public Button beginButton;
 
-    [Header("Markers (GameObjects driven by ArUco)")]
-    public Transform staticBlockMarker;
-    public Transform crankshaftMarker;
+    [Header("Tracking")]
+    public GameObject oilPan;
+    public ArUcoTrackingAppCoordinator arucoCoordinator;
+    public ArUcoMarkerTracking arucoTracking;
+    public int blockMarkerId;
 
-    [Header("Ghost")]
-    public GameObject crankshaftGhostPrefab;
-    private GameObject currentGhost;
+    [Header("Parts")]
+    public GameObject crankshaftPrefab;
+    public Vector3 crankshaftSpawnOffset;
 
-    [Header("Offsets (relative to block marker)")]
-    public Vector3 crankshaftPositionOffset;
-    public Vector3 crankshaftRotationOffset;
+    private GameObject spawnedCrankshaft;
 
-    [Header("Validation")]
-    public float positionTolerance = 0.01f;
-    public float rotationTolerance = 10f;
-
-    private bool stepActive = false;
-    private bool placementReady = false;
+    private bool sessionStarted = false;
     private bool anchorLocked = false;
-
-    private float stableTimer = 0f;
-
-    // Marker tracking helpers
-    private Vector3 lastBlockPos;
-    private Vector3 lastCrankPos;
-
-    private float blockMoveTimer = 0f;
-    private float crankMoveTimer = 0f;
-
-    private float detectionThreshold = 0.001f;
+    private bool partsSpawned = false;
 
     void Start()
     {
-        confirmPlacementButton.gameObject.SetActive(false);
-        confirmPlacementButton.onClick.AddListener(ConfirmPlacement);
+        beginButton.onClick.AddListener(StartSession);
 
-        ShowDemo();
+        captionText.text = "Welcome.\n\nPress BEGIN to start.";
+        beginButton.gameObject.SetActive(true);
+
+        // ❌ hide block initially
+        oilPan.SetActive(false);
     }
 
-    // ---------------- DEMO ----------------
-
-    void ShowDemo()
+    void StartSession()
     {
-        captionText.text =
-            "Welcome.\n\n" +
-            "Follow instructions to assemble the engine.\n\n" +
-            "Press GOT IT to begin.";
-    }
+        sessionStarted = true;
+        beginButton.gameObject.SetActive(false);
 
-    public void StartStep1()
-    {
-        captionText.text = "Step 1: Place the crankshaft onto the engine block.";
-        stepActive = true;
+        captionText.text = "Look at the marker to place the engine block.";
     }
-
-    // ---------------- UPDATE ----------------
 
     void Update()
     {
-        if (!stepActive) return;
+        if (!sessionStarted) return;
 
-        // 🔒 Anchor locking logic
-        if (!anchorLocked)
+        // 🟢 Detect marker directly (correct way)
+        if (!anchorLocked && IsMarkerDetected(blockMarkerId))
         {
-            bool blockDetected = IsMarkerTracked(staticBlockMarker, ref lastBlockPos, ref blockMoveTimer);
-
-            if (!blockDetected)
-            {
-                captionText.text = "Looking for engine block...";
-                return;
-            }
-
-            // wait until stable
-            if (blockMoveTimer < 0.2f)
-            {
-                stableTimer += Time.deltaTime;
-
-                if (stableTimer > 0.5f)
-                {
-                    LockAnchor();
-                }
-            }
-            else
-            {
-                stableTimer = 0f;
-            }
-
-            return;
+            ActivateAndLockBlock();
         }
 
-        // 🟢 Spawn ghost AFTER lock
-        if (currentGhost == null)
+        // 🟢 Spawn parts after lock
+        if (anchorLocked && !partsSpawned)
         {
-            SpawnGhost();
+            SpawnParts();
         }
-
-        // 🔍 Crankshaft detection
-        bool crankDetected = IsMarkerTracked(crankshaftMarker, ref lastCrankPos, ref crankMoveTimer);
-
-        if (!crankDetected)
-        {
-            captionText.text = "Pick up the crankshaft.";
-            return;
-        }
-
-        // ✅ Validate placement
-        ValidatePlacement();
-    }
-
-    // ---------------- LOCK ANCHOR ----------------
-
-    void LockAnchor()
-    {
-        anchorLocked = true;
-
-        // Detach from marker updates → NO JITTER
-        staticBlockMarker.parent = null;
-
-        captionText.text = "Block locked. Proceed with placement.";
     }
 
     // ---------------- MARKER DETECTION ----------------
 
-    bool IsMarkerTracked(Transform marker, ref Vector3 lastPos, ref float timer)
+    bool IsMarkerDetected(int markerId)
     {
-        float dist = Vector3.Distance(marker.position, lastPos);
+        if (arucoTracking == null) return false;
 
-        if (dist > detectionThreshold)
+        var idsField = typeof(ArUcoMarkerTracking)
+            .GetField("_detectedMarkerIds", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        if (idsField == null) return false;
+
+        var mat = idsField.GetValue(arucoTracking) as OpenCVForUnity.CoreModule.Mat;
+
+        if (mat == null || mat.total() == 0) return false;
+
+        for (int i = 0; i < mat.total(); i++)
         {
-            timer = 0f;
-            lastPos = marker.position;
-            return true;
+            if ((int)mat.get(i, 0)[0] == markerId)
+                return true;
         }
-        else
-        {
-            timer += Time.deltaTime;
 
-            if (timer > 0.5f)
-                return false;
-
-            return true;
-        }
+        return false;
     }
 
-    // ---------------- GHOST ----------------
+    // ---------------- LOCK BLOCK ----------------
 
-    void SpawnGhost()
+    void ActivateAndLockBlock()
     {
-        currentGhost = Instantiate(crankshaftGhostPrefab);
+        anchorLocked = true;
 
-        currentGhost.transform.position =
-            staticBlockMarker.position +
-            staticBlockMarker.rotation * crankshaftPositionOffset;
+        // ✅ now show block (it will already be aligned by ArUco)
+        oilPan.SetActive(true);
 
-        currentGhost.transform.rotation =
-            staticBlockMarker.rotation *
-            Quaternion.Euler(crankshaftRotationOffset);
+        // 🔒 STOP tracking → no jitter forever
+        if (arucoCoordinator != null)
+            arucoCoordinator.enabled = false;
+
+        captionText.text = "Block placed.";
     }
 
-    // ---------------- VALIDATION ----------------
+    // ---------------- SPAWN PARTS ----------------
 
-    void ValidatePlacement()
+    void SpawnParts()
     {
-        Vector3 targetPos = currentGhost.transform.position;
-        Quaternion targetRot = currentGhost.transform.rotation;
+        partsSpawned = true;
 
-        Vector3 currentPos = crankshaftMarker.position;
-        Quaternion currentRot = crankshaftMarker.rotation;
+        captionText.text = "Pick up the crankshaft.";
 
-        float posError = Vector3.Distance(currentPos, targetPos);
-        float rotError = Quaternion.Angle(currentRot, targetRot);
+        spawnedCrankshaft = Instantiate(crankshaftPrefab);
 
-        if (posError < positionTolerance && rotError < rotationTolerance)
-        {
-            stableTimer += Time.deltaTime;
+        spawnedCrankshaft.transform.position =
+            oilPan.transform.position +
+            oilPan.transform.rotation * crankshaftSpawnOffset;
 
-            if (stableTimer > 0.5f && !placementReady)
-            {
-                PlacementValid();
-            }
-        }
-        else
-        {
-            stableTimer = 0f;
-        }
-    }
+        spawnedCrankshaft.transform.rotation =
+            oilPan.transform.rotation;
 
-    void PlacementValid()
-    {
-        placementReady = true;
-
-        captionText.text = "Alignment correct. Confirm placement.";
-        confirmPlacementButton.gameObject.SetActive(true);
-    }
-
-    public void ConfirmPlacement()
-    {
-        captionText.text = "Step complete!";
-        confirmPlacementButton.gameObject.SetActive(false);
-
-        stepActive = false;
+        spawnedCrankshaft.transform.localScale = Vector3.one;
     }
 }
