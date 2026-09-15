@@ -133,7 +133,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.ai.navigation": {
-      "version": "2.0.5",
+      "version": "2.0.7",
       "depth": 2,
       "source": "registry",
       "dependencies": {
@@ -142,7 +142,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.burst": {
-      "version": "1.8.18",
+      "version": "1.8.21",
       "depth": 1,
       "source": "registry",
       "dependencies": {
@@ -199,20 +199,19 @@
     "com.unity.ext.nunit": {
       "version": "2.0.5",
       "depth": 0,
-      "source": "registry",
-      "dependencies": {},
-      "url": "https://packages.unity.com"
+      "source": "builtin",
+      "dependencies": {}
     },
     "com.unity.feature.development": {
       "version": "1.0.2",
       "depth": 0,
       "source": "builtin",
       "dependencies": {
-        "com.unity.ide.visualstudio": "2.0.22",
-        "com.unity.ide.rider": "3.0.31",
+        "com.unity.ide.visualstudio": "2.0.23",
+        "com.unity.ide.rider": "3.0.36",
         "com.unity.editorcoroutines": "1.0.0",
-        "com.unity.performance.profile-analyzer": "1.2.2",
-        "com.unity.test-framework": "1.4.5",
+        "com.unity.performance.profile-analyzer": "1.2.3",
+        "com.unity.test-framework": "1.5.1",
         "com.unity.testtools.codecoverage": "1.2.6"
       }
     },
@@ -227,8 +226,8 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.ide.rider": {
-      "version": "3.0.31",
-      "depth": 0,
+      "version": "3.0.36",
+      "depth": 1,
       "source": "registry",
       "dependencies": {
         "com.unity.ext.nunit": "1.0.6"
@@ -236,8 +235,8 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.ide.visualstudio": {
-      "version": "2.0.22",
-      "depth": 0,
+      "version": "2.0.23",
+      "depth": 1,
       "source": "registry",
       "dependencies": {
         "com.unity.test-framework": "1.1.9"
@@ -283,14 +282,14 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.performance.profile-analyzer": {
-      "version": "1.2.2",
+      "version": "1.2.3",
       "depth": 1,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"
     },
     "com.unity.render-pipelines.core": {
-      "version": "17.0.3",
+      "version": "17.1.0",
       "depth": 1,
       "source": "builtin",
       "dependencies": {
@@ -315,45 +314,44 @@
       }
     },
     "com.unity.searcher": {
-      "version": "4.9.2",
+      "version": "4.9.3",
       "depth": 1,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"
     },
     "com.unity.settings-manager": {
-      "version": "2.0.1",
+      "version": "2.1.0",
       "depth": 2,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"
     },
     "com.unity.shadergraph": {
-      "version": "17.0.3",
+      "version": "17.1.0",
       "depth": 0,
       "source": "builtin",
       "dependencies": {
-        "com.unity.render-pipelines.core": "17.0.3",
-        "com.unity.searcher": "4.9.2"
+        "com.unity.render-pipelines.core": "17.1.0",
+        "com.unity.searcher": "4.9.3"
       }
     },
     "com.unity.test-framework": {
-      "version": "1.4.6",
+      "version": "1.5.1",
       "depth": 0,
-      "source": "registry",
+      "source": "builtin",
       "dependencies": {
         "com.unity.ext.nunit": "2.0.3",
         "com.unity.modules.imgui": "1.0.0",
         "com.unity.modules.jsonserialize": "1.0.0"
-      },
-      "url": "https://packages.unity.com"
+      }
     },
     "com.unity.test-framework.performance": {
-      "version": "3.0.3",
+      "version": "3.1.0",
       "depth": 2,
       "source": "registry",
       "dependencies": {
-        "com.unity.test-framework": "1.1.31",
+        "com.unity.test-framework": "1.1.33",
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.com"
@@ -369,7 +367,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.textmeshpro": {
-      "version": "3.0.6",
+      "version": "5.0.0",
       "depth": 2,
       "source": "builtin",
       "dependencies": {
@@ -450,7 +448,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.core-utils": {
-      "version": "2.5.1",
+      "version": "2.5.2",
       "depth": 1,
       "source": "registry",
       "dependencies": {
@@ -488,7 +486,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.xr.legacyinputhelpers": {
-      "version": "2.1.11",
+      "version": "2.1.12",
       "depth": 1,
       "source": "registry",
       "dependencies": {

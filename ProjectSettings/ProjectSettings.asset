@@ -145,10 +145,6 @@ PlayerSettings:
   preloadedAssets:
   - {fileID: 0}
   - {fileID: 11400000, guid: 05a9818f894659c4790a015901301e88, type: 2}
-  - {fileID: 11400000, guid: ec0d9628aead0f84ba1c2f99e708ba80, type: 2}
-  - {fileID: -4681728442228546181, guid: 5496b31d150b80145aabb833df22fdc8, type: 2}
-  - {fileID: 11400000, guid: c8ff32e1ad44612478215cbbcb022953, type: 2}
-  - {fileID: -8382961302221429112, guid: 7cef7ce97239adb4cbc4280777e69340, type: 2}
   metroInputSource: 0
   wsaTransparentSwapchain: 0
   m_HolographicPauseOnTrackingLoss: 1
@@ -608,6 +604,7 @@ PlayerSettings:
   - serializedVersion: 2
     m_BuildTarget: PS4
     m_EncodingQuality: 1
+  m_BuildTargetGroupHDRCubemapEncodingQuality: []
   m_BuildTargetGroupLightmapSettings: []
   m_BuildTargetGroupLoadStoreDebugModeSettings: []
   m_BuildTargetNormalMapEncoding: []
@@ -874,12 +871,12 @@ PlayerSettings:
   webGLMemoryLinearGrowthStep: 16
   webGLMemoryGeometricGrowthStep: 0.2
   webGLMemoryGeometricGrowthCap: 96
-  webGLEnableWebGPU: 0
   webGLPowerPreference: 2
   webGLWebAssemblyTable: 0
   webGLWebAssemblyBigInt: 0
   webGLCloseOnQuit: 0
   webWasm2023: 0
+  webEnableSubmoduleStrippingCompatibility: 0
   scriptingDefineSymbols:
     Android: VUFORIA_ANDROID_SETTINGS;OVR_DISABLE_HAND_PINCH_BUTTON_MAPPING;USE_INPUT_SYSTEM_POSE_CONTROL;USE_STICK_CONTROL_THUMBSTICKS
     Standalone: OVR_DISABLE_HAND_PINCH_BUTTON_MAPPING;USE_INPUT_SYSTEM_POSE_CONTROL;USE_STICK_CONTROL_THUMBSTICKS
@@ -992,8 +989,8 @@ PlayerSettings:
       PrivateNetworkClientServer: False
       InternetClientServer: False
       VideosLibrary: False
-      BackgroundMediaPlayback: False
       Objects3D: False
+      InternetClient: True
       RemoteSystem: False
       BlockedChatMessages: False
       PhoneCall: False
@@ -1014,9 +1011,9 @@ PlayerSettings:
       PointOfService: False
       RecordedCallsFolder: False
       Contacts: False
-      InternetClient: True
       Proximity: False
       CodeGeneration: False
+      BackgroundMediaPlayback: False
       EnterpriseAuthentication: False
   metroTargetDeviceFamilies:
     Desktop: False
@@ -1093,3 +1090,4 @@ PlayerSettings:
   insecureHttpOption: 0
   androidVulkanDenyFilterList: []
   androidVulkanAllowFilterList: []
+  androidVulkanDeviceFilterListAsset: {fileID: 0}
