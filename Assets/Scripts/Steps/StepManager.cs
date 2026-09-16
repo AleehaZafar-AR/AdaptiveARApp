@@ -2,6 +2,7 @@
 using UnityEngine.UI;
 using TMPro;
 using TryAR.MarkerTracking;
+using AdaptiveAR.Steps;
 
 public class StepManager : MonoBehaviour
 {
@@ -18,6 +19,12 @@ public class StepManager : MonoBehaviour
     [Header("Parts")]
     public GameObject crankshaftPrefab;
     public Vector3 crankshaftSpawnOffset;
+
+    [Header("Step Sequence (optional)")]
+    [Tooltip("Leave EMPTY to keep the original hard-coded behaviour exactly as-is. " +
+             "Assign a StepRunner to hand the first instruction over to the " +
+             "configurable step / support-level system instead.")]
+    public StepRunner stepRunner;
 
     private GameObject spawnedCrankshaft;
 
@@ -106,6 +113,17 @@ public class StepManager : MonoBehaviour
     void SpawnParts()
     {
         partsSpawned = true;
+
+        // 🔀 If a StepRunner is assigned, hand the first instruction over to the
+        // configurable step / support-level system. If it is NOT assigned, the
+        // original hard-coded path below runs unchanged.
+        if (stepRunner != null)
+        {
+            if (stepRunner.BeginSequence())
+                return;
+
+            Debug.LogWarning("[StepManager] StepRunner could not begin; falling back to the built-in crankshaft step.");
+        }
 
         captionText.text = "Pick up the crankshaft.";
 

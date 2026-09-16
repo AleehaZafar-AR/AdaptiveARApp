@@ -1,4 +1,15 @@
 // File: StepData.cs
+// One researcher-authored assembly step.
+//
+// The original four fields are retained unchanged so the existing
+// Step_0_Demo / Step_1_Crankshaft assets keep deserialising. They now act as the
+// STEP-LEVEL DEFAULTS: whatever a support level leaves empty falls back to them.
+//
+// The three StepSupportContent blocks are the per-level guidance. They ship empty
+// by design - L1/L2/L3 contents are authored from the literature, not in code.
+
+using AdaptiveAR.Steps;
+using AdaptiveAR.Support;
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "StepData", menuName = "XRAssembly/Step Data")]
@@ -17,8 +28,67 @@ public class StepData : ScriptableObject
     [Header("Arrow Guide (Optional)")]
     public GameObject arrowPrefab;
 
-    void Start()
+    [Header("Identity")]
+    [Tooltip("Stable identifier used in logs. Falls back to the asset name if left empty.")]
+    public string stepId;
+
+    [Header("Step Defaults")]
+    [Tooltip("Offset from the anchor root used when a support level spawns the default ghostPrefab.")]
+    public Vector3 defaultGhostSpawnOffset;
+
+    [Header("Decision Inputs")]
+    [Tooltip("Researcher-authored task complexity for this step. " +
+             "Leave at 0 until defined; it is a decision-layer input, not a policy value.")]
+    public int taskComplexity;
+
+    [Header("Support Level")]
+    [Tooltip("Level this step opens at when it is entered.")]
+    public SupportLevel defaultSupportLevel = SupportLevel.L1_Minimal;
+
+    [Tooltip("L1 Minimal Support. Author from the literature; empty fields inherit the step defaults above.")]
+    public StepSupportContent l1Minimal = new StepSupportContent();
+
+    [Tooltip("L2 Guided Support. Author from the literature; empty fields inherit the step defaults above.")]
+    public StepSupportContent l2Guided = new StepSupportContent();
+
+    [Tooltip("L3 Assisted Support. Author from the literature; empty fields inherit the step defaults above.")]
+    public StepSupportContent l3Assisted = new StepSupportContent();
+
+    /// <summary>
+    /// Identifier used for logging and debug output.
+    /// </summary>
+    public string StepIdentifier
     {
-        ghostPrefab = GameObject.Find("crankshaftGhostOverlay");
+        get { return string.IsNullOrEmpty(stepId) ? name : stepId; }
+    }
+
+    /// <summary>
+    /// Returns the authored content block for a support level.
+    /// Never returns null; an unauthored block is simply empty, and the presenter
+    /// falls back per-field to the step-level defaults.
+    /// </summary>
+    public StepSupportContent GetContent(SupportLevel level)
+    {
+        switch (level)
+        {
+            case SupportLevel.L3_Assisted:
+                return l3Assisted ?? (l3Assisted = new StepSupportContent());
+
+            case SupportLevel.L2_Guided:
+                return l2Guided ?? (l2Guided = new StepSupportContent());
+
+            case SupportLevel.L1_Minimal:
+            default:
+                return l1Minimal ?? (l1Minimal = new StepSupportContent());
+        }
+    }
+
+    /// <summary>
+    /// True when a level has no authored content and will render entirely from
+    /// the step-level defaults. Useful for an authoring checklist later.
+    /// </summary>
+    public bool IsLevelUnauthored(SupportLevel level)
+    {
+        return GetContent(level).IsEmpty;
     }
 }
