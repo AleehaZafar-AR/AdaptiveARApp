@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c242a23446a15c942b2aea907c01160a, type: 3}
+  m_Name: Step_Crankshaft_Phase1
+  m_EditorClassIdentifier: 
+  stepTitle: Pick up the crankshaft.
+  stepDescription: 
+  ghostPrefab: {fileID: 2276785170046358372, guid: 8262644a8b2683b4a892731a65a0c2f6,
+    type: 3}
+  instructionAudio: {fileID: 0}
+  arrowPrefab: {fileID: 0}
+  stepId: step_01_crankshaft
+  defaultGhostSpawnOffset: {x: -0.25, y: 0.1, z: 0}
+  taskComplexity: 0
+  defaultSupportLevel: 1
+  l1Minimal:
+    instructionText: '[L1 TEST]
+
+
+      Pick up the crankshaft.'
+    instructionDetail: 
+    ghostKeys: []
+    ghostPrefabs: []
+    ghostSpawnOffset: {x: 0, y: 0, z: 0}
+    arrowKeys: []
+    arrowPrefabs: []
+    arrowSpawnOffset: {x: 0, y: 0, z: 0}
+    instructionAudio: {fileID: 0}
+    instructionVideo: {fileID: 0}
+    demonstrationAnimation: {fileID: 0}
+    animatorTrigger: 
+  l2Guided:
+    instructionText: '[L2 TEST]
+
+
+      Pick up the crankshaft.'
+    instructionDetail: 
+    ghostKeys: []
+    ghostPrefabs: []
+    ghostSpawnOffset: {x: 0, y: 0, z: 0}
+    arrowKeys: []
+    arrowPrefabs: []
+    arrowSpawnOffset: {x: 0, y: 0, z: 0}
+    instructionAudio: {fileID: 0}
+    instructionVideo: {fileID: 0}
+    demonstrationAnimation: {fileID: 0}
+    animatorTrigger: 
+  l3Assisted:
+    instructionText: '[L3 TEST]
+
+
+      Pick up the crankshaft.'
+    instructionDetail: 
+    ghostKeys: []
+    ghostPrefabs: []
+    ghostSpawnOffset: {x: 0, y: 0, z: 0}
+    arrowKeys: []
+    arrowPrefabs: []
+    arrowSpawnOffset: {x: 0, y: 0, z: 0}
+    instructionAudio: {fileID: 0}
+    instructionVideo: {fileID: 0}
+    demonstrationAnimation: {fileID: 0}
+    animatorTrigger: 
