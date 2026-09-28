@@ -23,6 +23,12 @@ namespace AdaptiveAR.Steps
 
             [Tooltip("Scene object this key resolves to.")]
             public GameObject target;
+
+            [Tooltip("Keep this object out of the presenter's show/hide cycle. Used for the " +
+                     "physical parts the operator manipulates: they are looked up by key for " +
+                     "validation, but must never be hidden between steps. " +
+                     "Default false preserves the behaviour of existing ghost entries.")]
+            public bool excludeFromAutoHide;
         }
 
         [Tooltip("Key -> scene object bindings, populated once in the Inspector.")]
@@ -91,6 +97,21 @@ namespace AdaptiveAR.Steps
         }
 
         /// <summary>
+        /// Same as TryResolve but never logs. For validation and tooling passes that
+        /// probe for keys and expect misses.
+        /// </summary>
+        public bool TryResolveQuiet(string key, out GameObject target)
+        {
+            target = null;
+            if (string.IsNullOrEmpty(key)) return false;
+
+            if (_lookup.Count == 0 && entries.Count > 0)
+                BuildLookup();
+
+            return _lookup.TryGetValue(key, out target) && target != null;
+        }
+
+        /// <summary>
         /// Deactivates every registered target. Used to guarantee a clean slate
         /// before presenting a step/level.
         /// </summary>
@@ -98,8 +119,14 @@ namespace AdaptiveAR.Steps
         {
             foreach (Entry entry in entries)
             {
-                if (entry != null && entry.target != null)
-                    entry.target.SetActive(false);
+                if (entry == null || entry.target == null)
+                    continue;
+
+                // Parts the operator manipulates are registered for lookup only.
+                if (entry.excludeFromAutoHide)
+                    continue;
+
+                entry.target.SetActive(false);
             }
         }
 

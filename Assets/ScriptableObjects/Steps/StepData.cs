@@ -32,6 +32,10 @@ public class StepData : ScriptableObject
     [Tooltip("Stable identifier used in logs. Falls back to the asset name if left empty.")]
     public string stepId;
 
+    [Tooltip("Short label for the task list, e.g. \"Crankshaft\". The full stepTitle is a " +
+             "whole sentence and is too long for a list row.")]
+    public string displayName;
+
     [Header("Step Defaults")]
     [Tooltip("Offset from the anchor root used when a support level spawns the default ghostPrefab.")]
     public Vector3 defaultGhostSpawnOffset;
@@ -40,6 +44,31 @@ public class StepData : ScriptableObject
     [Tooltip("Researcher-authored task complexity for this step. " +
              "Leave at 0 until defined; it is a decision-layer input, not a policy value.")]
     public int taskComplexity;
+
+    [Header("Validation")]
+    [Tooltip("Does this step check that a part was placed correctly? " +
+             "Off means the step advances only when the operator confirms.")]
+    public bool requiresValidation = true;
+
+    [Tooltip("GuidanceRegistry key for the part the operator must move, e.g. \"part.crankshaft\".")]
+    public string validationPartKey;
+
+    [Tooltip("GuidanceRegistry key for the pose it must reach, e.g. \"ghost.crankshaft\".")]
+    public string validationTargetKey;
+
+    [Tooltip("How close the part must get, in metres.")]
+    public float positionToleranceMeters = 0.04f;
+
+    [Tooltip("How closely the part's rotation must match, in degrees.")]
+    public float rotationToleranceDegrees = 25f;
+
+    [Tooltip("Snap the part exactly onto the target pose once it is accepted.")]
+    public bool snapOnSuccess = true;
+
+    [Header("Timing")]
+    [Tooltip("Researcher-authored expected duration in seconds. Fed to the decision layer " +
+             "as context. 0 means unset and is logged as null.")]
+    public float expectedDurationSeconds;
 
     [Header("Support Level")]
     [Tooltip("Level this step opens at when it is entered.")]

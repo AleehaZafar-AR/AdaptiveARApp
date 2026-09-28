@@ -56,6 +56,26 @@ namespace AdaptiveAR.Steps
         public event Action<StepData, int, string> OnStepChanged;
 
         /// <summary>
+        /// Raised when Advance is called on the final step. The runner stays on that step;
+        /// the session controller decides what finishing means.
+        /// </summary>
+        public event Action OnSequenceComplete;
+
+        /// <summary>True when the active step is the last one in the sequence.</summary>
+        public bool IsOnLastStep
+        {
+            get { return HasStarted && CurrentStepIndex == StepCount - 1; }
+        }
+
+        /// <summary>Read-only access to any authored step, for progress displays.</summary>
+        public StepData GetStepAt(int index)
+        {
+            if (steps == null || index < 0 || index >= steps.Count)
+                return null;
+            return steps[index];
+        }
+
+        /// <summary>
         /// Enters the first step. Called by StepManager once the ArUco anchor is
         /// locked and the engine model is visible.
         /// </summary>
@@ -82,7 +102,9 @@ namespace AdaptiveAR.Steps
             if (CurrentStepIndex + 1 >= StepCount)
             {
                 if (logChanges)
-                    Debug.Log("[StepRunner] Advance called at the end of the sequence.");
+                    Debug.Log("[StepRunner] Advance called on the final step - sequence complete.");
+
+                OnSequenceComplete?.Invoke();
                 return false;
             }
 
