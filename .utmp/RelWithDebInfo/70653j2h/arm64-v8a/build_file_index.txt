@@ -1,2 +1,0 @@
-C:\Users\azafar\Desktop\AdaptiveARThesisPrototype\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\CMakeLists.txt
-C:\Users\azafar\Desktop\AdaptiveARThesisPrototype\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\CMakeLists.txt

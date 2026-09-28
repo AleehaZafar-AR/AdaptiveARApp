@@ -70,6 +70,21 @@ crashlytics-build.properties
 # Packed Addressables
 /[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
 
+### Unity build artifacts not covered by the template above ###
+
+# Unity's Android/Gradle scratch build directory. Regenerated on every Android
+# build; was tracked by mistake and produced ~38 spurious changes per build.
+/.utmp/
+
+# Burst compiler debug output. Regenerated on every build, never shipped.
+*_BurstDebugInformation_DoNotShip/
+
+# IL2CPP symbols folder emitted next to player builds.
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+
+# JetBrains Rider project settings (com.unity.ide.rider is installed).
+.idea/
+
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
