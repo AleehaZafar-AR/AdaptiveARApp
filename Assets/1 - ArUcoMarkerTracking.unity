@@ -661,6 +661,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &33867566
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -775,6 +783,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &41449417
 GameObject:
   m_ObjectHideFlags: 0
@@ -3264,8 +3280,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   entries:
-  - key: ghost.oilPan
-    target: {fileID: 2078284919}
   - key: ghost.crankshaft
     target: {fileID: 1395555690}
   - key: ghost.engineBlockSep001
@@ -4378,6 +4392,66 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 287124412}
   m_CullTransparentMesh: 1
+--- !u!1 &290402203
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 290402204}
+  - component: {fileID: 290402205}
+  m_Layer: 0
+  m_Name: CalibrationOffset
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &290402204
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 290402203}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0.22392365}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 790534456}
+  m_Father: {fileID: 1810677275}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &290402205
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 290402203}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9abc2fe0ec6e0c24eb520d1185c52c2a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  assemblyScale: 1
+  liftAboveMarker: 0.22392365
+  lateralOffset: {x: 0, y: 0}
+  yawAboutMarkerNormal: 0
+  groundClearance: 0
+  autoGroundOnScaleChange: 1
+  liftNudgeStep: 0.005
+  scaleNudgeStep: 0.05
+  enableControllerNudge: 1
+  nudgeUpButton: 16
+  nudgeDownButton: 32
+  scaleUpButton: 128
+  scaleDownButton: 64
+  logChanges: 1
+  calibrationReadout: {fileID: 0}
 --- !u!1 &299224152
 GameObject:
   m_ObjectHideFlags: 0
@@ -5424,6 +5498,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &418952810
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -5538,6 +5620,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &422895811
 GameObject:
   m_ObjectHideFlags: 0
@@ -6445,6 +6535,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &464473693
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -6559,6 +6657,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &469082731
 GameObject:
   m_ObjectHideFlags: 0
@@ -8289,6 +8395,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &610860946
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -8403,6 +8517,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &640370683
 GameObject:
   m_ObjectHideFlags: 0
@@ -8453,6 +8575,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &640370686
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -8589,6 +8719,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &645617598
 GameObject:
   m_ObjectHideFlags: 0
@@ -8904,6 +9042,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &668996231
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -9018,6 +9164,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &675595543
 GameObject:
   m_ObjectHideFlags: 0
@@ -9315,6 +9469,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &697641374
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -9429,6 +9591,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &701505258
 GameObject:
   m_ObjectHideFlags: 0
@@ -9911,6 +10081,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &733729656
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -10025,6 +10203,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &743763027
 GameObject:
   m_ObjectHideFlags: 0
@@ -10395,6 +10581,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &760812607
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -10509,6 +10703,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &762833282
 GameObject:
   m_ObjectHideFlags: 0
@@ -10763,6 +10965,59 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 763227664}
   m_CullTransparentMesh: 1
+--- !u!1 &776438023
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 776438024}
+  - component: {fileID: 776438025}
+  m_Layer: 0
+  m_Name: TabletopSupport
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &776438024
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 776438023}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1810677275}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!65 &776438025
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 776438023}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 2, y: 0.1, z: 2}
+  m_Center: {x: 0, y: -0.05, z: 0}
 --- !u!1 &790534455
 GameObject:
   m_ObjectHideFlags: 0
@@ -10787,13 +11042,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 790534455}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: 0.246, y: 0, z: 0.346}
-  m_LocalScale: {x: 0.1, y: 0.1, z: 0.1}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 657294783}
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 290402204}
   m_LocalEulerAnglesHint: {x: -90, y: 90, z: 0}
 --- !u!1 &793701829
 GameObject:
@@ -12278,6 +12533,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &940378024
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -12392,6 +12655,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &950779152
 GameObject:
   m_ObjectHideFlags: 0
@@ -13108,7 +13379,7 @@ MonoBehaviour:
   m_arucoMarkerTracking: {fileID: 1254158198}
   m_markerGameObjectPairs:
   - markerId: 0
-    gameObject: {fileID: 790534455}
+    gameObject: {fileID: 1810677274}
   m_debugRenderer: {fileID: 1676941956}
 --- !u!1 &1069076107
 GameObject:
@@ -13992,6 +14263,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1210679152
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -14106,6 +14385,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1217390933
 GameObject:
   m_ObjectHideFlags: 0
@@ -14747,6 +15034,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1263489704
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -14861,6 +15156,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1265689291
 GameObject:
   m_ObjectHideFlags: 0
@@ -14910,6 +15213,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1265689294
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -15024,6 +15335,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1273390794
 GameObject:
   m_ObjectHideFlags: 0
@@ -15851,6 +16170,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1352201863
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -15912,6 +16239,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1354985937
 GameObject:
   m_ObjectHideFlags: 0
@@ -15961,6 +16296,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1354985940
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -16075,6 +16418,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1378414930
 GameObject:
   m_ObjectHideFlags: 0
@@ -16682,6 +17033,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1450934772
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -16743,6 +17102,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1453625332
 GameObject:
   m_ObjectHideFlags: 0
@@ -17442,6 +17809,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1500185795
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -17503,6 +17878,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1505187752
 GameObject:
   m_ObjectHideFlags: 0
@@ -17682,6 +18065,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1525051788
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -17743,6 +18134,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1529214347
 GameObject:
   m_ObjectHideFlags: 0
@@ -18025,6 +18424,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1550053284
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -18161,6 +18568,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1550908361
 GameObject:
   m_ObjectHideFlags: 0
@@ -18648,6 +19063,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1595208037
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -18762,6 +19185,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1600238083
 GameObject:
   m_ObjectHideFlags: 0
@@ -18983,6 +19414,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1621087482
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -19097,6 +19536,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1623215436
 GameObject:
   m_ObjectHideFlags: 0
@@ -19330,6 +19777,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1634980966
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -19444,6 +19899,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1650655056
 GameObject:
   m_ObjectHideFlags: 0
@@ -20586,6 +21049,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1732762073
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -20700,6 +21171,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1754121696
 GameObject:
   m_ObjectHideFlags: 0
@@ -21535,6 +22014,39 @@ RectTransform:
   m_AnchoredPosition: {x: -0.7, y: 1.2}
   m_SizeDelta: {x: 400, y: 600}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!1 &1810677274
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1810677275}
+  m_Layer: 0
+  m_Name: MarkerAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1810677275
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1810677274}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0.5, y: 0.5, z: 0.5, w: 0.5}
+  m_LocalPosition: {x: 0.246, y: 0, z: 0.346}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 290402204}
+  - {fileID: 776438024}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1814281491
 GameObject:
   m_ObjectHideFlags: 0
@@ -21584,6 +22096,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1814281494
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -21698,6 +22218,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1821514662
 GameObject:
   m_ObjectHideFlags: 0
@@ -21959,6 +22487,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1823164214
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -22020,6 +22556,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1830949240
 GameObject:
   m_ObjectHideFlags: 0
@@ -22190,6 +22734,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1831726713
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -22304,6 +22856,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1843720390
 GameObject:
   m_ObjectHideFlags: 0
@@ -22406,6 +22966,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1843720395
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -22467,6 +23035,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1848090494
 GameObject:
   m_ObjectHideFlags: 0
@@ -23160,6 +23736,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1892009791
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -23274,6 +23858,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1896773691
 GameObject:
   m_ObjectHideFlags: 0
@@ -23742,6 +24334,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &1917366183
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -23803,6 +24403,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &1917536359
 GameObject:
   m_ObjectHideFlags: 0
@@ -24855,6 +25463,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &2021279388
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -24969,6 +25585,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &2021867534
 GameObject:
   m_ObjectHideFlags: 0
@@ -25115,6 +25739,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &2034419386
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -25251,6 +25883,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &2037667490
 GameObject:
   m_ObjectHideFlags: 0
@@ -25611,6 +26251,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &2064679110
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -25672,6 +26320,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!1 &2068200612
 GameObject:
   m_ObjectHideFlags: 0
@@ -27743,6 +28399,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &3926448865101121901
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -27804,6 +28468,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!114 &3926448865101121904
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28177,6 +28849,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &5977806840018737240
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -28269,6 +28949,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &7306966351600380015
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -28330,6 +29018,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!114 &7306966351600380018
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28410,6 +29106,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &7686311269175314072
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -28471,6 +29175,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!114 &7686311269175314075
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28514,6 +29226,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!54 &8263615606536393053
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -28575,6 +29295,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!114 &8263615606536393056
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28674,6 +29402,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55c10fb1d84331c41b5c05a2fc2285a1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  releaseToGravityOnEnable: 1
+  collisionDetection: 3
+  interpolation: 1
+  recoverIfLost: 1
+  maxFallBelowStart: 0.5
+  maxDistanceFromStart: 3
+  maxRecoveriesBeforeHolding: 3
+  logRecovery: 1
 --- !u!114 &9200236866238938700
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28710,10 +29446,10 @@ SceneRoots:
   - {fileID: 149199262}
   - {fileID: 1463183914}
   - {fileID: 866230862}
-  - {fileID: 790534456}
   - {fileID: 1808580668}
   - {fileID: 205522877}
   - {fileID: 17500256}
   - {fileID: 492666277}
   - {fileID: 1950512430}
   - {fileID: 1673987214}
+  - {fileID: 1810677275}

@@ -45,6 +45,14 @@ namespace AdaptiveAR.EditorTools
 
         private const string GhostKeyPrefix = "ghost.";
 
+        // Permanent scene furniture, NOT per-step guidance.
+        //
+        // StepPresenter deactivates every registered object before presenting a step. Any
+        // always-visible base part that gets registered therefore disappears and never comes
+        // back, because no step asks for it by key. The oil pan / engine block base is exactly
+        // that: it is the thing parts are assembled INTO, so it must stay visible at all times.
+        private static readonly string[] AlwaysVisibleParts = { "oilPan" };
+
         // Temporary verification fixtures. NOT research content - see TestFixtures region.
         private const string TestLabelL1 = "[L1 TEST]";
         private const string TestLabelL2 = "[L2 TEST]";
@@ -251,15 +259,28 @@ namespace AdaptiveAR.EditorTools
             entries.ClearArray();
             int index = 0;
 
+            int skipped = 0;
             for (int i = 0; i < ghosties.transform.childCount; i++)
             {
                 Transform child = ghosties.transform.GetChild(i);
+
+                // Never register always-visible base parts - see AlwaysVisibleParts.
+                if (IsAlwaysVisible(child.name))
+                {
+                    child.gameObject.SetActive(true);
+                    skipped++;
+                    continue;
+                }
+
                 entries.InsertArrayElementAtIndex(index);
                 SerializedProperty e = entries.GetArrayElementAtIndex(index);
                 e.FindPropertyRelative("key").stringValue = GhostKeyPrefix + child.name;
                 e.FindPropertyRelative("target").objectReferenceValue = child.gameObject;
                 index++;
             }
+
+            if (skipped > 0)
+                Debug.Log($"[Phase1Setup] {skipped} always-visible base part(s) deliberately left out of the registry.");
 
             foreach (var kv in preserved)
             {
@@ -425,6 +446,108 @@ namespace AdaptiveAR.EditorTools
         }
 
         // =========================================================================
+        // REPAIR - restore always-visible base parts
+        //
+        // Fixes a scene that was already wired before AlwaysVisibleParts existed: the oil
+        // pan was registered as toggleable guidance, so StepPresenter switched it off and
+        // nothing switched it back on.
+        // =========================================================================
+
+        [MenuItem("AdaptiveAR/Phase 1/Fix - Keep Base Parts Always Visible", false, 20)]
+        public static void FixAlwaysVisibleParts()
+        {
+            Scene scene = SceneManager.GetActiveScene();
+
+            // Find the registry by component, not by path: the alignment fix moves objects
+            // around the hierarchy, and a path-based lookup is exactly what made an earlier
+            // version of this fix abort without doing anything.
+            GuidanceRegistry registry = FindComponentAnywhere<GuidanceRegistry>(scene);
+            if (registry == null)
+            {
+                Debug.LogError("[Phase1Setup] GuidanceRegistry not found anywhere in the scene. " +
+                               "Run 'Wire Foundation' first. Aborted.");
+                return;
+            }
+
+            int group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("Phase 1: Keep Base Parts Always Visible");
+
+            var so = new SerializedObject(registry);
+            SerializedProperty entries = so.FindProperty("entries");
+
+            if (entries == null)
+            {
+                Debug.LogError("[Phase1Setup] GuidanceRegistry.entries not found. Aborted.");
+                return;
+            }
+
+            var restored = new List<string>();
+            int removed = 0;
+
+            // Walk backwards so removals do not disturb the indices still to be checked.
+            // The entry already holds a direct reference to the object, so nothing has to be
+            // located by name or path.
+            for (int i = entries.arraySize - 1; i >= 0; i--)
+            {
+                SerializedProperty e = entries.GetArrayElementAtIndex(i);
+                string key = e.FindPropertyRelative("key").stringValue;
+
+                if (string.IsNullOrEmpty(key) || !key.StartsWith(GhostKeyPrefix))
+                    continue;
+
+                if (!IsAlwaysVisible(key.Substring(GhostKeyPrefix.Length)))
+                    continue;
+
+                var target = e.FindPropertyRelative("target").objectReferenceValue as GameObject;
+                if (target != null)
+                {
+                    if (!target.activeSelf)
+                    {
+                        Undo.RecordObject(target, "Reactivate base part");
+                        target.SetActive(true);
+                    }
+                    restored.Add(target.name);
+                }
+
+                entries.DeleteArrayElementAtIndex(i);
+                removed++;
+            }
+
+            if (removed > 0)
+                so.ApplyModifiedProperties();
+
+            Undo.CollapseUndoOperations(group);
+            EditorSceneManager.MarkSceneDirty(scene);
+
+            if (removed == 0)
+            {
+                Debug.Log(
+                    "[Phase1Setup] Nothing to change - no always-visible part is registered as guidance.\n" +
+                    $"  Looking for: {string.Join(", ", AlwaysVisibleParts)}\n" +
+                    $"  Registry currently holds {entries.arraySize} key(s).\n" +
+                    "  If a part is still invisible the cause is elsewhere; say so and it can be traced.");
+                return;
+            }
+
+            Debug.Log(
+                $"[Phase1Setup] Base parts restored: {string.Join(", ", restored)}\n" +
+                $"  Registry entries removed : {removed}\n" +
+                $"  Registry keys remaining  : {entries.arraySize}\n" +
+                "  StepPresenter can no longer hide them, because they are no longer registered.\n" +
+                "  SAVE THE SCENE (Ctrl+S) to persist this.");
+        }
+
+        private static bool IsAlwaysVisible(string objectName)
+        {
+            foreach (string n in AlwaysVisibleParts)
+            {
+                if (string.Equals(n, objectName, System.StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        // =========================================================================
         // TEMPORARY TEST FIXTURES
         //
         // NOT research content. These exist only to make runtime support switching
@@ -532,16 +655,10 @@ namespace AdaptiveAR.EditorTools
 
             string[] parts = path.Split('/');
 
-            Transform current = null;
-            foreach (GameObject root in scene.GetRootGameObjects())
-            {
-                if (root.name == parts[0])
-                {
-                    current = root.transform;
-                    break;
-                }
-            }
-
+            // Resolve the FIRST segment anywhere in the scene, not only among root objects.
+            // The alignment fix reparents EngineAnchor under MarkerAnchor/CalibrationOffset,
+            // so it is no longer a root and a roots-only lookup silently returned null.
+            Transform current = FindAnywhere(scene, parts[0]);
             if (current == null)
                 return null;
 
@@ -553,6 +670,49 @@ namespace AdaptiveAR.EditorTools
             }
 
             return current.gameObject;
+        }
+
+        /// <summary>Finds the first component of a type anywhere in the scene, including inactive objects.</summary>
+        private static T FindComponentAnywhere<T>(Scene scene) where T : Component
+        {
+            if (!scene.IsValid()) return null;
+
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                T c = root.GetComponentInChildren<T>(true);
+                if (c != null) return c;
+            }
+            return null;
+        }
+
+        /// <summary>Finds a transform by name anywhere in the scene, including inactive objects.</summary>
+        private static Transform FindAnywhere(Scene scene, string name)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.name == name)
+                    return root.transform;
+
+                Transform deep = FindDeep(root.transform, name);
+                if (deep != null)
+                    return deep;
+            }
+            return null;
+        }
+
+        private static Transform FindDeep(Transform parent, string name)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                Transform c = parent.GetChild(i);
+                if (c.name == name)
+                    return c;
+
+                Transform deeper = FindDeep(c, name);
+                if (deeper != null)
+                    return deeper;
+            }
+            return null;
         }
 
         private static T GetOrAddComponent<T>(GameObject go) where T : Component
