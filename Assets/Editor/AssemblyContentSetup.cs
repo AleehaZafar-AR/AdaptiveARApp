@@ -391,7 +391,7 @@ namespace AdaptiveAR.EditorTools
 
             step.stepId = spec.stepId;
             step.displayName = spec.shortLabel;
-            step.stepTitle = spec.whereItGoes;
+            step.stepTitle = spec.shortGoal;
             step.stepDescription = "";
             step.taskComplexity = 0;              // researcher-defined; deliberately left unset
             step.expectedDurationSeconds = spec.expectedSeconds;
@@ -408,17 +408,23 @@ namespace AdaptiveAR.EditorTools
             step.rotationToleranceDegrees = 25f;
             step.snapOnSuccess = true;
 
-            // --- L1: the goal only, no overlay ---
+            // The HEADLINE is identical at all three levels. Only the detail beneath it
+            // grows, so the levels read as progressive disclosure inside one visual system
+            // rather than as three different looks.
+
+            // --- L1: headline only, no overlay ---
             step.l1Minimal = new StepSupportContent
             {
                 instructionText = spec.shortGoal,
+                instructionDetail = "",
                 ghostKeys = new string[0]
             };
 
-            // --- L2: goal plus location, with the target ghost shown ---
+            // --- L2: headline + where it goes, with the target ghost shown ---
             step.l2Guided = new StepSupportContent
             {
-                instructionText = spec.whereItGoes,
+                instructionText = spec.shortGoal,
+                instructionDetail = spec.whereItGoes,
                 ghostKeys = new[] { spec.ghostKey }
             };
 
@@ -426,11 +432,12 @@ namespace AdaptiveAR.EditorTools
             var sb = new StringBuilder();
             sb.Append(spec.whereItGoes);
             for (int i = 0; i < spec.breakdown.Length; i++)
-                sb.Append('\n').Append(i + 1).Append(". ").Append(spec.breakdown[i]);
+                sb.Append('\n').Append(i + 1).Append(".  ").Append(spec.breakdown[i]);
 
             step.l3Assisted = new StepSupportContent
             {
-                instructionText = sb.ToString(),
+                instructionText = spec.shortGoal,
+                instructionDetail = sb.ToString(),
                 ghostKeys = new[] { spec.ghostKey },
                 instructionAudio = spec.partObject == "crankshaft"
                     ? AssetDatabase.LoadAssetAtPath<AudioClip>(AudioCrankshaft)

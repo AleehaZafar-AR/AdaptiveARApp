@@ -25,8 +25,23 @@ namespace AdaptiveAR.Steps
         [SerializeField] private GuidanceRegistry guidanceRegistry;
 
         [Header("Output")]
-        [Tooltip("Caption shown to the operator. DemoUICanvas/InstructionPanel/CaptionText.")]
+        [Tooltip("Single-field fallback. Used only when titleText below is not assigned, so the " +
+                 "original one-caption layout keeps working.")]
         [SerializeField] private TextMeshProUGUI captionText;
+
+        [Header("Output - typographic hierarchy (preferred)")]
+        [Tooltip("The instruction headline. Identical at every support level: levels reveal " +
+                 "more detail below it, they do not restyle it.")]
+        [SerializeField] private TextMeshProUGUI titleText;
+
+        [Tooltip("Supporting detail. Empty at L1, the location at L2, the ordered breakdown at L3.")]
+        [SerializeField] private TextMeshProUGUI bodyText;
+
+        [Tooltip("Small progress label, e.g. \"STEP 02 / 06\".")]
+        [SerializeField] private TextMeshProUGUI stepLabelText;
+
+        [Tooltip("Supplies the step number and count for the label above.")]
+        [SerializeField] private StepRunner stepRunnerForLabel;
 
         [Tooltip("Existing scene AudioSource used for instruction audio.")]
         [SerializeField] private AudioSource audioSource;
@@ -141,9 +156,6 @@ namespace AdaptiveAR.Steps
 
         private void PresentText(StepData step, StepSupportContent content)
         {
-            if (captionText == null)
-                return;
-
             string headline = FirstNonEmpty(
                 content != null ? content.instructionText : null,
                 step.stepTitle);
@@ -152,9 +164,52 @@ namespace AdaptiveAR.Steps
                 content != null ? content.instructionDetail : null,
                 step.stepDescription);
 
+            // Preferred: separate fields, so the headline holds its position and weight at
+            // every support level and only the detail below it grows. That is what makes
+            // L1 -> L2 -> L3 read as progressive disclosure rather than a restyle.
+            if (titleText != null)
+            {
+                titleText.text = headline;
+
+                if (bodyText != null)
+                {
+                    bodyText.text = detail ?? string.Empty;
+                    // Collapse the body entirely at L1 so the panel does not leave a gap.
+                    bodyText.gameObject.SetActive(!string.IsNullOrEmpty(detail));
+                }
+
+                UpdateStepLabel(step);
+                return;
+            }
+
+            // Fallback: the original single-caption layout.
+            if (captionText == null)
+                return;
+
             captionText.text = string.IsNullOrEmpty(detail)
                 ? headline
                 : headline + "\n\n" + detail;
+
+            UpdateStepLabel(step);
+        }
+
+        private void UpdateStepLabel(StepData step)
+        {
+            if (stepLabelText == null) return;
+
+            StepRunner source = stepRunnerForLabel != null ? stepRunnerForLabel : stepRunner;
+            if (source == null)
+            {
+                stepLabelText.text = "";
+                return;
+            }
+
+            int index = source.CurrentStepIndex;
+            int count = source.StepCount;
+
+            stepLabelText.text = index < 0 || count <= 0
+                ? ""
+                : $"STEP {index + 1:00} / {count:00}";
         }
 
         private void PresentGhosts(StepData step, StepSupportContent content)
