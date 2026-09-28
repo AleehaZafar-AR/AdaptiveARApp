@@ -45,6 +45,11 @@ public class StepManager : MonoBehaviour
 
     void StartSession()
     {
+        // Idempotent. MultiInputTrigger invokes this button's onClick on every index
+        // trigger press - the same button used to grab parts - so without this guard
+        // each grab would overwrite the current step's instruction caption.
+        if (sessionStarted) return;
+
         sessionStarted = true;
         beginButton.gameObject.SetActive(false);
 

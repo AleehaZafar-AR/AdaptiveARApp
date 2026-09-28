@@ -10,10 +10,15 @@
 //
 // What counts as an attempt
 // -------------------------
-// The Interaction SDK drives a held part kinematically, so a release shows up as
-// isKinematic going true -> false. That transition, after a short settle, is one
-// attempt. A part can also be accepted by simply coming to rest in tolerance, which
-// covers placements that never involved a grab.
+// The Interaction SDK drives a held part kinematically, so for a part WITH a
+// Rigidbody a release shows up as isKinematic going true -> false. That transition,
+// after a short settle, is one attempt.
+//
+// Several parts have no Rigidbody at all: the pistons are Grabbable transforms whose
+// meshes sit on eight child objects. For those there is no kinematic flag to watch,
+// so handling is detected from movement away from the start pose and speed is
+// estimated from the transform. A part that comes to rest inside tolerance is then
+// accepted, which is what makes the piston steps completable.
 
 using System;
 using AdaptiveAR.Logging;
@@ -45,6 +50,12 @@ namespace AdaptiveAR.Steps
                  "to spawn close to its target.")]
         [SerializeField] private bool requireHandledBeforeRest = true;
 
+        [Tooltip("Metres a part must move from where it started for it to count as handled. " +
+                 "Needed because several parts (the pistons) have no Rigidbody at all - they " +
+                 "are Grabbable transforms with their meshes on child objects - so a grab " +
+                 "cannot be detected from a kinematic flag.")]
+        [SerializeField] private float handledMoveThreshold = 0.05f;
+
         [Header("Debug")]
         [SerializeField] private bool logEvaluations = true;
 
@@ -66,6 +77,8 @@ namespace AdaptiveAR.Steps
 
         private bool _wasKinematic;
         private bool _hasBeenHandled;
+        private Vector3 _startPosition;
+        private Vector3 _prevPosition;
         private bool _awaitingSettle;
         private float _settleTimer;
         private float _inToleranceTimer;
@@ -116,6 +129,8 @@ namespace AdaptiveAR.Steps
             _partBody = partGo.GetComponent<Rigidbody>();
             _wasKinematic = _partBody != null && _partBody.isKinematic;
             _hasBeenHandled = false;
+            _startPosition = _part.position;
+            _prevPosition = _part.position;
 
             IsActive = true;
             _completed = false;
@@ -150,6 +165,18 @@ namespace AdaptiveAR.Steps
         {
             if (!IsActive || _completed || _part == null || _target == null)
                 return;
+
+            // Speed estimated from the transform, because a part may have no Rigidbody.
+            float dt = Mathf.Max(Time.deltaTime, 1e-5f);
+            float speed = _partBody != null
+                ? _partBody.linearVelocity.magnitude
+                : Vector3.Distance(_part.position, _prevPosition) / dt;
+            _prevPosition = _part.position;
+
+            // Moving away from where it started counts as handled, whether or not the part
+            // has a Rigidbody for the kinematic flag to live on.
+            if (Vector3.Distance(_part.position, _startPosition) > handledMoveThreshold)
+                _hasBeenHandled = true;
 
             bool held = _partBody != null && _partBody.isKinematic;
 
@@ -188,7 +215,7 @@ namespace AdaptiveAR.Steps
             if (requireHandledBeforeRest && !_hasBeenHandled)
                 return;
 
-            bool slow = _partBody == null || _partBody.linearVelocity.magnitude <= restSpeed;
+            bool slow = speed <= restSpeed;
             if (slow && WithinTolerance(out _, out _))
             {
                 _inToleranceTimer += Time.deltaTime;

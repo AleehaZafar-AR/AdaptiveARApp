@@ -293,6 +293,9 @@ namespace AdaptiveAR.EditorTools
             // --- 7. drop the temporary test labels ---
             int testCleared = ClearLegacyTestContent();
 
+            // --- 8. remove duplicate DropIntoTray components ---
+            int dupsRemoved = RemoveDuplicateDropIntoTray(scene);
+
             Undo.CollapseUndoOperations(group);
             EditorSceneManager.MarkSceneDirty(scene);
 
@@ -306,6 +309,7 @@ namespace AdaptiveAR.EditorTools
                 $"  Task list rows bound      : {taskRows}\n" +
                 $"  Confirm button wired      : {buttonWired}\n" +
                 $"  Legacy [Lx TEST] cleared  : {testCleared} level block(s)\n" +
+                $"  Duplicate DropIntoTray    : {dupsRemoved} removed\n" +
                 $"  Presenter found           : {(presenter != null ? "yes" : "NO - guidance will not render")}\n" +
                 "  SAVE THE SCENE (Ctrl+S) to persist.");
         }
@@ -481,6 +485,33 @@ namespace AdaptiveAR.EditorTools
             return cleared;
         }
 
+        /// <summary>
+        /// Several parts (camshaft, engineBlockSep002-004) carry TWO DropIntoTray
+        /// components. Both would run their spawn and recovery logic on the same
+        /// Rigidbody. Harmless but wrong, so the extras are removed.
+        /// </summary>
+        private static int RemoveDuplicateDropIntoTray(Scene scene)
+        {
+            int removed = 0;
+
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                foreach (DropIntoTray first in root.GetComponentsInChildren<DropIntoTray>(true))
+                {
+                    if (first == null) continue;
+
+                    DropIntoTray[] onObject = first.GetComponents<DropIntoTray>();
+                    for (int i = onObject.Length - 1; i >= 1; i--)
+                    {
+                        Undo.DestroyObjectImmediate(onObject[i]);
+                        removed++;
+                    }
+                }
+            }
+
+            return removed;
+        }
+
         // =====================================================================
         // UI wiring
         // =====================================================================
@@ -570,27 +601,66 @@ namespace AdaptiveAR.EditorTools
         }
 
         /// <summary>
-        /// Adds a persistent onClick so the existing confirm button also advances a step.
-        /// StepManager's own code-added listener still handles the initial Begin press;
-        /// AdvanceStep does nothing until the sequence has actually started.
+        /// Sets up the manual step-advance control.
+        ///
+        /// NextButton is used rather than GotItButton, because StepManager hides GotItButton
+        /// permanently once the session begins - it is the Begin control, not a per-step one.
+        /// NextButton already exists on the canvas and was inactive and unused.
+        ///
+        /// GotItButton's stale persistent call (to a method that no longer exists) is cleared
+        /// at the same time, but nothing is added to it.
         /// </summary>
         private static bool WireConfirmButton(Scene scene, AssemblySessionController session)
         {
-            GameObject go = FindByPath(scene, "DemoUICanvas/ButtonsPanel/GotItButton");
-            if (go == null) return false;
+            if (session == null) return false;
+
+            // --- clear the dead call on the Begin button ---
+            GameObject gotIt = FindByPath(scene, "DemoUICanvas/ButtonsPanel/GotItButton");
+            if (gotIt != null)
+            {
+                Button b = gotIt.GetComponent<Button>();
+                if (b != null)
+                {
+                    Undo.RecordObject(b, "Clear stale confirm wiring");
+                    for (int i = b.onClick.GetPersistentEventCount() - 1; i >= 0; i--)
+                        UnityEditor.Events.UnityEventTools.RemovePersistentListener(b.onClick, i);
+                    EditorUtility.SetDirty(b);
+                }
+            }
+
+            // --- NextButton becomes the per-step advance ---
+            GameObject go = FindByPath(scene, "DemoUICanvas/NextButton");
+            if (go == null)
+            {
+                Debug.LogWarning("[AssemblyContent] DemoUICanvas/NextButton not found; " +
+                                 "there will be no manual step-advance control.");
+                return false;
+            }
 
             Button button = go.GetComponent<Button>();
-            if (button == null || session == null) return false;
+            if (button == null) return false;
 
-            // Replace any stale persistent call (it pointed at a method that no longer exists).
-            Undo.RecordObject(button, "Wire confirm button");
+            if (!go.activeSelf)
+            {
+                Undo.RecordObject(go, "Activate NextButton");
+                go.SetActive(true);
+            }
 
-            int existing = button.onClick.GetPersistentEventCount();
-            for (int i = existing - 1; i >= 0; i--)
+            Undo.RecordObject(button, "Wire advance button");
+            for (int i = button.onClick.GetPersistentEventCount() - 1; i >= 0; i--)
                 UnityEditor.Events.UnityEventTools.RemovePersistentListener(button.onClick, i);
 
             UnityEditor.Events.UnityEventTools.AddVoidPersistentListener(
                 button.onClick, session.AdvanceStepManually);
+
+            // Label it for what it now does.
+            TextMeshProUGUI label = go.GetComponentInChildren<TextMeshProUGUI>(true);
+            if (label != null)
+            {
+                Undo.RecordObject(label, "Label advance button");
+                label.text = "Next Step";
+                EditorUtility.SetDirty(label);
+            }
 
             EditorUtility.SetDirty(button);
             return true;
