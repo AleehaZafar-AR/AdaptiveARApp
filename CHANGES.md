@@ -485,3 +485,98 @@ The next device build is successful only if the user can demonstrate, in one con
 15. Next remains gated until piston placement succeeds.
 
 **Do not call the iteration complete based on compilation. The purpose of this pass is to produce a build worth testing against these 15 concrete device criteria.**
+---
+
+## Claude → Reviewer — 2026-09-29 (b) — Fastener extraction and tool architecture
+
+Proceeding on the blockers with stated assumptions, as agreed. No Reviewer → Claude
+section existed in this file at the time, so this continues from the previous handoff.
+
+### Fastener extraction — the blocker is now removed
+
+`AdaptiveAR ▸ Fasteners ▸ 1 Validate / 2 Extract / 3 Author`
+
+The 4 bearing caps and 15 bolts were baked sub-meshes inside `Ghosties/oilPan`, drawn as
+though already fitted and impossible to pick up. Extraction now:
+
+- moves each one out to `Ghosties/Fasteners`, keeping its world pose — that pose **is** the
+  correct assembled position, so it becomes the ghost **target**;
+- duplicates it into `Components/Fasteners` as the movable **part**, staged in a grid near
+  the tray, with its real materials restored;
+- registers `ghost.*` and `part.*` keys for both.
+
+`oilPan_lambert2_0` and `oilPanCap_lambert2_0` are untouched, so the oil pan keeps its
+lambert2 materials as you asked. **[SV]** structurally; **[QV]** that the staged positions
+are actually reachable on the bench.
+
+### Fastener sequence — derived, not invented
+
+Every bolt is assigned to the nearest cap along the crankshaft axis. Computed from the
+model:
+
+| Cap | z | Bolts |
+|---|---|---|
+| crankHolder001 | +57.87 | 002, 003, 004 |
+| crankHolder002 | +29.34 | 005–008 |
+| crankHolder003 | +0.01 | 009–012 |
+| crankHolder004 | −28.85 | 013–016 |
+
+Three on the first cap because the model has no `Bolt001`. The dry run recomputes this from
+the live scene rather than trusting the table above.
+
+### A scoping decision you should know about
+
+15 individual bolts would add ~19 validated placements to the crankshaft stage and push a
+run far past the 15-minute target. So **the 4 caps are enabled and the individual bolts are
+authored but disabled**, with that reason stored in the asset and written to the log. Flip
+`enabled` on those actions for a full-procedure run. This is a judgement call about session
+length, not a claim about the procedure.
+
+### Camshaft — an honest correction
+
+The brief asked for camshaft holders and fasteners. **This model has no camshaft-specific
+holders.** `crankHolder001–004` sit at the crank journals, so they belong to the crankshaft
+stage, and that is where they are authored. The camshaft stage remains place-and-validate.
+**[BLOCKED]** on a model that includes camshaft caps.
+
+### Tool architecture — real, still unusable
+
+`ToolInteraction.cs` implements four switchable detection rules: proximity dwell, proximity
++ trigger held, proximity + accumulated rotation, proximity + single press. Which one
+survives hand-tracking on a Quest cannot be decided from here, so all four ship and the
+question is settled by testing. Completing a tool action advances the substep exactly as a
+placement does, and writes `fastener_action`.
+
+**[BLOCKED]** Assign a tool model to `toolTip` and the `ToolAction` substeps become
+performable. Until then they stay disabled and are logged as skipped.
+
+### taskComplexity — now populated, with its basis stated
+
+Was 0 everywhere, which gave the decision layer nothing. Now a **structural ordinal**:
+`1 base + 1 if the part is unique rather than a repeat + 1 if the stage has fastening`.
+Crankshaft 3, piston 1 → 2, pistons 2–4 → 1, camshaft 2. It counts what the procedure
+demands and says nothing about the operator. Replace it when the literature supplies a
+scale. **Not** a difficulty or workload rating.
+
+### Run order
+
+```
+Fasteners   ▸ 1 Validate  →  2 Extract  →  3 Author Fastening Substeps
+Assembly    ▸ 2 Apply Full Assembly Content
+Interaction ▸ 1 Apply Ghost Target Material  →  3 Wire Guidance Arrow
+UI          ▸ 2 Apply UI Restyle
+```
+Save the scene. Skip `Interaction ▸ 2` — that is the one that would overwrite your manual
+grab configuration.
+
+Note: after extraction the fastener parts need grab components. Either run `Interaction ▸ 2`
+once and accept it touching every part, or configure the new `Components/Fasteners` children
+by hand as you did for the others.
+
+### Still open
+
+- A tool model.
+- A model with camshaft caps, if stage 3 is to include fastening.
+- Whether the extracted caps are physically graspable at their real size — they are small,
+  and hand tracking may struggle. **[QV]**
+- All tolerances remain provisional. **[PC]**

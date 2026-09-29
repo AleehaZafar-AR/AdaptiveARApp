@@ -51,6 +51,7 @@ namespace AdaptiveAR.EditorTools
             public string whereItGoes;      // L2 adds this
             public string[] breakdown;      // L3 adds these ordered sub-actions
             public float expectedSeconds;   // session budget estimate, not a research construct
+            public int taskComplexity;      // structural ordinal, see AuthorStep
         }
 
         // Six steps: crankshaft, four pistons, camshaft. Sized for a 10-15 minute
@@ -58,7 +59,7 @@ namespace AdaptiveAR.EditorTools
         private static readonly StepSpec[] Specs =
         {
             new StepSpec {
-                assetName = "Step_01_Crankshaft", stepId = "step_01_crankshaft", shortLabel = "Crankshaft",
+                assetName = "Step_01_Crankshaft", stepId = "step_01_crankshaft", taskComplexity = 3, shortLabel = "Crankshaft",
                 partObject = "crankshaft", ghostKey = GhostKeyPrefix + "crankshaft",
                 shortGoal = "Fit the crankshaft.",
                 whereItGoes = "Fit the crankshaft into the main bearing saddles in the block.",
@@ -70,7 +71,7 @@ namespace AdaptiveAR.EditorTools
                 expectedSeconds = 120f
             },
             new StepSpec {
-                assetName = "Step_02_Piston001", stepId = "step_02_piston001", shortLabel = "Piston 1",
+                assetName = "Step_02_Piston001", stepId = "step_02_piston001", taskComplexity = 2, shortLabel = "Piston 1",
                 partObject = "piston001", ghostKey = GhostKeyPrefix + "piston001",
                 shortGoal = "Fit piston 1.",
                 whereItGoes = "Fit piston 1 into the first cylinder bore.",
@@ -82,7 +83,7 @@ namespace AdaptiveAR.EditorTools
                 expectedSeconds = 90f
             },
             new StepSpec {
-                assetName = "Step_03_Piston002", stepId = "step_03_piston002", shortLabel = "Piston 2",
+                assetName = "Step_03_Piston002", stepId = "step_03_piston002", taskComplexity = 1, shortLabel = "Piston 2",
                 partObject = "piston002", ghostKey = GhostKeyPrefix + "piston002",
                 shortGoal = "Fit piston 2.",
                 whereItGoes = "Fit piston 2 into the second cylinder bore.",
@@ -94,7 +95,7 @@ namespace AdaptiveAR.EditorTools
                 expectedSeconds = 90f
             },
             new StepSpec {
-                assetName = "Step_04_Piston003", stepId = "step_04_piston003", shortLabel = "Piston 3",
+                assetName = "Step_04_Piston003", stepId = "step_04_piston003", taskComplexity = 1, shortLabel = "Piston 3",
                 partObject = "piston003", ghostKey = GhostKeyPrefix + "piston003",
                 shortGoal = "Fit piston 3.",
                 whereItGoes = "Fit piston 3 into the third cylinder bore.",
@@ -106,7 +107,7 @@ namespace AdaptiveAR.EditorTools
                 expectedSeconds = 90f
             },
             new StepSpec {
-                assetName = "Step_05_Piston004", stepId = "step_05_piston004", shortLabel = "Piston 4",
+                assetName = "Step_05_Piston004", stepId = "step_05_piston004", taskComplexity = 1, shortLabel = "Piston 4",
                 partObject = "piston004", ghostKey = GhostKeyPrefix + "piston004",
                 shortGoal = "Fit piston 4.",
                 whereItGoes = "Fit piston 4 into the fourth cylinder bore.",
@@ -118,7 +119,7 @@ namespace AdaptiveAR.EditorTools
                 expectedSeconds = 90f
             },
             new StepSpec {
-                assetName = "Step_06_Camshaft", stepId = "step_06_camshaft", shortLabel = "Camshaft",
+                assetName = "Step_06_Camshaft", stepId = "step_06_camshaft", taskComplexity = 2, shortLabel = "Camshaft",
                 partObject = "camshaft", ghostKey = GhostKeyPrefix + "camshaft",
                 shortGoal = "Fit the camshaft.",
                 whereItGoes = "Fit the camshaft into its bearings above the crankshaft.",
@@ -396,7 +397,13 @@ namespace AdaptiveAR.EditorTools
             step.displayName = spec.shortLabel;
             step.stepTitle = spec.shortGoal;
             step.stepDescription = "";
-            step.taskComplexity = 0;              // researcher-defined; deliberately left unset
+            // Structural ordinal, NOT a psychological or difficulty rating: it counts what
+            // the procedure demands, nothing about the operator. Derived as
+            //   1 base + 1 if the part is unique rather than a repeat + 1 if the stage has
+            //   fastening actions.
+            // Recorded so the decision layer has a non-null input; replace with a
+            // researcher-defined scale when the literature supplies one.
+            step.taskComplexity = spec.taskComplexity;
             step.expectedDurationSeconds = spec.expectedSeconds;
 
             // Opening level for each step. A neutral, usable starting point - the real

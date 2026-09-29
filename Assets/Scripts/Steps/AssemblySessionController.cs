@@ -31,6 +31,9 @@ namespace AdaptiveAR.Steps
         [Tooltip("Single source of truth for progress. Every display subscribes to it.")]
         [SerializeField] private WorkflowState workflow;
 
+        [Tooltip("Optional. Completes ToolAction substeps when a tool is used on a fastener.")]
+        [SerializeField] private ToolInteraction toolInteraction;
+
         [Header("Participant")]
         [Tooltip("Recorded as a decision-layer input. Free text, e.g. novice / experienced.")]
         [SerializeField] private string operatorExperience = "unspecified";
@@ -111,6 +114,9 @@ namespace AdaptiveAR.Steps
                 validator.OnAttemptEvaluated += HandleAttempt;
                 validator.OnStepValidated += HandleStepValidated;
             }
+
+            if (toolInteraction != null)
+                toolInteraction.OnToolActionCompleted += HandleToolActionCompleted;
         }
 
         private void OnDisable()
@@ -129,6 +135,15 @@ namespace AdaptiveAR.Steps
                 validator.OnAttemptEvaluated -= HandleAttempt;
                 validator.OnStepValidated -= HandleStepValidated;
             }
+
+            if (toolInteraction != null)
+                toolInteraction.OnToolActionCompleted -= HandleToolActionCompleted;
+        }
+
+        /// <summary>A tool action satisfies its substep the same way a placement does.</summary>
+        private void HandleToolActionCompleted()
+        {
+            if (workflow != null) CompleteActionAndAdvance("tool_action");
         }
 
         private void Start()
