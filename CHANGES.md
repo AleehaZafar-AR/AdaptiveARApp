@@ -232,3 +232,256 @@ disabled, and logged as skipped. The camshaft stage therefore does **not** yet i
 working holder/fastening sequence, because the holders are baked geometry. That is the
 single largest gap between this build and your stated end state, and it is an asset problem
 rather than a code one.
+
+
+---
+
+## Reviewer → Claude — 2026-09-29 — DEVICE REVIEW: functional recovery + deterministic UI pass
+
+### Read this before doing more work
+
+Commit `836d792` was tested on Quest. The build is still **not usable enough for participant testing**. Treat the device evidence below as authoritative over static verification. Do not spend this pass on AI, BLE, fastener extraction, tool models, or expanding the workflow. First make the existing core interaction loop actually usable on Quest.
+
+This is **not primarily a visual-polish request**. The highest-priority failures are functional/spatial interaction failures.
+
+### Quest-observed failures from the latest run
+
+1. **Text still overlaps / escapes its intended layout.** Some labels are dramatically larger than their controls and extend outside the button/card.
+2. **Participant panels jitter when the user gets close to the marker/workspace.** The UI must not inherit noisy marker pose updates or fight tracking corrections during use.
+3. **Buttons are frequently practically unreachable/unpressable in the headset.** A button that looks correct but cannot be comfortably selected is a failed control.
+4. **Ghosts still read as solid virtual parts rather than transparent placement targets.**
+5. **Directional arrows are oriented incorrectly / do not reliably communicate the target.**
+6. **Only the crankshaft is reliably grabbable. Other required assembly objects still cannot be picked up.** The previous cloned-ISDK strategy therefore failed device validation.
+7. Overall participant usability is currently unacceptable even though several systems compile and are marked [SV].
+
+Do **not** respond to these failures by merely changing constants and declaring them fixed. Trace the runtime ownership, transforms, ray/poke interaction, material/shader behavior, and actual ISDK configuration that produce them.
+
+### P0 — FUNCTIONAL RECOVERY. Do this before visual polish.
+
+#### A. Make every currently-required movable component actually grabbable
+
+The crankshaft is the known-good reference. The pistons/camshaft/other current placeable components are not.
+
+Do not clone the crankshaft interaction hierarchy blindly again.
+
+For each required movable component:
+- inspect the actual crankshaft ISDK setup and object hierarchy;
+- inspect the candidate object's hierarchy, colliders, Rigidbody, scale, layers, interaction groups and grab interactable/transformer references;
+- determine exactly why the candidate is not selectable/grabbable on Quest;
+- create a reusable setup only after understanding the difference;
+- ensure colliders correspond to the physical mesh closely enough for hand/controller interaction;
+- ensure Rigidbody and interaction components live at the hierarchy level expected by ISDK;
+- ensure references point to the candidate object, not copied crankshaft transforms;
+- ensure placement/locking later disables interaction cleanly.
+
+Do not mark “all parts grabbable” [SV]. It remains [QV] until device tested.
+
+Current acceptance target for this pass: crankshaft + every enabled Place action's component can be picked up, moved and released. Fasteners/tool actions remain disabled for now.
+
+#### B. Stabilize the participant UI in space
+
+The latest run still shows panel jitter near the marker/workspace.
+
+The participant UI must **not continuously follow raw ArUco marker pose** after calibration. Separate:
+- assembly/world registration, which may be anchored from marker calibration;
+- participant HUD/card pose, which should become stable after onboarding/calibration.
+
+After the workspace is accepted:
+- capture a stable presentation pose/reference;
+- stop applying frame-to-frame marker corrections to the participant card;
+- do not parent the card under a transform that continues to receive noisy marker smoothing/corrections if that produces visible jitter;
+- allow explicit recenter only through the intended recenter action;
+- preserve EngineAnchor behavior for assembly content.
+
+Inspect the transform chain rather than assuming the existing “lock once found” code is effective.
+
+#### C. Fix interaction reachability
+
+The user must be able to activate every participant-facing button from the normal seated working pose without leaning/stretching into the panel.
+
+Audit the actual Meta ray/poke setup, canvas/world-space interaction, colliders/raycast targets and panel distance.
+
+Prefer **ray interaction for the primary card controls** if poke requires physically reaching too far. Do not require the participant to touch a world-space panel that is intentionally positioned beyond the assembly.
+
+Minimum target sizes must be generous for Quest. All controls need a clear visual hit area and a matching interaction hit area.
+
+Validate that Back / Next or Continue / Help / Replay / Begin / Recenter, if present, use the same reliable interaction approach.
+
+#### D. Ghost material must be genuinely transparent on Quest
+
+The current ghost still appears solid.
+
+Do not assume `alpha = 0.18` means transparency. Verify the actual URP material/shader configuration:
+- Surface Type = Transparent or equivalent runtime shader state;
+- appropriate blend mode;
+- alpha respected by shader;
+- depth/write behavior appropriate for a ghost overlay;
+- no emission value that visually overwhelms transparency;
+- no runtime material replacement restoring an opaque material.
+
+Desired result: the real environment/engine is clearly visible **through** the ghost while the ghost silhouette remains readable. Cyan/teal outline/tint is fine. It must unmistakably read as a target volume, not a second solid component.
+
+#### E. Replace arrow “orientation guesses” with target-derived geometry
+
+Do not use hand-authored Euler rotations as the primary orientation mechanism.
+
+For a directional placement cue:
+- define a source position and target position;
+- place the arrow between/near those anchors as appropriate;
+- orient its forward axis from the source toward the target using the prefab's actual local forward axis;
+- account for the arrow mesh's authored axis once, centrally;
+- keep any per-action offset small and explicit;
+- parent/resolve positions in the same coordinate space before computing direction.
+
+If an arrow cannot point correctly for an action, hide it rather than display misinformation.
+
+### P1 — REPLACE THE PARTICIPANT UI WITH ONE DETERMINISTIC CARD
+
+Use the supplied inspiration image as **visual language only**, not as a requirement to recreate its multiple-panel composition. Our participant UI should be simpler.
+
+There should be **one primary participant instruction card**. Remove/hide the permanent participant-facing Steps and Status panels. Research/debug information belongs in a separately toggled researcher HUD.
+
+#### Card layout specification
+
+Build one world-space card with a stable fixed layout. Do not use content-driven geometry that can collapse, expose an uncovered dark region, or allow text to escape.
+
+Suggested starting physical size (make serialized/configurable):
+- width: ~0.42–0.48 m
+- height: ~0.25–0.30 m
+- comfortable viewing distance: ~0.75–1.0 m from seated head pose
+- position: centered or slightly left of center, just above the assembly's highest normal manipulation volume
+- never require repeated upward neck tilt
+
+Visual language from the inspiration:
+- charcoal/near-black semi-opaque card;
+- subtle cyan/teal accent;
+- white primary text;
+- muted grey secondary text;
+- amber only for correction/warning;
+- restrained green only for confirmed success;
+- thin borders/dividers;
+- generous internal padding;
+- no neon blocks and no debug aesthetic.
+
+#### Strict hierarchy
+
+Inside the single card, top to bottom:
+
+1. **Header:** “V8 ASSEMBLY” small/medium.
+2. **Progress:** compact segmented or linear progress + concise stage/action count.
+3. **Action title:** e.g. “Position the crankshaft”.
+4. **Instruction body:** ONE current actionable instruction. Maximum 2–3 rendered lines.
+5. **Context feedback area:** normally empty; shows one concise validation message when needed.
+6. **Optional contextual action:** Help / Replay demo only if content exists.
+7. **Bottom controls:** Back + Continue/Next, consistently sized.
+
+Do not show long L3 paragraphs. L3 decomposition advances through sub-actions/instruction states one at a time.
+
+#### Text/layout rules — mandatory
+
+- Use TextMeshPro auto-size only within a conservative bounded range, not an unlimited shrink/grow behavior.
+- Set explicit RectTransforms for title/body/feedback/buttons.
+- Enable wrapping where intended.
+- No overflow mode that renders outside the card.
+- Button label font size must be explicitly bounded and substantially smaller than the button height.
+- Button label RectTransform must remain inside the button with padding on all sides.
+- All card text must have a maximum rendered region.
+- If content exceeds the region, fix/split the content; do not allow it to spill.
+- Background must cover the **entire card bounds**. There must never be an exposed lower section because content/background heights disagree.
+- One owner (`ParticipantCard`) controls visible participant content. No other runtime component writes directly to its TMP fields.
+
+#### State behavior
+
+On every state/action transition:
+- clear title/body/feedback/context action;
+- stop old demo/audio;
+- hide old ghost/arrow;
+- then populate the new state.
+
+There should never be two instructions occupying the same field or old text visible underneath new text.
+
+### P2 — COMPLETE THE CORE PHYSICAL LOOP
+
+For each currently enabled Place action the user experience must be:
+
+**instruction → grab component → manipulate → release → validate → correction OR success → snap → lock → clear ghost/arrow → progress update → next action**
+
+Requirements:
+- Next/Continue cannot advance an incomplete Place action.
+- Successful placement locks the actual object and prevents re-grab.
+- Progress derives only from validated completion.
+- A failed attempt does not increment completion.
+- Switching support levels must not reset completion or create duplicate presentation objects.
+- Entering the next action clears every previous guidance artifact.
+
+Do not touch fasteners/tool actions in this pass; they can remain explicitly disabled. We first need one reliable physical interaction pipeline.
+
+### Onboarding behavior
+
+Keep onboarding short and stable:
+1. Welcome / task purpose.
+2. Major task overview.
+3. Explain that transparent cyan placement guides show targets and the system confirms completion.
+4. Begin Assembly.
+
+No task ghost or arrow should appear until **Begin Assembly** is activated.
+
+### Support-level presentation
+
+The physical success criteria remain identical across L1/L2/L3.
+
+- **L1:** concise goal; no unnecessary spatial overlay.
+- **L2:** concise goal + transparent target ghost/spatial guidance.
+- **L3:** one decomposed instruction at a time + transparent ghost + correct directional cue + Help/Replay/audio only when an authored asset exists.
+
+Do not make L3 a paragraph.
+
+### What NOT to work on in this iteration
+
+Do not:
+- implement AI provider;
+- implement BLE/HRV;
+- extract baked fasteners;
+- create a tool model;
+- expand to a more detailed V8 procedure;
+- redesign logging architecture;
+- change research claims;
+- spend time on decorative animations before P0 works.
+
+Preserve the existing AI seam and logger.
+
+### Required self-check before handoff
+
+Before reporting this pass complete, inspect the scene/code and answer explicitly in Claude → Reviewer:
+
+1. Why were the non-crankshaft objects not grabbable, and what exact configuration difference was fixed?
+2. What transform was causing/allowing participant-card jitter, and how is the card now decoupled after calibration?
+3. Which Quest interaction path activates participant buttons (ray/poke), and why should it be reachable from the seated pose?
+4. Which shader/material settings now make the ghost truly transparent rather than merely assigning a low alpha value?
+5. How is arrow orientation computed from source/target positions, including the prefab's local forward axis?
+6. What hard bounds prevent title/body/button text from rendering outside its allocated RectTransform?
+7. Which component is the sole runtime writer of participant-facing text?
+
+If any answer is uncertain, label it [QV] rather than presenting it as solved.
+
+### Next Quest acceptance test
+
+The next device build is successful only if the user can demonstrate, in one continuous run:
+
+1. anchored workspace;
+2. stable onboarding UI with no jitter;
+3. comfortably reachable Begin button;
+4. no ghost before Begin;
+5. first instruction with no overlap/overflow;
+6. transparent crankshaft target;
+7. crankshaft can be grabbed;
+8. incorrectly placed crankshaft is rejected without advancing;
+9. correct placement validates, snaps and locks;
+10. progress updates once;
+11. old text/ghost/feedback clears;
+12. first piston can actually be grabbed;
+13. piston target ghost is transparent;
+14. directional cue points at the actual target;
+15. Next remains gated until piston placement succeeds.
+
+**Do not call the iteration complete based on compilation. The purpose of this pass is to produce a build worth testing against these 15 concrete device criteria.**
