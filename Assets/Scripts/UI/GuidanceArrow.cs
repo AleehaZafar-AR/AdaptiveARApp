@@ -52,6 +52,14 @@ namespace AdaptiveAR.UI
         [Tooltip("How quickly the arrow glides between part and target.")]
         [SerializeField] private float followSpeed = 6f;
 
+        [Header("Orientation")]
+        [Tooltip("Which local axis the arrow mesh actually points along. Corrected once, " +
+                 "centrally, instead of hand-authoring a Euler rotation per use.")]
+        [SerializeField] private MeshForwardAxis meshForward = MeshForwardAxis.MinusY;
+
+        [Tooltip("Small explicit nudge if a particular mesh needs it. Keep near zero.")]
+        [SerializeField] private Vector3 extraRotationEuler = Vector3.zero;
+
         [Header("Colour")]
         [SerializeField] private bool tintArrow = true;
 
@@ -59,6 +67,12 @@ namespace AdaptiveAR.UI
         [Tooltip("Arrows are assistance, so they appear only from this level upward. " +
                  "L1 is meant to be minimal.")]
         [SerializeField] private SupportLevel minimumLevel = SupportLevel.L2_Guided;
+
+        /// <summary>The axis the arrow art points along in its own local space.</summary>
+        public enum MeshForwardAxis
+        {
+            PlusZ = 0, MinusZ = 1, PlusY = 2, MinusY = 3, PlusX = 4, MinusX = 5
+        }
 
         private GameObject _arrow;
         private Renderer[] _renderers;
@@ -109,8 +123,22 @@ namespace AdaptiveAR.UI
             float bob = Mathf.Sin(Time.time * bobSpeed) * bobAmplitude;
             _arrow.transform.position = _smoothedPos + Vector3.up * bob;
 
-            // Point straight down at whatever it is indicating.
-            _arrow.transform.rotation = Quaternion.LookRotation(Vector3.down, Vector3.forward);
+            // Orientation comes from real geometry: from where the arrow sits, towards what
+            // it indicates. No hand-authored Euler angles - those were the reason it pointed
+            // the wrong way. If no usable direction exists, the arrow is hidden rather than
+            // shown pointing somewhere misleading.
+            Vector3 direction = focus.position - _arrow.transform.position;
+
+            if (direction.sqrMagnitude < 1e-6f)
+                direction = Vector3.down;   // hovering directly over the target
+
+            if (!TryBuildRotation(direction.normalized, out Quaternion rot))
+            {
+                SetVisible(false);
+                return;
+            }
+
+            _arrow.transform.rotation = rot;
 
             if (tintArrow)
                 Tint(handled ? MrTheme.Success : MrTheme.Accent);
@@ -145,6 +173,40 @@ namespace AdaptiveAR.UI
             if (string.IsNullOrEmpty(key)) return null;
 
             return guidanceRegistry.TryResolveQuiet(key, out GameObject go) ? go.transform : null;
+        }
+
+        /// <summary>
+        /// Builds a rotation that aims the mesh's authored axis along a world direction.
+        /// The axis correction is applied once here rather than being baked into per-action
+        /// Euler values, so a different arrow model needs one field changed, not re-tuning
+        /// every action.
+        /// </summary>
+        private bool TryBuildRotation(Vector3 worldDirection, out Quaternion rotation)
+        {
+            rotation = Quaternion.identity;
+            if (worldDirection.sqrMagnitude < 1e-6f) return false;
+
+            // Pick an up vector that is not parallel to the direction, or LookRotation fails.
+            Vector3 up = Mathf.Abs(Vector3.Dot(worldDirection, Vector3.up)) > 0.99f
+                ? Vector3.forward
+                : Vector3.up;
+
+            Quaternion aimZ = Quaternion.LookRotation(worldDirection, up);
+
+            // Rotate the mesh's own forward axis onto +Z first, then aim +Z at the target.
+            Quaternion axisFix;
+            switch (meshForward)
+            {
+                case MeshForwardAxis.MinusZ: axisFix = Quaternion.Euler(0f, 180f, 0f); break;
+                case MeshForwardAxis.PlusY: axisFix = Quaternion.Euler(90f, 0f, 0f); break;
+                case MeshForwardAxis.MinusY: axisFix = Quaternion.Euler(-90f, 0f, 0f); break;
+                case MeshForwardAxis.PlusX: axisFix = Quaternion.Euler(0f, -90f, 0f); break;
+                case MeshForwardAxis.MinusX: axisFix = Quaternion.Euler(0f, 90f, 0f); break;
+                default: axisFix = Quaternion.identity; break;
+            }
+
+            rotation = aimZ * axisFix * Quaternion.Euler(extraRotationEuler);
+            return true;
         }
 
         private void EnsureArrow()

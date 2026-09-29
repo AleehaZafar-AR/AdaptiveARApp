@@ -580,3 +580,132 @@ by hand as you did for the others.
 - Whether the extracted caps are physically graspable at their real size — they are small,
   and hand tracking may struggle. **[QV]**
 - All tolerances remain provisional. **[PC]**
+
+---
+
+## Claude → Reviewer — 2026-09-29 (c) — Functional recovery pass
+
+Responding to the device review. Scope respected: **no** AI, BLE, fastener extraction, tool
+models or workflow expansion in this pass.
+
+**Note on ordering.** The fastener/tool commit landed before your review was visible to me.
+Nothing in it runs automatically — those are opt-in menu items under `AdaptiveAR ▸ Fasteners`.
+**Do not run them this pass.** They are left in place for later.
+
+### Required self-check
+
+**1. Why were the non-crankshaft objects not grabbable, and what was fixed?**
+
+Measured from the scene, not assumed:
+
+| Part | Rigidbodies in subtree | Colliders owned by the part's own Rigidbody |
+|---|---|---|
+| crankshaft | 1 | 1 |
+| camshaft | 1 | 1 |
+| piston001–004 | **9** | **0** |
+
+A collider in Unity belongs to its **nearest Rigidbody ancestor**. Each piston had a
+Rigidbody on the root *and* on all eight child meshes, so every collider belonged to a child
+body and the root Rigidbody — the one `Grabbable` and the interactables reference — owned
+**nothing**. There was no hit target that resolved to the grabbable body, so it could never
+be selected however correct its references were.
+
+I also verified the ISDK `_rigidbody` references: **all correct**, pointing at each part's
+own body. My earlier "the clone mis-targeted references" theory was **wrong**.
+
+Fix: `AdaptiveAR ▸ Grab ▸ 1 Diagnose / 2 Repair` — one Rigidbody at the part root, nested
+ones removed, all mesh colliders convex, duplicates dropped (`ConnectingPin` had two).
+**[QV]** — only a Quest run proves a hand can select them.
+
+**2. What caused the card jitter, and how is it decoupled now?**
+
+`PanelRig` was **parented to `MarkerAnchor`**, which ArUco rewrites every frame. The previous
+"lock" only skipped the rig's own follow computation — a child inherits its parent transform
+regardless, so every pose correction and all tracking noise still reached the panels. Locking
+local logic could not possibly have fixed it.
+
+Fix: on anchor lock the rig now **unparents itself** (`DetachFromMarkerChain`), keeping its
+world pose and caching the marker position it still needs. Nothing downstream of the marker
+can move it afterwards. `EngineAnchor` stays in the marker chain, so the assembly keeps its
+registration — only the participant UI is decoupled. **[QV]**
+
+**3. Which interaction path activates the buttons, and why is it reachable?**
+
+**Ray**, via the existing `ISDK_RayCanvasInteraction` + `PointableCanvas` + `RayInteractable`
+on the canvas, whose `Surface` is resized with the card so the ray target matches the visible
+bounds. Controls are 170 × 56 mm with `raycastTarget` on the button's own Image, so the hit
+area is exactly the visible area. Poke is not required and the card is not positioned to be
+touched. **[QV]** — that the ray actually reaches it from the seated pose is a device question.
+
+**4. What makes the ghost genuinely transparent now?**
+
+Three things, all of which were wrong before:
+
+- **Shader: URP/Unlit, not Lit.** A Lit ghost is shaded by scene lighting and reads solid at
+  any alpha. Unlit stays flat.
+- **Emission removed.** It was `cyan × 0.55` with `_EMISSION` enabled — emission adds light
+  *on top of* the blend, which is precisely "reads as a solid glowing part".
+- **Alpha clipping explicitly off** (`_AlphaClip = 0`, `_ALPHATEST_ON` disabled) plus
+  `_Surface = 1`, SrcAlpha/OneMinusSrcAlpha, `_ZWrite = 0`, `DepthOnly` and shadow passes
+  disabled, render queue 3000. Alpha is 0.25, green as requested.
+
+Also fixed the reason the earlier colour change silently did nothing: `EnsureGhostMaterial`
+returned an existing asset untouched once created. Appearance is now reapplied every run.
+**[QV]**
+
+**5. How is arrow orientation computed?**
+
+From geometry: `direction = focus.position − arrow.position`, then
+`Quaternion.LookRotation(direction, up)` with a non-parallel up vector, multiplied by a
+**single central axis correction** (`meshForward`, default `MinusY`) that maps the arrow
+mesh's authored axis onto +Z. A per-action nudge exists but defaults to zero. The previous
+hard-coded `LookRotation(Vector3.down, Vector3.forward)` is gone. If no usable direction
+exists the arrow hides rather than pointing somewhere misleading. **[QV]** — `meshForward`
+may need one change once the prefab's real axis is observed.
+
+**6. What prevents text rendering outside its RectTransform?**
+
+- Every row has an **explicit RectTransform with a fixed height**; nothing is content-driven,
+  so content cannot move or resize a row.
+- Auto-size is **bounded** per field (title 22–30, body 14–19, feedback 13–17, button label
+  16–20) with `overflowMode = Truncate`. It shrinks to the floor, then truncates.
+- Button labels are capped at 20 against a 56 mm button and inset 12 × 8 on all sides.
+- The card background is anchored to the **full canvas bounds** (stretch, zero offsets), so
+  it cannot disagree with content height and leave an uncovered region.
+
+**7. Which component is the sole runtime writer of participant text?**
+
+`ParticipantCard`. `StepManager` writes only to a separate anchoring status line, hidden
+permanently once the first action appears. `StepPresenter` no longer drives the card.
+`StatusHud` and `TaskListHud` live on canvases that are now **hidden**.
+
+### Also done
+
+- **One card only.** `AdaptiveAR ▸ UI ▸ 3 - Build Participant Card` builds it and hides
+  `OverviewCanvas` and `StatusCanvas`. Layout: header → progress bar → progress label →
+  divider → title → body → feedback → Back / Continue.
+- Progress line reads `STAGE 1 / 6   CRANKSHAFT   STEP 2 / 3`, every number from
+  `WorkflowState`.
+
+### Run order for the next build
+
+```
+Grab        ▸ 1 Diagnose  →  2 Repair      (expect every part to report OK)
+UI          ▸ 3 Build Participant Card
+Interaction ▸ 1 Apply Ghost Target Material  →  3 Wire Guidance Arrow
+```
+
+Save the scene. **Skip `Interaction ▸ 2`** — it would re-add the nested Rigidbodies that
+caused the problem — and **skip `Fasteners ▸ *`** this pass.
+
+### Honest status against your 15 criteria
+
+Everything above is **[QV]**. Nothing has run on a headset. The four causes in answers 1, 2,
+4 and 5 are structural defects I can point at in scene data rather than constants I adjusted
+— but whether fixing them yields a usable build is exactly what the next device run decides.
+
+Largest remaining risk: **criterion 12, the piston grab.** The nested-Rigidbody explanation
+fits all the evidence, but if pistons still cannot be picked up after the repair, the cause
+is elsewhere in the ISDK configuration, and the Quest-side symptom would narrow it fast —
+specifically whether the part shows a hover highlight but refuses to grab, or shows no
+highlight at all.

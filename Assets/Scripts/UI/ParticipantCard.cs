@@ -122,13 +122,32 @@ namespace AdaptiveAR.UI
             StepData stage = workflow != null ? workflow.CurrentStage : stepRunner.CurrentStep;
             AssemblyAction action = workflow != null ? workflow.CurrentAction : null;
 
-            // --- stage name ---
+            // --- one compact progress line: stage position, stage name, action position.
+            // --- Every number comes from WorkflowState, so it cannot disagree with reality.
             if (stageText != null)
-                stageText.text = stage != null
+            {
+                string stageName = stage != null
                     ? (string.IsNullOrEmpty(stage.displayName) ? stage.stepTitle : stage.displayName)
                     : "";
 
-            // --- action counter, derived from real completion ---
+                int stageNum = (stepRunner != null ? stepRunner.CurrentStepIndex : -1) + 1;
+                int stageCount = stepRunner != null ? stepRunner.StepCount : 0;
+
+                string line = stageCount > 0 ? $"STAGE {stageNum} / {stageCount}" : "";
+
+                if (!string.IsNullOrEmpty(stageName))
+                    line += "     " + stageName.ToUpperInvariant();
+
+                if (workflow != null)
+                {
+                    workflow.GetActionCounter(out int cur, out int total);
+                    if (total > 1) line += $"     STEP {cur} / {total}";
+                }
+
+                stageText.text = line;
+            }
+
+            // Optional separate counter; the combined line above covers it by default.
             if (counterText != null)
             {
                 if (workflow != null)

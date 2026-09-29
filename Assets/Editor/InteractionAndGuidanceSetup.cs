@@ -106,17 +106,18 @@ namespace AdaptiveAR.EditorTools
         {
             // A placement TARGET, not another component: low alpha so the bench reads
             // through it, plus emission so the silhouette survives bright passthrough.
-            Color ghost = new Color(0.30f, 0.90f, 0.45f, 0.20f);
-            Color glow = new Color(0.30f, 0.90f, 0.45f, 1f) * 0.5f;
+            Color ghost = new Color(0.30f, 0.90f, 0.45f, 0.25f);
 
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", ghost);
             if (mat.HasProperty("_Color")) mat.SetColor("_Color", ghost);
 
+            // NO emission. An emissive ghost adds light on top of the blend and reads as a
+            // solid glowing object, which is exactly the reported symptom.
             if (mat.HasProperty("_EmissionColor"))
             {
-                mat.SetColor("_EmissionColor", glow);
-                mat.EnableKeyword("_EMISSION");
-                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
+                mat.SetColor("_EmissionColor", Color.black);
+                mat.DisableKeyword("_EMISSION");
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.EmissiveIsBlack;
             }
 
             // URP transparent setup. These keywords switch the blend mode.
@@ -127,8 +128,19 @@ namespace AdaptiveAR.EditorTools
             if (mat.HasProperty("_DstBlend")) mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.1f);
 
+            // Alpha clipping OFF: with it on the shader discards fragments instead of
+            // blending them, which produces a hard-edged solid look.
+            if (mat.HasProperty("_AlphaClip")) mat.SetFloat("_AlphaClip", 0f);
+            if (mat.HasProperty("_Cutoff")) mat.SetFloat("_Cutoff", 0f);
+
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.DisableKeyword("_ALPHATEST_ON");
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+
+            // Depth write off so the ghost does not occlude what is behind it.
+            mat.SetShaderPassEnabled("DepthOnly", false);
+            mat.SetShaderPassEnabled("SHADOWCASTER", false);
+
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
 
@@ -163,8 +175,11 @@ namespace AdaptiveAR.EditorTools
             Directory.CreateDirectory(GeneratedFolder);
 
             // URP project, so prefer a URP shader and fall back if the name ever changes.
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit")
-                            ?? Shader.Find("Universal Render Pipeline/Unlit")
+            // Unlit deliberately, and Unlit FIRST. A Lit ghost is shaded by scene lighting
+            // and reads as a solid object no matter how low the alpha; unlit keeps it flat,
+            // which is what a target volume should look like.
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit")
+                            ?? Shader.Find("Universal Render Pipeline/Lit")
                             ?? Shader.Find("Standard");
 
             if (shader == null)

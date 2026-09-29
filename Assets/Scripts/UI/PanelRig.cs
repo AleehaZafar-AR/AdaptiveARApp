@@ -82,6 +82,8 @@ namespace AdaptiveAR.UI
         /// <summary>True once the panels have been parked for good.</summary>
         public bool IsLocked { get; private set; }
 
+        private Vector3 _frozenMarkerPos;
+        private bool _hasFrozenMarkerPos;
         private Vector3 _stableDirection = Vector3.forward;
         private bool _hasStableDirection;
         private Vector3 _targetPosition;
@@ -124,6 +126,7 @@ namespace AdaptiveAR.UI
             if (!IsLocked && lockWhenSequenceStarts && stepManager != null && stepManager.AnchorLocked)
             {
                 Recenter();
+                DetachFromMarkerChain();
                 IsLocked = true;
                 return;
             }
@@ -131,6 +134,7 @@ namespace AdaptiveAR.UI
             if (!IsLocked && lockWhenSequenceStarts && stepRunner != null && stepRunner.HasStarted)
             {
                 Recenter();
+                DetachFromMarkerChain();
                 IsLocked = true;
                 return;
             }
@@ -155,6 +159,35 @@ namespace AdaptiveAR.UI
             transform.rotation = Quaternion.Slerp(transform.rotation, _targetRotation, t);
         }
 
+        /// <summary>
+        /// Detaches the rig from the marker-driven hierarchy, keeping its world pose.
+        ///
+        /// THIS is what actually stops the jitter. The rig was parented to MarkerAnchor,
+        /// which ArUco rewrites every frame. Skipping the rig's own follow logic changed
+        /// nothing, because a child inherits its parent's transform regardless: every
+        /// pose correction and every bit of tracking noise still reached the panels.
+        /// Once detached, nothing downstream of the marker can move them.
+        ///
+        /// EngineAnchor stays under the marker chain, so the assembly itself keeps its
+        /// registration - only the participant UI is decoupled.
+        /// </summary>
+        private void DetachFromMarkerChain()
+        {
+            if (markerAnchor != null)
+            {
+                _frozenMarkerPos = markerAnchor.position;
+                _hasFrozenMarkerPos = true;
+            }
+
+            if (transform.parent == null) return;
+
+            Vector3 p = transform.position;
+            Quaternion r = transform.rotation;
+
+            transform.SetParent(null, true);
+            transform.SetPositionAndRotation(p, r);
+        }
+
         /// <summary>Drops the dead zone for one frame and re-aims at the current head pose.</summary>
         public void Recenter()
         {
@@ -174,7 +207,8 @@ namespace AdaptiveAR.UI
             if (markerAnchor == null || head == null)
                 return false;
 
-            Vector3 markerPos = markerAnchor.position;
+            // Cached once the rig detaches, so the reference survives unparenting.
+            Vector3 markerPos = _hasFrozenMarkerPos ? _frozenMarkerPos : markerAnchor.position;
 
             // Horizontal direction from the viewer to the marker. The panels go a little
             // further along it, so the marker - and the engine on it - stays nearer the
