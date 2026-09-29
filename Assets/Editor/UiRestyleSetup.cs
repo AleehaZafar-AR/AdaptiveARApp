@@ -14,9 +14,13 @@
 // physical V8 stays the visual focus.
 //
 // Role changes:
-//   DemoUICanvas    -> participant instruction panel (left)
-//   OverviewCanvas  -> task list (right)
-//   StatusCanvas    -> researcher / debug HUD, hidden by default
+//   OverviewCanvas  -> task list      (left)
+//   DemoUICanvas    -> instruction     (centre; also the home and complete screens)
+//   StatusCanvas    -> status          (right; researcher detail hidden inside it)
+//
+// All three hang off a PanelRig parented to MarkerAnchor, so the interface travels
+// with the marker and turns to face the viewer instead of sitting at fixed world
+// coordinates that go stale the moment the marker or the operator moves.
 //
 // LAYOUT NUMBERS BELOW ARE AN ESTIMATE and need tuning in the headset. They are
 // constants at the top of this file precisely so they are cheap to change and
@@ -40,18 +44,17 @@ namespace AdaptiveAR.EditorTools
     {
         private const string ExpectedSceneName = "1 - ArUcoMarkerTracking";
 
-        // --- spatial layout, metres. Canvas scale is 0.001, so 1 canvas unit = 1 mm ---
-        private static readonly Vector3 InstructionPos = new Vector3(-0.34f, 1.18f, 0.92f);
-        private static readonly Vector3 InstructionEuler = new Vector3(0f, -20f, 0f);
-        private static readonly Vector2 InstructionSize = new Vector2(420f, 300f);
+        // --- layout, in PanelRig local space. The rig is anchored to the marker and
+        // --- turns to face the viewer, so these are simple left / centre / right offsets.
+        // --- Canvas scale is 0.001, so 1 canvas unit = 1 mm.
+        private static readonly Vector2 InstructionSize = new Vector2(560f, 430f);
+        private static readonly Vector2 TaskListSize = new Vector2(360f, 430f);
+        private static readonly Vector2 StatusSize = new Vector2(360f, 430f);
 
-        private static readonly Vector3 TaskListPos = new Vector3(0.36f, 1.18f, 0.92f);
-        private static readonly Vector3 TaskListEuler = new Vector3(0f, 20f, 0f);
-        private static readonly Vector2 TaskListSize = new Vector2(290f, 300f);
+        private const float PanelGap = 0.03f;   // metres between panels
 
-        private static readonly Vector3 DebugPos = new Vector3(0f, 1.58f, 1.05f);
-        private static readonly Vector3 DebugEuler = Vector3.zero;
-        private static readonly Vector2 DebugSize = new Vector2(560f, 300f);
+        // Side panels are angled inwards so the triptych wraps slightly around the viewer.
+        private const float SidePanelYaw = 16f;
 
         // =====================================================================
         // 1. VALIDATE
@@ -77,11 +80,16 @@ namespace AdaptiveAR.EditorTools
             }
 
             r.AppendLine();
-            r.AppendLine("Current span is about 1.8 m at 1 m - roughly 84 deg of view, centred on the work area.");
-            r.AppendLine("After restyle:");
-            r.AppendLine($"  Instruction panel  {InstructionSize.x / 1000f:F2} x {InstructionSize.y / 1000f:F2} m at {InstructionPos}");
-            r.AppendLine($"  Task list          {TaskListSize.x / 1000f:F2} x {TaskListSize.y / 1000f:F2} m at {TaskListPos}");
-            r.AppendLine($"  Researcher HUD     {DebugSize.x / 1000f:F2} x {DebugSize.y / 1000f:F2} m at {DebugPos}  (hidden by default)");
+            GameObject markerAnchor = Find(scene, "MarkerAnchor");
+            r.AppendLine($"MarkerAnchor: {(markerAnchor == null ? "MISSING - run the Alignment tool first" : "found")}");
+            r.AppendLine($"PanelRig:     {(Find(scene, "PanelRig") == null ? "will be created under MarkerAnchor" : "already exists")}");
+            r.AppendLine();
+            r.AppendLine("After restyle, three panels anchored to the marker and facing the viewer:");
+            r.AppendLine($"  Task list    {TaskListSize.x / 1000f:F2} x {TaskListSize.y / 1000f:F2} m   (left)");
+            r.AppendLine($"  Instruction  {InstructionSize.x / 1000f:F2} x {InstructionSize.y / 1000f:F2} m   (centre)");
+            r.AppendLine($"  Status       {StatusSize.x / 1000f:F2} x {StatusSize.y / 1000f:F2} m   (right, researcher detail hidden inside it)");
+            float span = (TaskListSize.x + InstructionSize.x + StatusSize.x) / 1000f + PanelGap * 2f;
+            r.AppendLine($"  Total span   {span:F2} m, sitting above and beyond the marker.");
             r.AppendLine();
             r.AppendLine("Sprites: " + (AssetDatabase.LoadAssetAtPath<Sprite>(UiSpriteFactory.PanelSpritePath) != null
                 ? "already generated" : "will be generated"));
@@ -147,7 +155,7 @@ namespace AdaptiveAR.EditorTools
             GameObject canvas = Find(scene, "DemoUICanvas");
             if (canvas == null) { Debug.LogWarning("[UiRestyle] DemoUICanvas missing."); return 0; }
 
-            PlaceCanvas(canvas, InstructionPos, InstructionEuler, InstructionSize);
+            PlaceInRig(scene, canvas, InstructionSize, 0f, 0f);
 
             // Hide EVERY legacy child except the ones this tool owns. Naming them one by
             // one is what left the old InstructionPanel bar and the TaskA/B/C rows on
@@ -192,15 +200,17 @@ namespace AdaptiveAR.EditorTools
             ReparentKeepingName(title.gameObject, panel.transform);
             StyleText(title, MrTheme.SizeTitle, MrTheme.TextPrimary, FontStyles.Bold);
             title.textWrappingMode = TextWrappingModes.Normal;
-            PlaceRow(title.rectTransform, inner, 110f, ref y);
+            AutoSize(title, 22f, MrTheme.SizeTitle);
+            PlaceRow(title.rectTransform, inner, 108f, ref y);
             y -= MrTheme.RowSpacing;
 
             // --- body: progressive detail ---
             TextMeshProUGUI body = EnsureText(panel, "BodyText", "",
                 MrTheme.SizeBody, MrTheme.TextSecondary, FontStyles.Normal);
             body.textWrappingMode = TextWrappingModes.Normal;
-            body.lineSpacing = 12f;
-            PlaceRow(body.rectTransform, inner, 130f, ref y);
+            body.lineSpacing = 10f;
+            AutoSize(body, 15f, MrTheme.SizeBody);
+            PlaceRow(body.rectTransform, inner, 190f, ref y);
 
             // --- alignment chip, bottom left ---
             GameObject chip = EnsureChip(panel, "AlignmentChip", panelSprite);
@@ -286,7 +296,8 @@ namespace AdaptiveAR.EditorTools
             TextMeshProUGUI hTitle = EnsureText(home, "Title", "V8 Engine Assembly",
                 MrTheme.SizeTitle, MrTheme.TextPrimary, FontStyles.Bold);
             hTitle.textWrappingMode = TextWrappingModes.Normal;
-            PlaceRow(hTitle.rectTransform, inner, 88f, ref y);
+            AutoSize(hTitle, 22f, MrTheme.SizeTitle);
+            PlaceRow(hTitle.rectTransform, inner, 100f, ref y);
             y -= 6f;
 
             TextMeshProUGUI hBody = EnsureText(home, "Body",
@@ -295,7 +306,8 @@ namespace AdaptiveAR.EditorTools
                 MrTheme.SizeBody, MrTheme.TextSecondary, FontStyles.Normal);
             hBody.textWrappingMode = TextWrappingModes.Normal;
             hBody.lineSpacing = 10f;
-            PlaceRow(hBody.rectTransform, inner, 110f, ref y);
+            AutoSize(hBody, 15f, MrTheme.SizeBody);
+            PlaceRow(hBody.rectTransform, inner, 170f, ref y);
 
             GameObject startBtn = EnsureButton(home, "StartButton", panelSprite, "Start", primary: true);
             var sr = Rect(startBtn);
@@ -317,14 +329,16 @@ namespace AdaptiveAR.EditorTools
             TextMeshProUGUI cTitle = EnsureText(complete, "Title", "Assembly complete",
                 MrTheme.SizeTitle, MrTheme.TextPrimary, FontStyles.Bold);
             cTitle.textWrappingMode = TextWrappingModes.Normal;
-            PlaceRow(cTitle.rectTransform, inner, 88f, ref cy);
+            AutoSize(cTitle, 22f, MrTheme.SizeTitle);
+            PlaceRow(cTitle.rectTransform, inner, 100f, ref cy);
             cy -= 6f;
 
             TextMeshProUGUI cBody = EnsureText(complete, "Body", "",
                 MrTheme.SizeBody, MrTheme.TextSecondary, FontStyles.Normal);
             cBody.textWrappingMode = TextWrappingModes.Normal;
             cBody.lineSpacing = 10f;
-            PlaceRow(cBody.rectTransform, inner, 130f, ref cy);
+            AutoSize(cBody, 15f, MrTheme.SizeBody);
+            PlaceRow(cBody.rectTransform, inner, 180f, ref cy);
 
             // ---------- flow ----------
             var flow = canvas.GetComponent<AppFlowController>();
@@ -404,7 +418,8 @@ namespace AdaptiveAR.EditorTools
             GameObject canvas = Find(scene, "OverviewCanvas");
             if (canvas == null) { Debug.LogWarning("[UiRestyle] OverviewCanvas missing."); return 0; }
 
-            PlaceCanvas(canvas, TaskListPos, TaskListEuler, TaskListSize);
+            float leftX = -(InstructionSize.x * 0.0005f + PanelGap + TaskListSize.x * 0.0005f);
+            PlaceInRig(scene, canvas, TaskListSize, leftX, SidePanelYaw);
 
             HideLegacyChildren(canvas, "Panel", "Surface", "ISDK_RayCanvasInteraction");
 
@@ -427,6 +442,7 @@ namespace AdaptiveAR.EditorTools
             {
                 TextMeshProUGUI row = EnsureText(panel, $"Row{i + 1}", "",
                     MrTheme.SizeList, MrTheme.TextSecondary, FontStyles.Normal);
+                AutoSize(row, 14f, MrTheme.SizeList);
                 PlaceRow(row.rectTransform, inner, 34f, ref y);
                 y -= 6f;
                 rows.Add(row);
@@ -472,28 +488,67 @@ namespace AdaptiveAR.EditorTools
             GameObject canvas = Find(scene, "StatusCanvas");
             if (canvas == null) { Debug.LogWarning("[UiRestyle] StatusCanvas missing."); return 0; }
 
-            PlaceCanvas(canvas, DebugPos, DebugEuler, DebugSize);
+            float rightX = InstructionSize.x * 0.0005f + PanelGap + StatusSize.x * 0.0005f;
+            PlaceInRig(scene, canvas, StatusSize, rightX, -SidePanelYaw);
 
-            // The old participant-facing metrics move into this HUD, so their original
-            // rows are hidden rather than deleted.
-            HideLegacyChildren(canvas, "Panel", "Surface", "ISDK_RayCanvasInteraction");
+            HideLegacyChildren(canvas, "Panel", "ResearcherPanel", "Surface", "ISDK_RayCanvasInteraction");
 
-            GameObject panel = EnsurePanel(canvas, "Panel", panelSprite, borderSprite, DebugSize);
+            // ---------- participant-facing status, always visible ----------
+            GameObject panel = EnsurePanel(canvas, "Panel", panelSprite, borderSprite, StatusSize);
 
-            float inner = DebugSize.x - MrTheme.PanelPadding * 2f;
+            float inner = StatusSize.x - MrTheme.PanelPadding * 2f;
             float y = -MrTheme.PanelPadding;
 
-            TextMeshProUGUI heading = EnsureText(panel, "Heading", "RESEARCHER VIEW",
-                MrTheme.SizeEyebrow, MrTheme.Warning, FontStyles.Bold | FontStyles.UpperCase);
+            TextMeshProUGUI heading = EnsureText(panel, "Heading", "STATUS",
+                MrTheme.SizeEyebrow, MrTheme.Accent, FontStyles.Bold | FontStyles.UpperCase);
             heading.characterSpacing = MrTheme.EyebrowCharacterSpacing;
             PlaceRow(heading.rectTransform, inner, 24f, ref y);
+            y -= MrTheme.SectionSpacing;
+
+            TextMeshProUGUI supportLabel = Metric(panel, "SupportLabel", "SUPPORT LEVEL", inner, ref y);
+            TextMeshProUGUI supportValue = MetricValue(panel, "SupportValue", "-", inner, ref y);
             y -= MrTheme.RowSpacing;
 
-            TextMeshProUGUI readout = EnsureText(panel, "Readout", "",
-                MrTheme.SizeMetricLabel + 4f, MrTheme.TextSecondary, FontStyles.Normal);
-            readout.textWrappingMode = TextWrappingModes.NoWrap;
-            readout.lineSpacing = 18f;
-            PlaceRow(readout.rectTransform, inner, DebugSize.y - 90f, ref y);
+            TextMeshProUGUI progressLabel = Metric(panel, "ProgressLabel", "PROGRESS", inner, ref y);
+            TextMeshProUGUI progressValue = MetricValue(panel, "ProgressValue", "-", inner, ref y);
+            y -= MrTheme.RowSpacing;
+
+            TextMeshProUGUI timeLabel = Metric(panel, "TimeLabel", "TIME ON STEP", inner, ref y);
+            TextMeshProUGUI timeValue = MetricValue(panel, "TimeValue", "--:--", inner, ref y);
+            y -= MrTheme.RowSpacing;
+
+            TextMeshProUGUI errorLabel = Metric(panel, "ErrorLabel", "PLACEMENT RETRIES", inner, ref y);
+            TextMeshProUGUI errorValue = MetricValue(panel, "ErrorValue", "0", inner, ref y);
+
+            var statusHud = canvas.GetComponent<StatusHud>();
+            if (statusHud == null) statusHud = Undo.AddComponent<StatusHud>(canvas);
+
+            SetRefs(statusHud,
+                ("session", session), ("stepRunner", runner),
+                ("supportLevel", level), ("validator", validator),
+                ("supportLevelText", supportValue),
+                ("progressValueText", progressValue),
+                ("timeValueText", timeValue),
+                ("errorValueText", errorValue),
+                ("placementErrorText", null),
+                ("progressSlider", null), ("progressFill", null));
+
+            // ---------- researcher detail, hidden inside the same panel ----------
+            GameObject research = EnsurePanel(canvas, "ResearcherPanel", panelSprite, borderSprite, StatusSize);
+
+            float ry = -MrTheme.PanelPadding;
+            TextMeshProUGUI rHeading = EnsureText(research, "Heading", "RESEARCHER VIEW",
+                MrTheme.SizeEyebrow, MrTheme.Warning, FontStyles.Bold | FontStyles.UpperCase);
+            rHeading.characterSpacing = MrTheme.EyebrowCharacterSpacing;
+            PlaceRow(rHeading.rectTransform, inner, 24f, ref ry);
+            ry -= MrTheme.RowSpacing;
+
+            TextMeshProUGUI readout = EnsureText(research, "Readout", "",
+                16f, MrTheme.TextSecondary, FontStyles.Normal);
+            readout.textWrappingMode = TextWrappingModes.Normal;
+            readout.lineSpacing = 14f;
+            AutoSize(readout, 10f, 16f);
+            PlaceRow(readout.rectTransform, inner, StatusSize.y - 90f, ref ry);
 
             var hud = canvas.GetComponent<ResearcherHud>();
             if (hud == null) hud = Undo.AddComponent<ResearcherHud>(canvas);
@@ -501,34 +556,57 @@ namespace AdaptiveAR.EditorTools
             SetRefs(hud,
                 ("session", session), ("stepRunner", runner), ("supportLevel", level),
                 ("validator", validator), ("logger", logger),
-                ("panelRoot", panel), ("readoutText", readout));
+                ("panelRoot", research), ("readoutText", readout));
 
-            // Hidden from the participant until explicitly toggled.
-            if (panel.activeSelf)
-            {
-                Undo.RecordObject(panel, "Hide researcher HUD");
-                panel.SetActive(false);
-            }
+            // Participant sees STATUS; the researcher overlay stays off until toggled.
+            SetActiveRecorded(panel, true);
+            SetActiveRecorded(research, false);
 
-            // The old StatusHud drove participant-facing metrics that no longer exist here.
-            var oldHud = canvas.GetComponent<StatusHud>();
-            if (oldHud != null)
-                Undo.DestroyObjectImmediate(oldHud);
+            return 4;
+        }
 
-            return 2;
+        /// <summary>Small uppercase metric caption.</summary>
+        private static TextMeshProUGUI Metric(GameObject panel, string name, string text, float inner, ref float y)
+        {
+            TextMeshProUGUI t = EnsureText(panel, name, text, 16f, MrTheme.TextMuted,
+                                           FontStyles.Bold | FontStyles.UpperCase);
+            t.characterSpacing = 5f;
+            PlaceRow(t.rectTransform, inner, 20f, ref y);
+            return t;
+        }
+
+        /// <summary>The value beneath a metric caption.</summary>
+        private static TextMeshProUGUI MetricValue(GameObject panel, string name, string text, float inner, ref float y)
+        {
+            TextMeshProUGUI t = EnsureText(panel, name, text, 30f, MrTheme.TextPrimary, FontStyles.Bold);
+            AutoSize(t, 16f, 30f);
+            PlaceRow(t.rectTransform, inner, 38f, ref y);
+            return t;
         }
 
         // =====================================================================
         // Building blocks
         // =====================================================================
 
-        private static void PlaceCanvas(GameObject canvas, Vector3 pos, Vector3 euler, Vector2 size)
+        /// <summary>
+        /// Parents a canvas to the marker-anchored PanelRig and positions it as one panel
+        /// of the triptych. Anchoring to the marker is what keeps the panels in a
+        /// comfortable place no matter where the marker is put down or how the operator
+        /// shifts in their seat.
+        /// </summary>
+        private static void PlaceInRig(Scene scene, GameObject canvas, Vector2 size, float localX, float yaw)
         {
+            GameObject rig = EnsurePanelRig(scene);
+
             var rt = canvas.GetComponent<RectTransform>();
             Undo.RecordObject(rt, "Place canvas");
 
-            rt.position = pos;
-            rt.rotation = Quaternion.Euler(euler);
+            if (rig != null && canvas.transform.parent != rig.transform)
+                Undo.SetTransformParent(canvas.transform, rig.transform, "Parent canvas to PanelRig");
+
+            rt.localPosition = new Vector3(localX, 0f, 0f);
+            rt.localRotation = Quaternion.Euler(0f, yaw, 0f);
+            rt.localScale = new Vector3(0.001f, 0.001f, 0.001f);
             rt.sizeDelta = size;
 
             // The ISDK ray surface must track the canvas or pointing lands in the wrong place.
@@ -642,6 +720,50 @@ namespace AdaptiveAR.EditorTools
             StyleText(tmp, size, color, style);
             tmp.raycastTarget = false;
             return tmp;
+        }
+
+        /// <summary>
+        /// Lets TMP shrink text that would not otherwise fit its box. This is what stops
+        /// long instructions spilling past the panel edge, which no fixed font size can
+        /// guarantee across six steps of differing length.
+        /// </summary>
+        private static void AutoSize(TextMeshProUGUI tmp, float min, float max)
+        {
+            tmp.enableAutoSizing = true;
+            tmp.fontSizeMin = min;
+            tmp.fontSizeMax = max;
+            tmp.overflowMode = TextOverflowModes.Truncate;
+        }
+
+        /// <summary>
+        /// Creates (or finds) the marker-anchored rig the panels hang from. Parented to
+        /// MarkerAnchor so the whole interface travels with the marker; the rig itself
+        /// turns to face the viewer.
+        /// </summary>
+        private static GameObject EnsurePanelRig(Scene scene)
+        {
+            GameObject rig = Find(scene, "PanelRig");
+            GameObject markerAnchor = Find(scene, "MarkerAnchor");
+
+            if (rig == null)
+            {
+                rig = new GameObject("PanelRig");
+                Undo.RegisterCreatedObjectUndo(rig, "Create PanelRig");
+            }
+
+            if (markerAnchor != null && rig.transform.parent != markerAnchor.transform)
+                Undo.SetTransformParent(rig.transform, markerAnchor.transform, "Parent PanelRig");
+
+            var comp = rig.GetComponent<PanelRig>();
+            if (comp == null) comp = Undo.AddComponent<PanelRig>(rig);
+
+            if (markerAnchor != null)
+                SetRefs(comp, ("markerAnchor", markerAnchor.transform));
+            else
+                Debug.LogWarning("[UiRestyle] MarkerAnchor not found. Run the Alignment tool first, " +
+                                 "otherwise the panels have nothing to anchor to.");
+
+            return rig;
         }
 
         private static void StyleText(TextMeshProUGUI tmp, float size, Color color, FontStyles style)

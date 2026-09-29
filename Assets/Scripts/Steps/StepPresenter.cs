@@ -137,6 +137,7 @@ namespace AdaptiveAR.Steps
                 return;
 
             ClearPresentation();
+            ClearText();
 
             StepSupportContent content = step.GetContent(level);
 
@@ -191,6 +192,25 @@ namespace AdaptiveAR.Steps
                 : headline + "\n\n" + detail;
 
             UpdateStepLabel(step);
+        }
+
+        /// <summary>
+        /// Blanks every text field before the new step is written. Without this the
+        /// previous step's wording stays on screen whenever the incoming step leaves a
+        /// field empty - which is exactly what happens at L1, where the body is blank.
+        /// </summary>
+        private void ClearText()
+        {
+            if (titleText != null) titleText.text = string.Empty;
+
+            if (bodyText != null)
+            {
+                bodyText.text = string.Empty;
+                bodyText.gameObject.SetActive(false);
+            }
+
+            if (captionText != null && titleText == null)
+                captionText.text = string.Empty;
         }
 
         private void UpdateStepLabel(StepData step)
