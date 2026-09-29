@@ -41,6 +41,11 @@ namespace AdaptiveAR.UI
         [SerializeField] private OnboardingSequence onboarding;
 
         [Header("Sources")]
+        [Tooltip("Told to start marker detection when the participant begins. Wiring the " +
+                 "button directly to StepManager also hid it, which broke the later " +
+                 "onboarding screens.")]
+        [SerializeField] private StepManager stepManager;
+
         [SerializeField] private AssemblySessionController session;
         [SerializeField] private StepRunner stepRunner;
 
@@ -84,6 +89,11 @@ namespace AdaptiveAR.UI
             if (Current != Screen.Home) return;
 
             Show(Screen.Running);
+
+            // Marker detection begins here, not on the button press, so the shared
+            // onboarding button survives every screen.
+            if (stepManager != null) stepManager.StartSessionExternal();
+
             OnStarted?.Invoke();
         }
 

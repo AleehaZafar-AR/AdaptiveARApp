@@ -38,7 +38,7 @@ namespace AdaptiveAR.UI
 
         [Header("Visibility")]
         [Tooltip("Participants should not see this, so it starts hidden.")]
-        [SerializeField] private bool visibleOnStart = false;
+        [SerializeField] private bool visibleOnStart = true;
 
         [Tooltip("Controller button that toggles the HUD. Start/Menu avoids every binding " +
                  "already in use: Button.One is the CV debug quad, B/Y change support level, " +

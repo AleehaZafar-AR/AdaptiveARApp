@@ -21,6 +21,10 @@ namespace AdaptiveAR.UI
         [SerializeField] private AssemblySessionController session;
         [SerializeField] private StepRunner stepRunner;
 
+        [Tooltip("Authoritative completion. A segment fills when its stage is validated, " +
+                 "not when the participant arrives at it.")]
+        [SerializeField] private WorkflowState workflow;
+
         [Header("Appearance")]
         [SerializeField] private float segmentHeight = MrTheme.ProgressSegmentHeight;
         [SerializeField] private float segmentGap = MrTheme.ProgressSegmentGap;
@@ -65,8 +69,9 @@ namespace AdaptiveAR.UI
             {
                 if (_segments[i] == null) continue;
 
-                bool done = finished || i < current;
-                bool isCurrent = !finished && i == current;
+                bool done = finished
+                            || (workflow != null ? workflow.IsStageComplete(i) : i < current);
+                bool isCurrent = !finished && i == current && !done;
 
                 // Completed reads as a calm accent; the current step is full strength;
                 // everything ahead stays as an empty track.

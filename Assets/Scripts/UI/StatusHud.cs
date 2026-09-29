@@ -24,8 +24,13 @@ namespace AdaptiveAR.UI
         [SerializeField] private SupportLevelController supportLevel;
         [SerializeField] private StepValidator validator;
 
+        [Tooltip("Authoritative progress. Without it the panel counted the step you are ON " +
+                 "as a step you had FINISHED, so it read 1/6 before anything was done.")]
+        [SerializeField] private WorkflowState workflow;
+
         [Header("Text Fields (all optional)")]
-        [Tooltip("StatusCanvas/TopPanel/CaptionText - shows the support level.")]
+        [Tooltip("Participant-facing stage name. Support level is research instrumentation " +
+                 "and is deliberately NOT shown here.")]
         [SerializeField] private TextMeshProUGUI supportLevelText;
 
         [Tooltip("StatusCanvas/TimerText/TimeValue - time on the current step.")]
@@ -89,17 +94,21 @@ namespace AdaptiveAR.UI
             UpdatePlacementError();
         }
 
+        /// <summary>
+        /// Shows the current STAGE, not the support level. The level is a research variable;
+        /// naming it to the participant would tell them they are being adapted to.
+        /// </summary>
         private void UpdateSupportLevel()
         {
             if (supportLevelText == null) return;
 
-            if (supportLevel == null)
-            {
-                supportLevelText.text = "Support --";
-                return;
-            }
+            StepData stage = workflow != null ? workflow.CurrentStage
+                           : (stepRunner != null ? stepRunner.CurrentStep : null);
 
-            supportLevelText.text = "Support " + FriendlyLevel(supportLevel.CurrentLevel);
+            if (stage == null) { supportLevelText.text = ""; return; }
+
+            supportLevelText.text = string.IsNullOrEmpty(stage.displayName)
+                ? stage.stepTitle : stage.displayName;
         }
 
         private static string FriendlyLevel(SupportLevel level)
@@ -142,18 +151,30 @@ namespace AdaptiveAR.UI
 
             bool finished = session != null && session.SequenceFinished;
 
-            if (progressValueText != null)
+            // COMPLETED stages, not the stage you happen to be on. Being on stage 1 with
+            // nothing validated is 0 of 6, not 1 of 6.
+            int completed = 0;
+            if (workflow != null)
             {
-                if (count == 0) progressValueText.text = "--";
-                else if (finished) progressValueText.text = $"{count} / {count}";
-                else if (index < 0) progressValueText.text = $"0 / {count}";
-                else progressValueText.text = $"{index + 1} / {count}";
+                for (int i = 0; i < count; i++)
+                    if (workflow.IsStageComplete(i)) completed++;
+            }
+            else if (index > 0)
+            {
+                completed = index;
             }
 
-            // Fraction of COMPLETED steps: being on step index means index steps are done.
+            if (finished) completed = count;
+
+            if (progressValueText != null)
+                progressValueText.text = count == 0 ? "--" : $"{completed} / {count}";
+
+            // Fraction is derived from validated work, including part-finished stages.
             float fraction = 0f;
             if (count > 0)
-                fraction = finished ? 1f : Mathf.Clamp01(Mathf.Max(0, index) / (float)count);
+                fraction = workflow != null
+                    ? workflow.OverallProgress
+                    : Mathf.Clamp01(completed / (float)count);
 
             if (progressSlider != null)
             {

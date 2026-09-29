@@ -60,6 +60,15 @@ namespace AdaptiveAR.UI
         [Tooltip("Used only to detect that the marker has been found and the sequence has begun.")]
         [SerializeField] private AdaptiveAR.Steps.StepRunner stepRunner;
 
+        [Tooltip("Locks as soon as the ArUco anchor is found, which is earlier than the " +
+                 "sequence start and covers the whole onboarding.")]
+        [SerializeField] private StepManager stepManager;
+
+        [Tooltip("Metres. Below this the viewer is too close to the marker for the " +
+                 "look direction to be stable, so the last good direction is kept. " +
+                 "Without this the panels swing wildly when leaning over the bench.")]
+        [SerializeField] private float minStableDistance = 0.35f;
+
         [Header("Behaviour")]
         [Tooltip("Snap straight to the target on the first frame instead of gliding in from the origin.")]
         [SerializeField] private bool snapOnFirstFrame = true;
@@ -73,6 +82,8 @@ namespace AdaptiveAR.UI
         /// <summary>True once the panels have been parked for good.</summary>
         public bool IsLocked { get; private set; }
 
+        private Vector3 _stableDirection = Vector3.forward;
+        private bool _hasStableDirection;
         private Vector3 _targetPosition;
         private Quaternion _targetRotation;
         private bool _hasTarget;
@@ -108,7 +119,15 @@ namespace AdaptiveAR.UI
                 return;
             }
 
-            // Park the panels the moment the marker is found, and leave them there.
+            // Park the panels the moment the ArUco anchor is found - before onboarding,
+            // not after it - and leave them there.
+            if (!IsLocked && lockWhenSequenceStarts && stepManager != null && stepManager.AnchorLocked)
+            {
+                Recenter();
+                IsLocked = true;
+                return;
+            }
+
             if (!IsLocked && lockWhenSequenceStarts && stepRunner != null && stepRunner.HasStarted)
             {
                 Recenter();
@@ -163,10 +182,20 @@ namespace AdaptiveAR.UI
             Vector3 away = markerPos - head.position;
             away.y = 0f;
 
-            if (away.sqrMagnitude < 1e-4f)
-                away = Vector3.forward;   // viewer is directly above the marker
+            // Close to the marker the horizontal direction becomes unstable and tiny head
+            // movements swing it through large angles - that is the jitter. Hold the last
+            // good direction instead of recomputing from a degenerate vector.
+            if (away.magnitude < minStableDistance)
+            {
+                if (_hasStableDirection) away = _stableDirection;
+                else away = Vector3.forward;
+            }
             else
+            {
                 away.Normalize();
+                _stableDirection = away;
+                _hasStableDirection = true;
+            }
 
             position = markerPos + Vector3.up * heightAboveMarker + away * depthBeyondMarker;
 

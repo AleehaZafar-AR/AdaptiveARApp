@@ -32,6 +32,10 @@ namespace AdaptiveAR.EditorTools
         private const string ExpectedSceneName = "1 - ArUcoMarkerTracking";
         private const string GeneratedFolder = "Assets/UI/Generated";
         private const string GhostMaterialPath = GeneratedFolder + "/GhostTarget.mat";
+
+        // Objects under Ghosties that are NOT placement targets and must keep their own
+        // materials. The oil pan is the engine base the participant assembles into.
+        private static readonly string[] AlwaysVisibleGhostParts = { "oilPan" };
         private const string ArrowPrefabPath = "Assets/Prefabs/arrow.prefab";
 
         private const string ComponentsPath = "EngineAnchor/Offset/Components";
@@ -60,8 +64,18 @@ namespace AdaptiveAR.EditorTools
             Undo.SetCurrentGroupName("Interaction: Tint Ghosts");
 
             int tinted = 0;
+            int skipped = 0;
+
             foreach (Renderer r in ghosties.GetComponentsInChildren<Renderer>(true))
             {
+                // The oil pan is the permanently visible engine base, not a placement
+                // target. Its original lambert2 materials must be left alone.
+                if (IsUnderAlwaysVisiblePart(r.transform, ghosties.transform))
+                {
+                    skipped++;
+                    continue;
+                }
+
                 Undo.RecordObject(r, "Tint ghost");
 
                 var mats = new Material[r.sharedMaterials.Length == 0 ? 1 : r.sharedMaterials.Length];
@@ -77,16 +91,74 @@ namespace AdaptiveAR.EditorTools
 
             Debug.Log($"[Interaction] Applied the ghost target material to {tinted} renderer(s).\n" +
                       $"  Material: {GhostMaterialPath}\n" +
-                      "  Semi-transparent cyan with emission: a placement target, not a solid part.\n" +
+                      $"  Left alone (own materials kept): {skipped} renderer(s) on " +
+                      string.Join(", ", AlwaysVisibleGhostParts) + ".\n" +
+                      "  Semi-transparent green with emission: a placement target, not a solid part.\n" +
                       "  Alpha is 0.18 - raise it if the silhouette is too faint on the bench, lower\n" +
                       "  it if it reads as a real component. Every ghost shares this one material.");
         }
 
-        /// <summary>Creates the translucent green ghost material if it does not exist yet.</summary>
+        /// <summary>
+        /// The ghost look, applied to a new or an existing material so colour changes
+        /// actually take effect on re-run.
+        /// </summary>
+        private static void ApplyGhostAppearance(Material mat)
+        {
+            // A placement TARGET, not another component: low alpha so the bench reads
+            // through it, plus emission so the silhouette survives bright passthrough.
+            Color ghost = new Color(0.30f, 0.90f, 0.45f, 0.20f);
+            Color glow = new Color(0.30f, 0.90f, 0.45f, 1f) * 0.5f;
+
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", ghost);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", ghost);
+
+            if (mat.HasProperty("_EmissionColor"))
+            {
+                mat.SetColor("_EmissionColor", glow);
+                mat.EnableKeyword("_EMISSION");
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
+            }
+
+            // URP transparent setup. These keywords switch the blend mode.
+            if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+            if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 0f);
+            if (mat.HasProperty("_ZWrite")) mat.SetFloat("_ZWrite", 0f);
+            if (mat.HasProperty("_SrcBlend")) mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            if (mat.HasProperty("_DstBlend")) mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.1f);
+
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.DisableKeyword("_ALPHATEST_ON");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
+
+        /// <summary>True when this renderer belongs to a part that must keep its own material.</summary>
+        private static bool IsUnderAlwaysVisiblePart(Transform t, Transform ghostiesRoot)
+        {
+            while (t != null && t != ghostiesRoot)
+            {
+                foreach (string n in AlwaysVisibleGhostParts)
+                    if (string.Equals(t.name, n, System.StringComparison.OrdinalIgnoreCase))
+                        return true;
+                t = t.parent;
+            }
+            return false;
+        }
+
+        /// <summary>Creates the semi-transparent ghost material if it does not exist yet.</summary>
         private static Material EnsureGhostMaterial()
         {
             Material existing = AssetDatabase.LoadAssetAtPath<Material>(GhostMaterialPath);
-            if (existing != null) return existing;
+            if (existing != null)
+            {
+                // Refresh the colours rather than returning it untouched. Returning early
+                // meant a tweak to the ghost colour silently did nothing once the asset
+                // existed, which is how it stayed cyan after being changed to green.
+                ApplyGhostAppearance(existing);
+                EditorUtility.SetDirty(existing);
+                AssetDatabase.SaveAssets();
+                return existing;
+            }
 
             Directory.CreateDirectory(GeneratedFolder);
 
@@ -102,34 +174,7 @@ namespace AdaptiveAR.EditorTools
             }
 
             var mat = new Material(shader) { name = "GhostTarget" };
-
-            // A placement TARGET, not another component. Low alpha so the physical bench
-            // reads through it, cyan rather than green because green is reserved for
-            // confirmed states, and emission so the silhouette survives bright passthrough.
-            Color ghost = new Color(0.25f, 0.85f, 0.85f, 0.18f);
-            Color glow = new Color(0.25f, 0.85f, 0.85f, 1f) * 0.55f;
-
-            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", ghost);
-            if (mat.HasProperty("_Color")) mat.SetColor("_Color", ghost);
-
-            if (mat.HasProperty("_EmissionColor"))
-            {
-                mat.SetColor("_EmissionColor", glow);
-                mat.EnableKeyword("_EMISSION");
-                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
-            }
-
-            // URP transparent setup. These keywords are what actually switch the blend mode.
-            if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);   // 1 = Transparent
-            if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 0f);       // 0 = Alpha
-            if (mat.HasProperty("_ZWrite")) mat.SetFloat("_ZWrite", 0f);
-            if (mat.HasProperty("_SrcBlend")) mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            if (mat.HasProperty("_DstBlend")) mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.1f);
-
-            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            mat.DisableKeyword("_ALPHATEST_ON");
-            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            ApplyGhostAppearance(mat);
 
             AssetDatabase.CreateAsset(mat, GhostMaterialPath);
             AssetDatabase.SaveAssets();
@@ -342,6 +387,11 @@ namespace AdaptiveAR.EditorTools
             SetRef(so, "validator", validator);
             SetRef(so, "supportLevel", level);
             SetRef(so, "arrowPrefab", prefab);
+
+            // Without these the arrow only exists during a Place action, so it disappeared
+            // on every Locate step - which is most of what the participant sees.
+            SetRef(so, "workflow", FindComponent<WorkflowState>(scene));
+            SetRef(so, "guidanceRegistry", FindComponent<GuidanceRegistry>(scene));
             so.ApplyModifiedProperties();
 
             EditorSceneManager.MarkSceneDirty(scene);

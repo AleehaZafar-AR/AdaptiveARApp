@@ -56,6 +56,9 @@ namespace AdaptiveAR.EditorTools
         // Side panels are angled inwards so the triptych wraps slightly around the viewer.
         private const float SidePanelYaw = 16f;
 
+        // Fourth panel: research detail, at the edge of vision.
+        private static readonly Vector2 ResearchSize = new Vector2(300f, 360f);
+
         // Seated tabletop use: the card belongs just above the work, in natural forward
         // gaze, not overhead. PanelRig holds the real values; these are what the tool
         // writes when it wires the rig.
@@ -131,6 +134,7 @@ namespace AdaptiveAR.EditorTools
             var presenter = FindComponent<StepPresenter>(scene);
 
             int built = 0;
+            built += BuildResearchPanel(scene, panelSprite, borderSprite, session, runner, level, validator, logger);
             built += BuildInstructionPanel(scene, panelSprite, borderSprite, presenter, session, runner);
             built += BuildTaskList(scene, panelSprite, borderSprite, session, runner);
             built += BuildResearcherHud(scene, panelSprite, borderSprite, session, runner, level, validator, logger);
@@ -148,6 +152,85 @@ namespace AdaptiveAR.EditorTools
                 "  ISDK interaction components were left untouched.\n" +
                 "  Layout is an estimate - tune the constants at the top of UiRestyleSetup.cs and re-run.\n" +
                 "  SAVE THE SCENE (Ctrl+S).");
+        }
+
+        // =====================================================================
+        // Fourth panel: research detail
+        //
+        // Its own canvas, off to the side and dim, so instrumentation never competes with
+        // the participant view. It carries no buttons, so it needs no ISDK interaction.
+        // =====================================================================
+
+        private static int BuildResearchPanel(Scene scene, Sprite panelSprite, Sprite borderSprite,
+                                              AssemblySessionController session, StepRunner runner,
+                                              SupportLevelController level, StepValidator validator,
+                                              SessionLogger logger)
+        {
+            GameObject rig = EnsurePanelRig(scene);
+            if (rig == null) return 0;
+
+            Transform existing = rig.transform.Find("ResearchCanvas");
+            GameObject canvas = existing != null ? existing.gameObject : null;
+
+            if (canvas == null)
+            {
+                canvas = new GameObject("ResearchCanvas", typeof(RectTransform), typeof(Canvas));
+                Undo.RegisterCreatedObjectUndo(canvas, "Create research canvas");
+                Undo.SetTransformParent(canvas.transform, rig.transform, "Parent research canvas");
+
+                var c = canvas.GetComponent<Canvas>();
+                c.renderMode = RenderMode.WorldSpace;
+            }
+
+            var rt = canvas.GetComponent<RectTransform>();
+            Undo.RecordObject(rt, "Place research canvas");
+
+            // Far right of the triptych, pushed back and angled in. Deliberately at the
+            // edge of vision: visible if looked for, ignorable otherwise.
+            float x = InstructionSize.x * 0.0005f + PanelGap * 2f + StatusSize.x * 0.001f + ResearchSize.x * 0.0005f;
+            rt.localPosition = new Vector3(x, -0.06f, 0.05f);
+            rt.localRotation = Quaternion.Euler(0f, -28f, 0f);
+            rt.localScale = new Vector3(0.001f, 0.001f, 0.001f);
+            rt.sizeDelta = ResearchSize;
+
+            GameObject panel = EnsurePanel(canvas, "Panel", panelSprite, borderSprite, ResearchSize);
+
+            // Dimmer than the participant panels so it recedes.
+            var panelImg = panel.GetComponent<Image>();
+            if (panelImg != null) panelImg.color = MrTheme.WithAlpha(MrTheme.PanelFill, 0.62f);
+
+            float inner = ResearchSize.x - MrTheme.PanelPadding * 2f;
+            float y = -MrTheme.PanelPadding;
+
+            TextMeshProUGUI heading = EnsureText(panel, "Heading", "RESEARCH",
+                14f, MrTheme.WithAlpha(MrTheme.Warning, 0.8f), FontStyles.Bold | FontStyles.UpperCase);
+            heading.characterSpacing = MrTheme.EyebrowCharacterSpacing;
+            PlaceRow(heading.rectTransform, inner, 20f, ref y);
+            y -= 8f;
+
+            TextMeshProUGUI readout = EnsureText(panel, "Readout", "",
+                14f, MrTheme.WithAlpha(MrTheme.TextSecondary, 0.85f), FontStyles.Normal);
+            readout.textWrappingMode = TextWrappingModes.Normal;
+            readout.lineSpacing = 12f;
+            AutoSize(readout, 9f, 14f);
+            PlaceRow(readout.rectTransform, inner, ResearchSize.y - 70f, ref y);
+
+            var hud = canvas.GetComponent<ResearcherHud>();
+            if (hud == null) hud = Undo.AddComponent<ResearcherHud>(canvas);
+
+            SetRefs(hud,
+                ("session", session), ("stepRunner", runner), ("supportLevel", level),
+                ("validator", validator), ("logger", logger),
+                ("panelRoot", panel), ("readoutText", readout));
+
+            // Mildly visible by default; the toggle still hides it entirely.
+            var hudSo = new SerializedObject(hud);
+            SerializedProperty vis = hudSo.FindProperty("visibleOnStart");
+            if (vis != null) vis.boolValue = true;
+            hudSo.ApplyModifiedProperties();
+
+            SetActiveRecorded(panel, true);
+            return 2;
         }
 
         // =====================================================================
@@ -189,7 +272,8 @@ namespace AdaptiveAR.EditorTools
             var progress = bar.GetComponent<StepProgressBar>();
             if (progress == null) progress = Undo.AddComponent<StepProgressBar>(bar);
             progress.SetSegmentSprite(panelSprite);
-            SetRefs(progress, ("session", session), ("stepRunner", runner));
+            SetRefs(progress, ("session", session), ("stepRunner", runner),
+                    ("workflow", FindComponent<WorkflowState>(scene)));
             y -= 14f;
 
             // --- step label ---
@@ -302,9 +386,11 @@ namespace AdaptiveAR.EditorTools
                 fr.anchoredPosition = new Vector2(MrTheme.PanelPadding, MrTheme.PanelPadding + 52f);
             }
 
+            WorkflowState workflowState = FindComponent<WorkflowState>(scene);
+
             SetRefs(card,
                 ("session", session),
-                ("workflow", FindComponent<WorkflowState>(scene)),
+                ("workflow", workflowState),
                 ("stepRunner", runner),
                 ("supportLevel", FindComponent<SupportLevelController>(scene)),
                 ("validator", FindComponent<StepValidator>(scene)),
@@ -443,10 +529,14 @@ namespace AdaptiveAR.EditorTools
                 EditorUtility.SetDirty(startButton);
             }
 
-            // StepManager adds its own listener to whatever is in beginButton, so pointing it
-            // at the new Start button is all that is needed to keep marker detection working.
-            if (stepManager != null && startButton != null)
-                SetRefs(stepManager, ("beginButton", startButton));
+            // Deliberately NOT assigning StepManager.beginButton. StartSession also calls
+            // beginButton.SetActive(false), which hid the shared onboarding button after the
+            // first press and left screens 2-4 with no way forward. AppFlowController calls
+            // StepManager.StartSessionExternal() instead.
+            if (stepManager != null)
+                SetRefs(stepManager, ("beginButton", null));
+
+            SetRefs(flow, ("stepManager", stepManager));
 
             // Correct starting visibility; AppFlowController re-asserts this at runtime.
             SetActiveRecorded(home, true);
@@ -596,6 +686,7 @@ namespace AdaptiveAR.EditorTools
             SetRefs(statusHud,
                 ("session", session), ("stepRunner", runner),
                 ("supportLevel", level), ("validator", validator),
+                ("workflow", FindComponent<WorkflowState>(scene)),
                 ("supportLevelText", supportValue),
                 ("progressValueText", progressValue),
                 ("timeValueText", timeValue),
@@ -834,6 +925,10 @@ namespace AdaptiveAR.EditorTools
             var runnerForLock = FindComponent<StepRunner>(scene);
             if (runnerForLock != null)
                 SetRefs(comp, ("stepRunner", runnerForLock));
+
+            var managerForLock = FindComponent<StepManager>(scene);
+            if (managerForLock != null)
+                SetRefs(comp, ("stepManager", managerForLock));
 
             else
                 Debug.LogWarning("[UiRestyle] MarkerAnchor not found. Run the Alignment tool first, " +

@@ -32,12 +32,30 @@ public class StepManager : MonoBehaviour
     private bool anchorLocked = false;
     private bool partsSpawned = false;
 
+    /// <summary>True once the ArUco anchor has been found and frozen.</summary>
+    public bool AnchorLocked { get { return anchorLocked; } }
+
+    /// <summary>
+    /// Starts marker detection from outside. The onboarding flow calls this instead of
+    /// wiring the button straight to StartSession: that wiring also ran
+    /// beginButton.SetActive(false), which hid the shared onboarding button after the
+    /// first press and left the later screens with no way forward.
+    /// </summary>
+    public void StartSessionExternal()
+    {
+        StartSession();
+    }
+
     void Start()
     {
-        beginButton.onClick.AddListener(StartSession);
+        if (beginButton != null)
+            beginButton.onClick.AddListener(StartSession);
 
-        captionText.text = "Welcome.\n\nPress BEGIN to start.";
-        beginButton.gameObject.SetActive(true);
+        if (captionText != null)
+            captionText.text = "";
+
+        if (beginButton != null)
+            beginButton.gameObject.SetActive(true);
 
         // ❌ hide block initially
         oilPan.SetActive(false);
@@ -51,9 +69,14 @@ public class StepManager : MonoBehaviour
         if (sessionStarted) return;
 
         sessionStarted = true;
-        beginButton.gameObject.SetActive(false);
 
-        captionText.text = "Look at the marker to place the engine block.";
+        // Only hide a button this component owns. The onboarding button is shared across
+        // four screens and must survive.
+        if (beginButton != null)
+            beginButton.gameObject.SetActive(false);
+
+        if (captionText != null)
+            captionText.text = "Look at the marker to anchor the engine.";
     }
 
     void Update()
@@ -110,7 +133,8 @@ public class StepManager : MonoBehaviour
         if (arucoCoordinator != null)
             arucoCoordinator.enabled = false;
 
-        captionText.text = "Block placed.";
+        if (captionText != null)
+            captionText.text = "Engine anchored.";
     }
 
     // ---------------- SPAWN PARTS ----------------

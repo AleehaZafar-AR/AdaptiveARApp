@@ -26,6 +26,13 @@ namespace AdaptiveAR.UI
         [SerializeField] private StepValidator validator;
         [SerializeField] private SupportLevelController supportLevel;
 
+        [Tooltip("Supplies the active action. Without this the arrow only appears during a " +
+                 "Place action, so it vanished on every Locate step.")]
+        [SerializeField] private WorkflowState workflow;
+
+        [Tooltip("Resolves the action part and target keys to scene objects.")]
+        [SerializeField] private GuidanceRegistry guidanceRegistry;
+
         [Header("Arrow")]
         [Tooltip("Prefab instanced once and reused. Assets/Prefabs/arrow.prefab.")]
         [SerializeField] private GameObject arrowPrefab;
@@ -66,12 +73,6 @@ namespace AdaptiveAR.UI
 
         private void Update()
         {
-            if (validator == null || !validator.IsActive)
-            {
-                SetVisible(false);
-                return;
-            }
-
             if (supportLevel != null && (int)supportLevel.CurrentLevel < (int)minimumLevel)
             {
                 SetVisible(false);
@@ -79,8 +80,8 @@ namespace AdaptiveAR.UI
             }
 
             // Held already? Point at the destination. Otherwise point at the part.
-            bool handled = validator.HasBeenHandled;
-            Transform focus = handled ? validator.CurrentTarget : validator.CurrentPart;
+            bool handled = validator != null && validator.IsActive && validator.HasBeenHandled;
+            Transform focus = ResolveFocus(handled);
 
             if (focus == null)
             {
@@ -113,6 +114,37 @@ namespace AdaptiveAR.UI
 
             if (tintArrow)
                 Tint(handled ? MrTheme.Success : MrTheme.Accent);
+        }
+
+        /// <summary>
+        /// Finds what the arrow should indicate right now.
+        ///
+        /// The validator is only armed during a Place action, so relying on it alone left
+        /// the arrow missing during Locate. The workflow action is the authoritative source:
+        /// it names the part on every action, and the target on the ones that have one.
+        /// </summary>
+        private Transform ResolveFocus(bool handled)
+        {
+            // Placement in progress: the validator knows which interchangeable part is
+            // actually in the hand, which the action alone cannot.
+            if (validator != null && validator.IsActive)
+            {
+                Transform fromValidator = handled ? validator.CurrentTarget : validator.CurrentPart;
+                if (fromValidator != null) return fromValidator;
+            }
+
+            if (workflow == null || guidanceRegistry == null) return null;
+
+            AssemblyAction action = workflow.CurrentAction;
+            if (action == null || !action.enabled || !action.showArrow) return null;
+
+            string key = handled && !string.IsNullOrEmpty(action.targetKey)
+                ? action.targetKey
+                : action.partKey;
+
+            if (string.IsNullOrEmpty(key)) return null;
+
+            return guidanceRegistry.TryResolveQuiet(key, out GameObject go) ? go.transform : null;
         }
 
         private void EnsureArrow()

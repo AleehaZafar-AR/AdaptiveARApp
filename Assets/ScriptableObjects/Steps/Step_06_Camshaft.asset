@@ -28,6 +28,71 @@ MonoBehaviour:
   positionToleranceMeters: 0.04
   rotationToleranceDegrees: 25
   snapOnSuccess: 1
+  actions:
+  - actionId: step_06_camshaft.locate
+    kind: 0
+    instruction: Find the camshaft in the parts tray.
+    detail: Take the camshaft from the tray.
+    partKey: part.camshaft
+    interchangeablePartKeys: []
+    targetKey: 
+    positionToleranceMeters: 0.04
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.45
+    ghostKeys: []
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_06_camshaft.place
+    kind: 1
+    instruction: Fit the camshaft.
+    detail: Fit the camshaft into its bearings above the crankshaft.
+    partKey: part.camshaft
+    interchangeablePartKeys: []
+    targetKey: ghost.camshaft
+    positionToleranceMeters: 0.04
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.45
+    ghostKeys:
+    - ghost.camshaft
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_06_camshaft.fasten
+    kind: 2
+    instruction: Fit the retaining cap and bolts.
+    detail: 
+    partKey: 
+    interchangeablePartKeys: []
+    targetKey: 
+    positionToleranceMeters: 0.04
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.45
+    ghostKeys: []
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 0
+    disabledReason: No separately movable fastener exists. crankHolderBolt002-016
+      and crankHolder001-004 are baked sub-meshes of the oilPan ghost; pistonBolt/PistonNut
+      are child meshes of each piston.
+  - actionId: step_06_camshaft.tighten
+    kind: 3
+    instruction: Tighten the fasteners with the tool.
+    detail: 
+    partKey: 
+    interchangeablePartKeys: []
+    targetKey: 
+    positionToleranceMeters: 0.04
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.45
+    ghostKeys: []
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 0
+    disabledReason: No tool model exists in the repository. Architecture is in place;
+      assign a tool prefab and a detection rule once supplied.
   expectedDurationSeconds: 120
   defaultSupportLevel: 2
   l1Minimal:
