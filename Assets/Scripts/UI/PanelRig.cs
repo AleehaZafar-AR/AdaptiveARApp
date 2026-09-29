@@ -51,6 +51,15 @@ namespace AdaptiveAR.UI
         [Tooltip("Keep the panels upright. Off lets them tilt with the head, which reads badly.")]
         [SerializeField] private bool keepUpright = true;
 
+        [Header("Locking")]
+        [Tooltip("Freeze the panels permanently once the marker has been found. The marker is " +
+                 "taped to the bench and does not move, so a fixed panel position is calmer to " +
+                 "read than one that keeps re-settling.")]
+        [SerializeField] private bool lockWhenSequenceStarts = true;
+
+        [Tooltip("Used only to detect that the marker has been found and the sequence has begun.")]
+        [SerializeField] private AdaptiveAR.Steps.StepRunner stepRunner;
+
         [Header("Behaviour")]
         [Tooltip("Snap straight to the target on the first frame instead of gliding in from the origin.")]
         [SerializeField] private bool snapOnFirstFrame = true;
@@ -60,6 +69,9 @@ namespace AdaptiveAR.UI
         [SerializeField] private OVRInput.RawButton recenterButton = OVRInput.RawButton.LThumbstick;
 
         [SerializeField] private KeyCode recenterKey = KeyCode.R;
+
+        /// <summary>True once the panels have been parked for good.</summary>
+        public bool IsLocked { get; private set; }
 
         private Vector3 _targetPosition;
         private Quaternion _targetRotation;
@@ -88,7 +100,23 @@ namespace AdaptiveAR.UI
             }
 
             if (OVRInput.GetDown(recenterButton) || Input.GetKeyDown(recenterKey))
+            {
+                IsLocked = false;      // an explicit recentre always wins
                 Recenter();
+                if (lockWhenSequenceStarts && stepRunner != null && stepRunner.HasStarted)
+                    IsLocked = true;
+                return;
+            }
+
+            // Park the panels the moment the marker is found, and leave them there.
+            if (!IsLocked && lockWhenSequenceStarts && stepRunner != null && stepRunner.HasStarted)
+            {
+                Recenter();
+                IsLocked = true;
+                return;
+            }
+
+            if (IsLocked) return;
 
             if (!ComputeTarget(out Vector3 wantPos, out Quaternion wantRot))
                 return;

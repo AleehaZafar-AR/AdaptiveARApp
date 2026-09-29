@@ -56,6 +56,25 @@ public class StepData : ScriptableObject
     [Tooltip("GuidanceRegistry key for the pose it must reach, e.g. \"ghost.crankshaft\".")]
     public string validationTargetKey;
 
+    [Tooltip("Other parts that are equally acceptable for this step. The four pistons are " +
+             "interchangeable, so picking up any unplaced one should count as correct rather " +
+             "than being marked an error. Leave empty for a unique part.")]
+    public string[] interchangeablePartKeys;
+
+    /// <summary>Every part key this step will accept, primary first.</summary>
+    public System.Collections.Generic.List<string> AllAcceptedPartKeys()
+    {
+        var keys = new System.Collections.Generic.List<string>();
+        if (!string.IsNullOrEmpty(validationPartKey)) keys.Add(validationPartKey);
+
+        if (interchangeablePartKeys != null)
+        {
+            foreach (string k in interchangeablePartKeys)
+                if (!string.IsNullOrEmpty(k) && !keys.Contains(k)) keys.Add(k);
+        }
+        return keys;
+    }
+
     [Tooltip("How close the part must get, in metres.")]
     public float positionToleranceMeters = 0.04f;
 

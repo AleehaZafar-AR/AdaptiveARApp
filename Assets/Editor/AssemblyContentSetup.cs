@@ -404,6 +404,13 @@ namespace AdaptiveAR.EditorTools
             step.requiresValidation = true;
             step.validationPartKey = PartKeyPrefix + spec.partObject;
             step.validationTargetKey = spec.ghostKey;
+
+            // The four pistons are identical, so any unplaced one is an acceptable pick.
+            // Insisting on a specific one would record errors that are not errors.
+            step.interchangeablePartKeys = spec.partObject.StartsWith("piston")
+                ? new[] { PartKeyPrefix + "piston001", PartKeyPrefix + "piston002",
+                          PartKeyPrefix + "piston003", PartKeyPrefix + "piston004" }
+                : new string[0];
             step.positionToleranceMeters = 0.04f;
             step.rotationToleranceDegrees = 25f;
             step.snapOnSuccess = true;

@@ -5,23 +5,25 @@
 // frame, a position threshold of 10.0 that was always true, Euler-angle distance
 // that wraps at 0/360, and a UnityEditor import that breaks Android builds).
 //
-// Both the part and the target pose are resolved through GuidanceRegistry, because
-// StepData is a ScriptableObject and cannot hold scene references.
+// Interchangeable parts
+// ---------------------
+// A step can accept several parts. The four pistons are identical, so picking up
+// any unplaced one is correct - insisting on "piston 2" when the operator reached
+// for an identical piston would record an error that is not one. Whichever
+// accepted part the operator actually moves becomes the one being judged, and a
+// part that has been placed is not offered again on a later step.
 //
 // What counts as an attempt
 // -------------------------
-// The Interaction SDK drives a held part kinematically, so for a part WITH a
-// Rigidbody a release shows up as isKinematic going true -> false. That transition,
-// after a short settle, is one attempt.
+// For a part WITH a Rigidbody the Interaction SDK holds it kinematically, so a
+// release shows up as isKinematic going true -> false, judged after a short settle.
 //
-// Several parts have no Rigidbody at all: the pistons are Grabbable transforms whose
-// meshes sit on eight child objects. For those there is no kinematic flag to watch,
-// so handling is detected from movement away from the start pose and speed is
-// estimated from the transform. A part that comes to rest inside tolerance is then
-// accepted, which is what makes the piston steps completable.
+// Several parts have no Rigidbody at all: the pistons are Grabbable transforms
+// whose meshes sit on child objects. For those there is no kinematic flag, so
+// handling is detected from movement and speed is estimated from the transform.
 
 using System;
-using AdaptiveAR.Logging;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace AdaptiveAR.Steps
@@ -38,22 +40,19 @@ namespace AdaptiveAR.Steps
         [Tooltip("Speed below which a part counts as at rest, in metres per second.")]
         [SerializeField] private float restSpeed = 0.03f;
 
-        [Tooltip("Seconds a part must sit in tolerance, untouched, to be accepted without a release.")]
+        [Tooltip("Seconds a part must sit in tolerance, untouched, to be accepted.")]
         [SerializeField] private float restAcceptSeconds = 0.8f;
 
         [Header("Behaviour")]
         [Tooltip("Accept a placement when the part comes to rest in tolerance, even with no release event.")]
         [SerializeField] private bool acceptOnRest = true;
 
-        [Tooltip("Require the part to have been picked up at least once before a resting " +
-                 "placement counts. Stops a step auto-completing because the part happened " +
-                 "to spawn close to its target.")]
+        [Tooltip("Require the part to have been picked up before a resting placement counts. " +
+                 "Stops a step auto-completing because a part spawned close to its target.")]
         [SerializeField] private bool requireHandledBeforeRest = true;
 
-        [Tooltip("Metres a part must move from where it started for it to count as handled. " +
-                 "Needed because several parts (the pistons) have no Rigidbody at all - they " +
-                 "are Grabbable transforms with their meshes on child objects - so a grab " +
-                 "cannot be detected from a kinematic flag.")]
+        [Tooltip("Metres a part must move from where it started to count as handled. Needed " +
+                 "because parts without a Rigidbody have no kinematic flag to watch.")]
         [SerializeField] private float handledMoveThreshold = 0.05f;
 
         [Header("Debug")]
@@ -70,33 +69,56 @@ namespace AdaptiveAR.Steps
         public string PartKey { get; private set; }
         public string TargetKey { get; private set; }
 
-        private Transform _part;
-        private Transform _target;
-        private Rigidbody _partBody;
-        private StepData _step;
+        /// <summary>The part currently being judged. Null when nothing is armed.</summary>
+        public Transform CurrentPart { get; private set; }
 
-        private bool _wasKinematic;
-        private bool _hasBeenHandled;
-        private Vector3 _startPosition;
-        private Vector3 _prevPosition;
+        /// <summary>The pose the part must reach.</summary>
+        public Transform CurrentTarget { get; private set; }
+
+        /// <summary>True once the operator has actually picked the part up.</summary>
+        public bool HasBeenHandled { get; private set; }
+
+        private class Candidate
+        {
+            public string key;
+            public Transform tf;
+            public Rigidbody body;
+            public Vector3 startPos;
+            public Vector3 prevPos;
+            public bool wasKinematic;
+            public bool moved;
+        }
+
+        private readonly List<Candidate> _candidates = new List<Candidate>();
+
+        // Parts already assembled. Survives across steps so an identical part is not
+        // offered twice; cleared when the session restarts.
+        private readonly HashSet<string> _consumed = new HashSet<string>();
+
+        private Candidate _active;
+        private StepData _step;
         private bool _awaitingSettle;
         private float _settleTimer;
         private float _inToleranceTimer;
         private bool _completed;
 
         // =====================================================================
-        // Lifecycle
-        // =====================================================================
+
+        /// <summary>Forgets which parts have been assembled. Call when a session restarts.</summary>
+        public void ResetConsumedParts()
+        {
+            _consumed.Clear();
+        }
 
         /// <summary>
         /// Arms validation for a step. Returns false when the step does not use validation
-        /// or its keys cannot be resolved - the caller should then rely on manual advance.
+        /// or nothing could be resolved - the caller then relies on manual advance.
         /// </summary>
         public bool BeginStep(StepData step)
         {
             Clear();
-
             _step = step;
+
             if (step == null || !step.requiresValidation)
                 return false;
 
@@ -109,52 +131,64 @@ namespace AdaptiveAR.Steps
                 return false;
             }
 
-            if (string.IsNullOrEmpty(PartKey) || string.IsNullOrEmpty(TargetKey))
-            {
-                Debug.LogWarning($"[StepValidator] Step '{step.StepIdentifier}' requires validation but its " +
-                                 "part/target keys are not set; advance manually.", this);
-                return false;
-            }
-
-            if (!guidanceRegistry.TryResolve(PartKey, out GameObject partGo) ||
+            if (string.IsNullOrEmpty(TargetKey) ||
                 !guidanceRegistry.TryResolve(TargetKey, out GameObject targetGo))
             {
-                Debug.LogWarning($"[StepValidator] Step '{step.StepIdentifier}': could not resolve " +
-                                 $"'{PartKey}' and/or '{TargetKey}'; advance manually.", this);
+                Debug.LogWarning($"[StepValidator] Step '{step.StepIdentifier}': target '{TargetKey}' " +
+                                 "could not be resolved; advance manually.", this);
                 return false;
             }
 
-            _part = partGo.transform;
-            _target = targetGo.transform;
-            _partBody = partGo.GetComponent<Rigidbody>();
-            _wasKinematic = _partBody != null && _partBody.isKinematic;
-            _hasBeenHandled = false;
-            _startPosition = _part.position;
-            _prevPosition = _part.position;
+            CurrentTarget = targetGo.transform;
 
+            foreach (string key in step.AllAcceptedPartKeys())
+            {
+                if (_consumed.Contains(key)) continue;                     // already assembled
+                if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go)) continue;
+
+                _candidates.Add(new Candidate
+                {
+                    key = key,
+                    tf = go.transform,
+                    body = go.GetComponent<Rigidbody>(),
+                    startPos = go.transform.position,
+                    prevPos = go.transform.position,
+                    wasKinematic = go.GetComponent<Rigidbody>() != null && go.GetComponent<Rigidbody>().isKinematic
+                });
+            }
+
+            if (_candidates.Count == 0)
+            {
+                Debug.LogWarning($"[StepValidator] Step '{step.StepIdentifier}': no accepted part could be " +
+                                 "resolved; advance manually.", this);
+                return false;
+            }
+
+            _active = _candidates[0];
+            CurrentPart = _active.tf;
             IsActive = true;
             _completed = false;
 
             if (logEvaluations)
-                Debug.Log($"[StepValidator] Watching '{PartKey}' against '{TargetKey}' " +
-                          $"(tolerance {step.positionToleranceMeters * 100f:F1} cm / " +
+                Debug.Log($"[StepValidator] Watching {_candidates.Count} accepted part(s) against " +
+                          $"'{TargetKey}' (tolerance {step.positionToleranceMeters * 100f:F1} cm / " +
                           $"{step.rotationToleranceDegrees:F0} deg).");
 
             return true;
         }
 
-        /// <summary>Disarms validation and clears all per-step state.</summary>
         public void Clear()
         {
             IsActive = false;
             _completed = false;
-            _part = null;
-            _target = null;
-            _partBody = null;
+            _candidates.Clear();
+            _active = null;
             _step = null;
+            CurrentPart = null;
+            CurrentTarget = null;
+            HasBeenHandled = false;
             AttemptCount = 0;
             _awaitingSettle = false;
-            _hasBeenHandled = false;
             _settleTimer = 0f;
             _inToleranceTimer = 0f;
             PartKey = null;
@@ -163,43 +197,53 @@ namespace AdaptiveAR.Steps
 
         private void Update()
         {
-            if (!IsActive || _completed || _part == null || _target == null)
-                return;
+            if (!IsActive || _completed || CurrentTarget == null) return;
 
-            // Speed estimated from the transform, because a part may have no Rigidbody.
             float dt = Mathf.Max(Time.deltaTime, 1e-5f);
-            float speed = _partBody != null
-                ? _partBody.linearVelocity.magnitude
-                : Vector3.Distance(_part.position, _prevPosition) / dt;
-            _prevPosition = _part.position;
+            bool anyHeld = false;
+            bool releasedThisFrame = false;
 
-            // Moving away from where it started counts as handled, whether or not the part
-            // has a Rigidbody for the kinematic flag to live on.
-            if (Vector3.Distance(_part.position, _startPosition) > handledMoveThreshold)
-                _hasBeenHandled = true;
+            foreach (Candidate c in _candidates)
+            {
+                if (c.tf == null) continue;
 
-            bool held = _partBody != null && _partBody.isKinematic;
+                bool held = c.body != null && c.body.isKinematic;
+                if (c.body != null && c.wasKinematic && !held) releasedThisFrame = true;
+                c.wasKinematic = held;
+                if (held) anyHeld = true;
 
-            // --- release detected: kinematic (held) -> non-kinematic (let go) ---
-            if (_partBody != null && _wasKinematic && !held)
+                if (Vector3.Distance(c.tf.position, c.startPos) > handledMoveThreshold)
+                    c.moved = true;
+
+                c.prevPos = c.tf.position;
+            }
+
+            // Whichever accepted part the operator is actually working with is the one judged.
+            Candidate chosen = PickActive();
+            if (chosen != null && chosen != _active)
+            {
+                _active = chosen;
+                CurrentPart = chosen.tf;
+                _inToleranceTimer = 0f;
+            }
+
+            HasBeenHandled = _active != null && _active.moved;
+
+            if (releasedThisFrame)
             {
                 _awaitingSettle = true;
                 _settleTimer = 0f;
             }
-            _wasKinematic = held;
 
-            if (held)
+            if (anyHeld)
             {
-                // Being handled: no judgement, and the rest timer restarts.
-                _hasBeenHandled = true;
                 _inToleranceTimer = 0f;
                 return;
             }
 
-            // --- judge after a release, once the part has settled ---
             if (_awaitingSettle)
             {
-                _settleTimer += Time.deltaTime;
+                _settleTimer += dt;
                 if (_settleTimer >= settleSeconds)
                 {
                     _awaitingSettle = false;
@@ -208,17 +252,17 @@ namespace AdaptiveAR.Steps
                 return;
             }
 
-            // --- accept a part that simply comes to rest in tolerance ---
-            if (!acceptOnRest)
-                return;
+            if (!acceptOnRest) return;
+            if (requireHandledBeforeRest && !HasBeenHandled) return;
+            if (_active == null || _active.tf == null) return;
 
-            if (requireHandledBeforeRest && !_hasBeenHandled)
-                return;
+            float speed = _active.body != null
+                ? _active.body.linearVelocity.magnitude
+                : Vector3.Distance(_active.tf.position, _active.prevPos) / dt;
 
-            bool slow = speed <= restSpeed;
-            if (slow && WithinTolerance(out _, out _))
+            if (speed <= restSpeed && WithinTolerance(_active, out _, out _))
             {
-                _inToleranceTimer += Time.deltaTime;
+                _inToleranceTimer += dt;
                 if (_inToleranceTimer >= restAcceptSeconds)
                     Evaluate("rest");
             }
@@ -228,17 +272,38 @@ namespace AdaptiveAR.Steps
             }
         }
 
-        // =====================================================================
-        // Evaluation
-        // =====================================================================
-
-        private bool WithinTolerance(out float positionError, out float rotationError)
+        /// <summary>
+        /// Prefers a part the operator has moved; otherwise the one nearest the target.
+        /// </summary>
+        private Candidate PickActive()
         {
-            positionError = Vector3.Distance(_part.position, _target.position);
+            Candidate best = null;
+            float bestScore = float.MaxValue;
 
-            // Quaternion.Angle is the true shortest angular distance, so it does not
-            // break near 0/360 the way an Euler comparison does.
-            rotationError = Quaternion.Angle(_part.rotation, _target.rotation);
+            foreach (Candidate c in _candidates)
+            {
+                if (c.tf == null) continue;
+
+                float d = Vector3.Distance(c.tf.position, CurrentTarget.position);
+                float score = c.moved ? d : d + 1000f;   // moved parts always win
+
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = c;
+                }
+            }
+
+            return best;
+        }
+
+        private bool WithinTolerance(Candidate c, out float positionError, out float rotationError)
+        {
+            positionError = Vector3.Distance(c.tf.position, CurrentTarget.position);
+
+            // Quaternion.Angle is the true shortest angular distance, so it does not break
+            // near 0/360 the way an Euler comparison does.
+            rotationError = Quaternion.Angle(c.tf.rotation, CurrentTarget.rotation);
 
             return positionError <= _step.positionToleranceMeters
                 && rotationError <= _step.rotationToleranceDegrees;
@@ -246,15 +311,14 @@ namespace AdaptiveAR.Steps
 
         private void Evaluate(string trigger)
         {
-            if (_completed) return;
+            if (_completed || _active == null || _active.tf == null) return;
 
-            bool ok = WithinTolerance(out float posErr, out float rotErr);
+            bool ok = WithinTolerance(_active, out float posErr, out float rotErr);
             AttemptCount++;
 
             if (logEvaluations)
-                Debug.Log($"[StepValidator] Attempt {AttemptCount} ({trigger}): " +
-                          $"{(ok ? "ACCEPTED" : "rejected")}  " +
-                          $"off by {posErr * 100f:F1} cm / {rotErr:F0} deg");
+                Debug.Log($"[StepValidator] Attempt {AttemptCount} ({trigger}) on '{_active.key}': " +
+                          $"{(ok ? "ACCEPTED" : "rejected")}  off by {posErr * 100f:F1} cm / {rotErr:F0} deg");
 
             OnAttemptEvaluated?.Invoke(ok, posErr, rotErr, trigger);
 
@@ -266,23 +330,24 @@ namespace AdaptiveAR.Steps
 
             _completed = true;
             IsActive = false;
+            _consumed.Add(_active.key);
 
             if (_step.snapOnSuccess)
-                SnapPartToTarget();
+                SnapToTarget(_active);
 
             OnStepValidated?.Invoke();
         }
 
-        private void SnapPartToTarget()
+        private void SnapToTarget(Candidate c)
         {
-            if (_partBody != null)
+            if (c.body != null)
             {
-                _partBody.linearVelocity = Vector3.zero;
-                _partBody.angularVelocity = Vector3.zero;
-                _partBody.isKinematic = true; // stays put once assembled
+                c.body.linearVelocity = Vector3.zero;
+                c.body.angularVelocity = Vector3.zero;
+                c.body.isKinematic = true;   // stays put once assembled
             }
 
-            _part.SetPositionAndRotation(_target.position, _target.rotation);
+            c.tf.SetPositionAndRotation(CurrentTarget.position, CurrentTarget.rotation);
         }
 
         /// <summary>Current placement error, for a live on-device readout. Zero when inactive.</summary>
@@ -291,10 +356,10 @@ namespace AdaptiveAR.Steps
             positionError = 0f;
             rotationError = 0f;
 
-            if (!IsActive || _part == null || _target == null) return;
+            if (!IsActive || _active == null || _active.tf == null || CurrentTarget == null) return;
 
-            positionError = Vector3.Distance(_part.position, _target.position);
-            rotationError = Quaternion.Angle(_part.rotation, _target.rotation);
+            positionError = Vector3.Distance(_active.tf.position, CurrentTarget.position);
+            rotationError = Quaternion.Angle(_active.tf.rotation, CurrentTarget.rotation);
         }
     }
 }

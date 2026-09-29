@@ -212,6 +212,19 @@ namespace AdaptiveAR.EditorTools
             AutoSize(body, 15f, MrTheme.SizeBody);
             PlaceRow(body.rectTransform, inner, 190f, ref y);
 
+            // --- anchoring status line: "Look at the marker" / "Block placed." ---
+            // StepManager writes here instead of into the step title, so that text cannot
+            // linger over the instructions once the sequence begins.
+            TextMeshProUGUI statusLine = EnsureText(panel, "StatusLine", "",
+                MrTheme.SizeBody, MrTheme.Accent, FontStyles.Italic);
+            statusLine.textWrappingMode = TextWrappingModes.Normal;
+            AutoSize(statusLine, 14f, MrTheme.SizeBody);
+            PlaceRow(statusLine.rectTransform, inner, 56f, ref y);
+
+            StepManager stepManagerForStatus = FindComponent<StepManager>(scene);
+            if (stepManagerForStatus != null)
+                SetRefs(stepManagerForStatus, ("captionText", statusLine));
+
             // --- alignment chip, bottom left ---
             GameObject chip = EnsureChip(panel, "AlignmentChip", panelSprite);
             var chipRect = Rect(chip);
@@ -257,7 +270,8 @@ namespace AdaptiveAR.EditorTools
                     ("titleText", title),
                     ("bodyText", body),
                     ("stepLabelText", stepLabel),
-                    ("stepRunnerForLabel", runner));
+                    ("stepRunnerForLabel", runner),
+                    ("statusLineText", statusLine));
             }
 
             if (session != null)
@@ -759,6 +773,11 @@ namespace AdaptiveAR.EditorTools
 
             if (markerAnchor != null)
                 SetRefs(comp, ("markerAnchor", markerAnchor.transform));
+
+            // Lets the rig park itself the moment the marker is found.
+            var runnerForLock = FindComponent<StepRunner>(scene);
+            if (runnerForLock != null)
+                SetRefs(comp, ("stepRunner", runnerForLock));
             else
                 Debug.LogWarning("[UiRestyle] MarkerAnchor not found. Run the Alignment tool first, " +
                                  "otherwise the panels have nothing to anchor to.");

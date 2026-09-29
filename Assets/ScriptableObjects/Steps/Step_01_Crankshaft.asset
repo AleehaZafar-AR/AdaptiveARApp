@@ -10,28 +10,27 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c242a23446a15c942b2aea907c01160a, type: 3}
-  m_Name: Step_Crankshaft_Phase1
+  m_Name: Step_01_Crankshaft
   m_EditorClassIdentifier: 
-  stepTitle: Pick up the crankshaft.
+  stepTitle: Fit the crankshaft.
   stepDescription: 
-  ghostPrefab: {fileID: 2276785170046358372, guid: 8262644a8b2683b4a892731a65a0c2f6,
-    type: 3}
+  ghostPrefab: {fileID: 0}
   instructionAudio: {fileID: 0}
   arrowPrefab: {fileID: 0}
   stepId: step_01_crankshaft
-  displayName: 
-  defaultGhostSpawnOffset: {x: -0.25, y: 0.1, z: 0}
+  displayName: Crankshaft
+  defaultGhostSpawnOffset: {x: 0, y: 0, z: 0}
   taskComplexity: 0
   requiresValidation: 1
-  validationPartKey: 
-  validationTargetKey: 
+  validationPartKey: part.crankshaft
+  validationTargetKey: ghost.crankshaft
   positionToleranceMeters: 0.04
   rotationToleranceDegrees: 25
   snapOnSuccess: 1
-  expectedDurationSeconds: 0
-  defaultSupportLevel: 1
+  expectedDurationSeconds: 120
+  defaultSupportLevel: 2
   l1Minimal:
-    instructionText: 
+    instructionText: Fit the crankshaft.
     instructionDetail: 
     ghostKeys: []
     ghostPrefabs: []
@@ -44,9 +43,10 @@ MonoBehaviour:
     demonstrationAnimation: {fileID: 0}
     animatorTrigger: 
   l2Guided:
-    instructionText: 
-    instructionDetail: 
-    ghostKeys: []
+    instructionText: Fit the crankshaft.
+    instructionDetail: Fit the crankshaft into the main bearing saddles in the block.
+    ghostKeys:
+    - ghost.crankshaft
     ghostPrefabs: []
     ghostSpawnOffset: {x: 0, y: 0, z: 0}
     arrowKeys: []
@@ -57,15 +57,24 @@ MonoBehaviour:
     demonstrationAnimation: {fileID: 0}
     animatorTrigger: 
   l3Assisted:
-    instructionText: 
-    instructionDetail: 
-    ghostKeys: []
+    instructionText: Fit the crankshaft.
+    instructionDetail: 'Fit the crankshaft into the main bearing saddles in the block.
+
+      1. 
+      Take the crankshaft from the tray.
+
+      2.  Line its journals up with the
+      bearing saddles.
+
+      3.  Lower it straight down until it sits flat.'
+    ghostKeys:
+    - ghost.crankshaft
     ghostPrefabs: []
     ghostSpawnOffset: {x: 0, y: 0, z: 0}
     arrowKeys: []
     arrowPrefabs: []
     arrowSpawnOffset: {x: 0, y: 0, z: 0}
-    instructionAudio: {fileID: 0}
+    instructionAudio: {fileID: 8300000, guid: 9964df80bcd28a8499ef55cabfd74038, type: 3}
     instructionVideo: {fileID: 0}
     demonstrationAnimation: {fileID: 0}
     animatorTrigger: 

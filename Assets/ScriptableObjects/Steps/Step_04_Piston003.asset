@@ -10,28 +10,27 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c242a23446a15c942b2aea907c01160a, type: 3}
-  m_Name: Step_Crankshaft_Phase1
+  m_Name: Step_04_Piston003
   m_EditorClassIdentifier: 
-  stepTitle: Pick up the crankshaft.
+  stepTitle: Fit piston 3.
   stepDescription: 
-  ghostPrefab: {fileID: 2276785170046358372, guid: 8262644a8b2683b4a892731a65a0c2f6,
-    type: 3}
+  ghostPrefab: {fileID: 0}
   instructionAudio: {fileID: 0}
   arrowPrefab: {fileID: 0}
-  stepId: step_01_crankshaft
-  displayName: 
-  defaultGhostSpawnOffset: {x: -0.25, y: 0.1, z: 0}
+  stepId: step_04_piston003
+  displayName: Piston 3
+  defaultGhostSpawnOffset: {x: 0, y: 0, z: 0}
   taskComplexity: 0
   requiresValidation: 1
-  validationPartKey: 
-  validationTargetKey: 
+  validationPartKey: part.piston003
+  validationTargetKey: ghost.piston003
   positionToleranceMeters: 0.04
   rotationToleranceDegrees: 25
   snapOnSuccess: 1
-  expectedDurationSeconds: 0
-  defaultSupportLevel: 1
+  expectedDurationSeconds: 90
+  defaultSupportLevel: 2
   l1Minimal:
-    instructionText: 
+    instructionText: Fit piston 3.
     instructionDetail: 
     ghostKeys: []
     ghostPrefabs: []
@@ -44,9 +43,10 @@ MonoBehaviour:
     demonstrationAnimation: {fileID: 0}
     animatorTrigger: 
   l2Guided:
-    instructionText: 
-    instructionDetail: 
-    ghostKeys: []
+    instructionText: Fit piston 3.
+    instructionDetail: Fit piston 3 into the third cylinder bore.
+    ghostKeys:
+    - ghost.piston003
     ghostPrefabs: []
     ghostSpawnOffset: {x: 0, y: 0, z: 0}
     arrowKeys: []
@@ -57,9 +57,19 @@ MonoBehaviour:
     demonstrationAnimation: {fileID: 0}
     animatorTrigger: 
   l3Assisted:
-    instructionText: 
-    instructionDetail: 
-    ghostKeys: []
+    instructionText: Fit piston 3.
+    instructionDetail: 'Fit piston 3 into the third cylinder bore.
+
+      1.  Take
+      piston 3 from the tray.
+
+      2.  Point the connecting rod down towards the
+      crankshaft.
+
+      3.  Slide the piston into the bore and seat the rod on its
+      journal.'
+    ghostKeys:
+    - ghost.piston003
     ghostPrefabs: []
     ghostSpawnOffset: {x: 0, y: 0, z: 0}
     arrowKeys: []

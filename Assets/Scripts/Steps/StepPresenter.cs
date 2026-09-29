@@ -43,6 +43,11 @@ namespace AdaptiveAR.Steps
         [Tooltip("Supplies the step number and count for the label above.")]
         [SerializeField] private StepRunner stepRunnerForLabel;
 
+        [Tooltip("Anchoring status line, e.g. \"Look at the marker\" / \"Block placed.\". " +
+                 "StepManager writes here, and it is hidden for good once the first step is " +
+                 "presented so that text cannot linger over the instructions.")]
+        [SerializeField] private TextMeshProUGUI statusLineText;
+
         [Tooltip("Existing scene AudioSource used for instruction audio.")]
         [SerializeField] private AudioSource audioSource;
 
@@ -202,6 +207,13 @@ namespace AdaptiveAR.Steps
         private void ClearText()
         {
             if (titleText != null) titleText.text = string.Empty;
+
+            // The anchoring status line has done its job by the time a step is shown.
+            if (statusLineText != null && statusLineText.gameObject.activeSelf)
+            {
+                statusLineText.text = string.Empty;
+                statusLineText.gameObject.SetActive(false);
+            }
 
             if (bodyText != null)
             {
