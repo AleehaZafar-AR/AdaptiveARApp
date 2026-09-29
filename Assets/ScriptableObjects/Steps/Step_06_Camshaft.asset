@@ -24,6 +24,7 @@ MonoBehaviour:
   requiresValidation: 1
   validationPartKey: part.camshaft
   validationTargetKey: ghost.camshaft
+  interchangeablePartKeys: []
   positionToleranceMeters: 0.04
   rotationToleranceDegrees: 25
   snapOnSuccess: 1

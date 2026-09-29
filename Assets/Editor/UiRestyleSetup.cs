@@ -56,6 +56,12 @@ namespace AdaptiveAR.EditorTools
         // Side panels are angled inwards so the triptych wraps slightly around the viewer.
         private const float SidePanelYaw = 16f;
 
+        // Seated tabletop use: the card belongs just above the work, in natural forward
+        // gaze, not overhead. PanelRig holds the real values; these are what the tool
+        // writes when it wires the rig.
+        private const float RigHeightAboveMarker = 0.20f;
+        private const float RigDepthBeyondMarker = 0.10f;
+
         // =====================================================================
         // 1. VALIDATE
         // =====================================================================
@@ -277,6 +283,39 @@ namespace AdaptiveAR.EditorTools
             if (session != null)
                 SetRefs(session, ("captionText", title));
 
+            // --- participant card owns every field, so a new action clears the old one ---
+            var card = canvas.GetComponent<ParticipantCard>();
+            if (card == null) card = Undo.AddComponent<ParticipantCard>(canvas);
+
+            GameObject nextGo = Find(scene, "DemoUICanvas/Panel/NextButton")
+                                ?? Find(scene, "DemoUICanvas/NextButton");
+
+            TextMeshProUGUI feedback = EnsureText(panel, "FeedbackText", "",
+                MrTheme.SizeBody, MrTheme.TextSecondary, FontStyles.Bold);
+            feedback.textWrappingMode = TextWrappingModes.Normal;
+            AutoSize(feedback, 14f, MrTheme.SizeBody);
+            {
+                var fr = feedback.rectTransform;
+                fr.anchorMin = fr.anchorMax = new Vector2(0f, 0f);
+                fr.pivot = new Vector2(0f, 0f);
+                fr.sizeDelta = new Vector2(inner - 180f, 44f);
+                fr.anchoredPosition = new Vector2(MrTheme.PanelPadding, MrTheme.PanelPadding + 52f);
+            }
+
+            SetRefs(card,
+                ("session", session),
+                ("workflow", FindComponent<WorkflowState>(scene)),
+                ("stepRunner", runner),
+                ("supportLevel", FindComponent<SupportLevelController>(scene)),
+                ("validator", FindComponent<StepValidator>(scene)),
+                ("stageText", eyebrow),
+                ("counterText", stepLabel),
+                ("instructionText", title),
+                ("detailText", body),
+                ("feedbackText", feedback),
+                ("nextButton", nextGo != null ? nextGo.GetComponent<Button>() : null),
+                ("nextLabel", nextGo != null ? nextGo.GetComponentInChildren<TextMeshProUGUI>(true) : null));
+
             // --- home and completion screens, and the flow that switches between them ---
             BuildHomeAndComplete(scene, canvas, panel, panelSprite, borderSprite, session, runner, stepLabel);
 
@@ -371,6 +410,22 @@ namespace AdaptiveAR.EditorTools
                 ("completeBody", cBody),
                 ("stepLabel", stepLabel));
 
+            // --- onboarding: four content states on the one home panel ---
+            var onboarding = canvas.GetComponent<OnboardingSequence>();
+            if (onboarding == null) onboarding = Undo.AddComponent<OnboardingSequence>(canvas);
+
+            SetRefs(onboarding,
+                ("stepRunner", runner),
+                ("logger", FindComponent<SessionLogger>(scene)),
+                ("flow", flow),
+                ("eyebrowText", hEyebrow),
+                ("titleText", hTitle),
+                ("bodyText", hBody),
+                ("advanceButton", startBtn.GetComponent<Button>()),
+                ("advanceLabel", startBtn.GetComponentInChildren<TextMeshProUGUI>(true)));
+
+            SetRefs(flow, ("onboarding", onboarding));
+
             // Start must drive BOTH: StepManager begins marker detection, the flow swaps panels.
             var startButton = startBtn.GetComponent<Button>();
             StepManager stepManager = FindComponent<StepManager>(scene);
@@ -381,8 +436,9 @@ namespace AdaptiveAR.EditorTools
                 for (int i = startButton.onClick.GetPersistentEventCount() - 1; i >= 0; i--)
                     UnityEditor.Events.UnityEventTools.RemovePersistentListener(startButton.onClick, i);
 
-                UnityEditor.Events.UnityEventTools.AddVoidPersistentListener(
-                    startButton.onClick, flow.BeginSession);
+                // Onboarding adds its own listener at runtime and calls flow.BeginSession()
+                // only on the final screen, so pressing Start no longer skips the
+                // introduction straight into step one.
 
                 EditorUtility.SetDirty(startButton);
             }
@@ -778,9 +834,19 @@ namespace AdaptiveAR.EditorTools
             var runnerForLock = FindComponent<StepRunner>(scene);
             if (runnerForLock != null)
                 SetRefs(comp, ("stepRunner", runnerForLock));
+
             else
                 Debug.LogWarning("[UiRestyle] MarkerAnchor not found. Run the Alignment tool first, " +
                                  "otherwise the panels have nothing to anchor to.");
+
+            // Seated height: the instruction should be reachable by eye movement, not a
+            // head tilt. Overridable on the component after bench testing.
+            var rigSo = new SerializedObject(comp);
+            SerializedProperty h = rigSo.FindProperty("heightAboveMarker");
+            if (h != null) h.floatValue = RigHeightAboveMarker;
+            SerializedProperty d = rigSo.FindProperty("depthBeyondMarker");
+            if (d != null) d.floatValue = RigDepthBeyondMarker;
+            rigSo.ApplyModifiedProperties();
 
             return rig;
         }

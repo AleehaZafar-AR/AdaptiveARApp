@@ -28,6 +28,9 @@ namespace AdaptiveAR.Steps
         [SerializeField] private StepValidator validator;
         [SerializeField] private SessionLogger logger;
 
+        [Tooltip("Single source of truth for progress. Every display subscribes to it.")]
+        [SerializeField] private WorkflowState workflow;
+
         [Header("Participant")]
         [Tooltip("Recorded as a decision-layer input. Free text, e.g. novice / experienced.")]
         [SerializeField] private string operatorExperience = "unspecified";
@@ -173,6 +176,105 @@ namespace AdaptiveAR.Steps
         // Step tracking
         // =====================================================================
 
+        /// <summary>True when the participant is allowed to move on. Gates the Next control.</summary>
+        public bool CanAdvance
+        {
+            get
+            {
+                if (!SessionActive || SequenceFinished) return false;
+                if (workflow == null) return true;                     // no model: never gate
+
+                AssemblyAction action = workflow.CurrentAction;
+                if (action == null) return true;                       // stage without actions
+                if (!action.enabled) return true;                      // designed, not performable
+                if (!action.RequiresPhysicalValidation) return true;    // read and acknowledge
+
+                return workflow.CurrentActionComplete;
+            }
+        }
+
+        /// <summary>Short reason the Next control is unavailable, for the participant card.</summary>
+        public string BlockedReason
+        {
+            get
+            {
+                if (CanAdvance) return null;
+                AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
+                return a != null && a.kind == ActionKind.Fasten
+                    ? "Fit the fastener to continue"
+                    : "Place the part to continue";
+            }
+        }
+
+        // ---------------- action lifecycle ----------------
+
+        /// <summary>
+        /// Enters one action: tears down the previous one, arms validation, logs it.
+        /// Everything owned by the previous action is cleared here, which is what stops
+        /// stale instructions and orphaned ghosts surviving into the next action.
+        /// </summary>
+        private void EnterAction(int index)
+        {
+            if (workflow == null) return;
+
+            StepData stage = workflow.CurrentStage;
+            if (stage == null) return;
+
+            int resolved = stage.NextEnabledActionIndex(index);
+
+            if (resolved < 0)
+            {
+                CompleteStageAndAdvance();
+                return;
+            }
+
+            workflow.EnterAction(resolved);
+            AssemblyAction action = workflow.CurrentAction;
+
+            if (validator != null)
+            {
+                bool armed = validator.BeginAction(action);
+
+                if (!armed && action != null && action.RequiresPhysicalValidation && logToConsole)
+                    Debug.LogWarning("[Session] Action '" + action.Id + "' wants validation but could " +
+                                     "not be armed; it must be confirmed manually.");
+            }
+
+            if (logger != null && action != null)
+                logger.LogActionEnter(resolved, action.Id, action.kind.ToString(),
+                                      action.enabled, action.disabledReason);
+
+            RaiseStateChanged();
+        }
+
+        /// <summary>Marks the active action done and moves on, or finishes the stage.</summary>
+        private void CompleteActionAndAdvance(string reason)
+        {
+            if (workflow == null) { AdvanceStep(reason); return; }
+
+            AssemblyAction action = workflow.CurrentAction;
+            workflow.CompleteCurrentAction();
+
+            if (logger != null && action != null)
+                logger.LogActionComplete(workflow.ActionIndex, action.Id, _stepMs, reason);
+
+            if (validator != null) validator.Clear();
+
+            StepData stage = workflow.CurrentStage;
+            int next = stage != null ? stage.NextEnabledActionIndex(workflow.ActionIndex + 1) : -1;
+
+            if (next >= 0) EnterAction(next);
+            else CompleteStageAndAdvance();
+        }
+
+        private void CompleteStageAndAdvance()
+        {
+            if (workflow != null)
+                workflow.CompleteStage(workflow.StageIndex);
+
+            AdvanceStep("stage_complete");
+        }
+
         private void HandleStepChanged(StepData step, int index, string reason)
         {
             // Close the outgoing step first, so its duration is recorded before the new
@@ -196,13 +298,16 @@ namespace AdaptiveAR.Steps
                                     step.taskComplexity, ExpectedMsOrNull(step));
             }
 
-            // Arm validation. If the step cannot be validated the operator advances manually.
-            if (validator != null)
+            // Enter the stage in the authoritative model, then its first real action.
+            if (workflow != null)
             {
-                bool armed = validator.BeginStep(step);
-                if (!armed && logToConsole)
-                    Debug.Log($"[Session] Step '{step.StepIdentifier}' has no automatic validation; " +
-                              "advance with the confirm button.");
+                workflow.SetPhase(WorkflowPhase.Assembly);
+                workflow.EnterStage(index);
+                EnterAction(0);
+            }
+            else if (validator != null)
+            {
+                validator.Clear();
             }
 
             RaiseStateChanged();
@@ -255,7 +360,10 @@ namespace AdaptiveAR.Steps
 
         private void HandleStepValidated()
         {
-            AdvanceStep("validation_passed");
+            // A validated placement completes the current ACTION. The stage advances only
+            // when it runs out of actions.
+            if (workflow != null) CompleteActionAndAdvance("validation_passed");
+            else AdvanceStep("validation_passed");
         }
 
         /// <summary>
@@ -291,16 +399,29 @@ namespace AdaptiveAR.Steps
             stepRunner.Advance(reason);
         }
 
-        /// <summary>Parameterless overload so a UI Button can call it directly.</summary>
+        /// <summary>
+        /// Parameterless overload for a UI Button. Refuses to skip unfinished physical work:
+        /// the participant cannot press past a placement they have not made.
+        /// </summary>
         public void AdvanceStepManually()
         {
-            AdvanceStep("manual_confirm");
+            if (!CanAdvance)
+            {
+                if (logger != null) logger.LogNote("advance_blocked");
+                if (logToConsole) Debug.Log("[Session] Advance blocked: " + BlockedReason);
+                RaiseStateChanged();
+                return;
+            }
+
+            if (workflow != null) CompleteActionAndAdvance("manual_confirm");
+            else AdvanceStep("manual_confirm");
         }
 
         /// <summary>Skips the current step without marking it validated. Researcher control.</summary>
         public void SkipStep()
         {
-            AdvanceStep("researcher_skip");
+            if (workflow != null) CompleteActionAndAdvance("researcher_skip");
+            else AdvanceStep("researcher_skip");
         }
 
         private void HandleSequenceComplete()
@@ -308,6 +429,8 @@ namespace AdaptiveAR.Steps
             if (SequenceFinished) return;
 
             SequenceFinished = true;
+
+            if (workflow != null) workflow.SetPhase(WorkflowPhase.Complete);
 
             if (validator != null)
                 validator.Clear();

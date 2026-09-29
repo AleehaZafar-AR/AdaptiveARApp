@@ -31,7 +31,7 @@ namespace AdaptiveAR.EditorTools
     {
         private const string ExpectedSceneName = "1 - ArUcoMarkerTracking";
         private const string GeneratedFolder = "Assets/UI/Generated";
-        private const string GhostMaterialPath = GeneratedFolder + "/GhostGreen.mat";
+        private const string GhostMaterialPath = GeneratedFolder + "/GhostTarget.mat";
         private const string ArrowPrefabPath = "Assets/Prefabs/arrow.prefab";
 
         private const string ComponentsPath = "EngineAnchor/Offset/Components";
@@ -42,7 +42,7 @@ namespace AdaptiveAR.EditorTools
         // 1. GHOSTS
         // =====================================================================
 
-        [MenuItem("AdaptiveAR/Interaction/1 - Tint Ghosts Translucent Green", false, 10)]
+        [MenuItem("AdaptiveAR/Interaction/1 - Apply Ghost Target Material", false, 10)]
         public static void TintGhosts()
         {
             Scene scene = SceneManager.GetActiveScene();
@@ -75,9 +75,11 @@ namespace AdaptiveAR.EditorTools
             Undo.CollapseUndoOperations(group);
             EditorSceneManager.MarkSceneDirty(scene);
 
-            Debug.Log($"[Interaction] Tinted {tinted} ghost renderer(s) translucent green.\n" +
+            Debug.Log($"[Interaction] Applied the ghost target material to {tinted} renderer(s).\n" +
                       $"  Material: {GhostMaterialPath}\n" +
-                      "  Adjust its colour and alpha there; every ghost shares it.");
+                      "  Semi-transparent cyan with emission: a placement target, not a solid part.\n" +
+                      "  Alpha is 0.18 - raise it if the silhouette is too faint on the bench, lower\n" +
+                      "  it if it reads as a real component. Every ghost shares this one material.");
         }
 
         /// <summary>Creates the translucent green ghost material if it does not exist yet.</summary>
@@ -99,11 +101,23 @@ namespace AdaptiveAR.EditorTools
                 return null;
             }
 
-            var mat = new Material(shader) { name = "GhostGreen" };
-            Color green = new Color(0.36f, 0.86f, 0.55f, 0.32f);
+            var mat = new Material(shader) { name = "GhostTarget" };
 
-            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", green);
-            if (mat.HasProperty("_Color")) mat.SetColor("_Color", green);
+            // A placement TARGET, not another component. Low alpha so the physical bench
+            // reads through it, cyan rather than green because green is reserved for
+            // confirmed states, and emission so the silhouette survives bright passthrough.
+            Color ghost = new Color(0.25f, 0.85f, 0.85f, 0.18f);
+            Color glow = new Color(0.25f, 0.85f, 0.85f, 1f) * 0.55f;
+
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", ghost);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", ghost);
+
+            if (mat.HasProperty("_EmissionColor"))
+            {
+                mat.SetColor("_EmissionColor", glow);
+                mat.EnableKeyword("_EMISSION");
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
+            }
 
             // URP transparent setup. These keywords are what actually switch the blend mode.
             if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);   // 1 = Transparent

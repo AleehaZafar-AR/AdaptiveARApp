@@ -24,6 +24,11 @@ MonoBehaviour:
   requiresValidation: 1
   validationPartKey: part.piston004
   validationTargetKey: ghost.piston004
+  interchangeablePartKeys:
+  - part.piston001
+  - part.piston002
+  - part.piston003
+  - part.piston004
   positionToleranceMeters: 0.04
   rotationToleranceDegrees: 25
   snapOnSuccess: 1

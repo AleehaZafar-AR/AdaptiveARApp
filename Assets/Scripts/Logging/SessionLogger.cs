@@ -43,6 +43,18 @@ namespace AdaptiveAR.Logging
             public const string Decision = "decision";
             public const string Physiological = "physiological";
             public const string Note = "note";
+
+            // --- refined workflow ---
+            public const string OnboardingEnter = "onboarding_enter";
+            public const string OnboardingComplete = "onboarding_complete";
+            public const string AssemblyStart = "assembly_start";
+            public const string ActionEnter = "action_enter";
+            public const string ActionComplete = "action_complete";
+            public const string ComponentGrabbed = "component_grabbed";
+            public const string ComponentReleased = "component_released";
+            public const string ComponentLocked = "component_locked";
+            public const string HelpRequested = "help_requested";
+            public const string FastenerAction = "fastener_action";
         }
 
         [Header("Participant")]
@@ -254,9 +266,11 @@ namespace AdaptiveAR.Logging
         public void LogValidationAttempt(int attemptIndex, bool success,
                                          float positionErrorM, float rotationErrorDeg,
                                          float positionToleranceM, float rotationToleranceDeg,
-                                         string partKey, string targetKey, string trigger)
+                                         string partKey, string targetKey, string trigger,
+                                         string rejectReason = null)
         {
             var w = NewLine(Events.ValidationAttempt);
+            w.Str("reject_reason", rejectReason);
             w.Num("attempt_index", attemptIndex);
             w.Bool("success", success);
             w.Num("position_error_m", positionErrorM);
@@ -273,6 +287,91 @@ namespace AdaptiveAR.Logging
         {
             var w = NewLine(Events.Physiological);
             WritePhysiological(w, "physiological", sample);
+            Write(w);
+        }
+
+        /// <summary>Onboarding screen entered. Separate from assembly so the two can be timed apart.</summary>
+        public void LogOnboardingEnter(int screenIndex, string screenId)
+        {
+            var w = NewLine(Events.OnboardingEnter);
+            w.Num("screen_index", screenIndex);
+            w.Str("screen_id", screenId);
+            Write(w);
+        }
+
+        public void LogOnboardingComplete(float durationMs)
+        {
+            var w = NewLine(Events.OnboardingComplete);
+            w.Num("onboarding_duration_ms", durationMs);
+            Write(w);
+        }
+
+        /// <summary>The participant explicitly began the assembly. Task timing starts here.</summary>
+        public void LogAssemblyStart()
+        {
+            Write(NewLine(Events.AssemblyStart));
+        }
+
+        /// <summary>A substep began. Disabled actions are recorded with their reason.</summary>
+        public void LogActionEnter(int actionIndex, string actionId, string kind,
+                                   bool enabled, string disabledReason)
+        {
+            var w = NewLine(Events.ActionEnter);
+            w.Num("action_index", actionIndex);
+            w.Str("action_id", actionId);
+            w.Str("action_kind", kind);
+            w.Bool("action_enabled", enabled);
+            w.Str("disabled_reason", string.IsNullOrEmpty(disabledReason) ? null : disabledReason);
+            Write(w);
+        }
+
+        public void LogActionComplete(int actionIndex, string actionId, float durationMs, string reason)
+        {
+            var w = NewLine(Events.ActionComplete);
+            w.Num("action_index", actionIndex);
+            w.Str("action_id", actionId);
+            w.Num("action_duration_ms", durationMs);
+            w.Str("reason", reason);
+            Write(w);
+        }
+
+        public void LogComponentGrabbed(string partKey)
+        {
+            var w = NewLine(Events.ComponentGrabbed);
+            w.Str("part_key", partKey);
+            Write(w);
+        }
+
+        public void LogComponentReleased(string partKey)
+        {
+            var w = NewLine(Events.ComponentReleased);
+            w.Str("part_key", partKey);
+            Write(w);
+        }
+
+        public void LogComponentLocked(string partKey, float positionErrorM, float rotationErrorDeg)
+        {
+            var w = NewLine(Events.ComponentLocked);
+            w.Str("part_key", partKey);
+            w.Num("position_error_m", positionErrorM);
+            w.Num("rotation_error_deg", rotationErrorDeg);
+            Write(w);
+        }
+
+        public void LogHelpRequested(string what)
+        {
+            var w = NewLine(Events.HelpRequested);
+            w.Str("what", what);
+            Write(w);
+        }
+
+        /// <summary>Fastener or tool action. Detection rule is still to be decided on the bench.</summary>
+        public void LogFastenerAction(string fastenerKey, string toolKey, bool completed)
+        {
+            var w = NewLine(Events.FastenerAction);
+            w.Str("fastener_key", fastenerKey);
+            w.Str("tool_key", toolKey);
+            w.Bool("completed", completed);
             Write(w);
         }
 

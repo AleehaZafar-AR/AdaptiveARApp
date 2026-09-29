@@ -35,6 +35,11 @@ namespace AdaptiveAR.UI
         [Tooltip("Task list canvas. Hidden on the home screen so the first thing seen is one panel, not three.")]
         [SerializeField] private GameObject taskListRoot;
 
+        [Header("Onboarding")]
+        [Tooltip("Runs on the home panel. BeginSession is called by its final screen, so the " +
+                 "task starts because the participant chose to start it.")]
+        [SerializeField] private OnboardingSequence onboarding;
+
         [Header("Sources")]
         [SerializeField] private AssemblySessionController session;
         [SerializeField] private StepRunner stepRunner;
@@ -68,6 +73,9 @@ namespace AdaptiveAR.UI
         private void Start()
         {
             Show(Screen.Home);
+
+            // Begin the introduction as soon as the home screen is up.
+            if (onboarding != null) onboarding.Begin();
         }
 
         /// <summary>Hooked to the Start button. StepManager's own listener runs alongside this.</summary>

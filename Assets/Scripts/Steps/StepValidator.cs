@@ -61,6 +61,9 @@ namespace AdaptiveAR.Steps
         /// <summary>Fired for every judged placement. (success, positionError, rotationError, trigger)</summary>
         public event Action<bool, float, float, string> OnAttemptEvaluated;
 
+        /// <summary>Why the last placement was rejected, so feedback can be specific.</summary>
+        public RejectReason LastRejectReason { get; private set; }
+
         /// <summary>Fired once when the current step's placement is accepted.</summary>
         public event Action OnStepValidated;
 
@@ -96,7 +99,7 @@ namespace AdaptiveAR.Steps
         private readonly HashSet<string> _consumed = new HashSet<string>();
 
         private Candidate _active;
-        private StepData _step;
+        private AssemblyAction _action;
         private bool _awaitingSettle;
         private float _settleTimer;
         private float _inToleranceTimer;
@@ -114,16 +117,17 @@ namespace AdaptiveAR.Steps
         /// Arms validation for a step. Returns false when the step does not use validation
         /// or nothing could be resolved - the caller then relies on manual advance.
         /// </summary>
-        public bool BeginStep(StepData step)
+        public bool BeginAction(AssemblyAction action)
         {
             Clear();
-            _step = step;
+            _action = action;
 
-            if (step == null || !step.requiresValidation)
+            if (action == null || !action.RequiresPhysicalValidation)
                 return false;
 
-            PartKey = step.validationPartKey;
-            TargetKey = step.validationTargetKey;
+            PartKey = action.partKey;
+            TargetKey = action.targetKey;
+            settleSeconds = Mathf.Max(0.05f, action.settleSeconds);
 
             if (guidanceRegistry == null)
             {
@@ -134,14 +138,14 @@ namespace AdaptiveAR.Steps
             if (string.IsNullOrEmpty(TargetKey) ||
                 !guidanceRegistry.TryResolve(TargetKey, out GameObject targetGo))
             {
-                Debug.LogWarning($"[StepValidator] Step '{step.StepIdentifier}': target '{TargetKey}' " +
-                                 "could not be resolved; advance manually.", this);
+                Debug.LogWarning($"[StepValidator] Action '{action.Id}': target '{TargetKey}' " +
+                                 "could not be resolved; this action cannot be validated.", this);
                 return false;
             }
 
             CurrentTarget = targetGo.transform;
 
-            foreach (string key in step.AllAcceptedPartKeys())
+            foreach (string key in action.AcceptedPartKeys())
             {
                 if (_consumed.Contains(key)) continue;                     // already assembled
                 if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go)) continue;
@@ -159,8 +163,8 @@ namespace AdaptiveAR.Steps
 
             if (_candidates.Count == 0)
             {
-                Debug.LogWarning($"[StepValidator] Step '{step.StepIdentifier}': no accepted part could be " +
-                                 "resolved; advance manually.", this);
+                Debug.LogWarning($"[StepValidator] Action '{action.Id}': no accepted part could be " +
+                                 "resolved; this action cannot be validated.", this);
                 return false;
             }
 
@@ -171,8 +175,8 @@ namespace AdaptiveAR.Steps
 
             if (logEvaluations)
                 Debug.Log($"[StepValidator] Watching {_candidates.Count} accepted part(s) against " +
-                          $"'{TargetKey}' (tolerance {step.positionToleranceMeters * 100f:F1} cm / " +
-                          $"{step.rotationToleranceDegrees:F0} deg).");
+                          $"'{TargetKey}' (tolerance {action.positionToleranceMeters * 100f:F1} cm / " +
+                          $"{action.rotationToleranceDegrees:F0} deg).");
 
             return true;
         }
@@ -183,7 +187,7 @@ namespace AdaptiveAR.Steps
             _completed = false;
             _candidates.Clear();
             _active = null;
-            _step = null;
+            _action = null;
             CurrentPart = null;
             CurrentTarget = null;
             HasBeenHandled = false;
@@ -305,8 +309,8 @@ namespace AdaptiveAR.Steps
             // near 0/360 the way an Euler comparison does.
             rotationError = Quaternion.Angle(c.tf.rotation, CurrentTarget.rotation);
 
-            return positionError <= _step.positionToleranceMeters
-                && rotationError <= _step.rotationToleranceDegrees;
+            return positionError <= _action.positionToleranceMeters
+                && rotationError <= _action.rotationToleranceDegrees;
         }
 
         private void Evaluate(string trigger)
@@ -315,6 +319,12 @@ namespace AdaptiveAR.Steps
 
             bool ok = WithinTolerance(_active, out float posErr, out float rotErr);
             AttemptCount++;
+
+            // Specific enough to act on. "Alignment needed" tells the participant nothing.
+            if (ok) LastRejectReason = RejectReason.None;
+            else if (posErr > _action.positionToleranceMeters * 3f) LastRejectReason = RejectReason.WrongComponent;
+            else if (posErr > _action.positionToleranceMeters) LastRejectReason = RejectReason.TooFar;
+            else LastRejectReason = RejectReason.WrongRotation;
 
             if (logEvaluations)
                 Debug.Log($"[StepValidator] Attempt {AttemptCount} ({trigger}) on '{_active.key}': " +
@@ -332,8 +342,12 @@ namespace AdaptiveAR.Steps
             IsActive = false;
             _consumed.Add(_active.key);
 
-            if (_step.snapOnSuccess)
-                SnapToTarget(_active);
+            SnapToTarget(_active);
+
+            // Reusable locking, so an installed part cannot be pulled back out later.
+            var padlock = _active.tf.GetComponent<PlacementLock>();
+            if (padlock == null) padlock = _active.tf.gameObject.AddComponent<PlacementLock>();
+            padlock.LockAt(CurrentTarget);
 
             OnStepValidated?.Invoke();
         }

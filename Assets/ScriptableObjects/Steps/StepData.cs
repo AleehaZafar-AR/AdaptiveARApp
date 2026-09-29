@@ -84,6 +84,22 @@ public class StepData : ScriptableObject
     [Tooltip("Snap the part exactly onto the target pose once it is accepted.")]
     public bool snapOnSuccess = true;
 
+    [Header("Actions (substeps)")]
+    [Tooltip("The concrete things the participant does inside this stage, in order. " +
+             "The participant sees ONE at a time, which is what keeps L3 from becoming a " +
+             "paragraph. A stage is complete only when every enabled action is validated.")]
+    public System.Collections.Generic.List<AssemblyAction> actions =
+        new System.Collections.Generic.List<AssemblyAction>();
+
+    /// <summary>First enabled action at or after an index, or -1 when none remain.</summary>
+    public int NextEnabledActionIndex(int from)
+    {
+        if (actions == null) return -1;
+        for (int i = Mathf.Max(0, from); i < actions.Count; i++)
+            if (actions[i] != null && actions[i].enabled) return i;
+        return -1;
+    }
+
     [Header("Timing")]
     [Tooltip("Researcher-authored expected duration in seconds. Fed to the decision layer " +
              "as context. 0 means unset and is logged as null.")]

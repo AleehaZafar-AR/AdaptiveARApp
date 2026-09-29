@@ -274,6 +274,8 @@ namespace AdaptiveAR.EditorTools
             SessionLogger logger = GetOrAdd<SessionLogger>(stepManagerGo);
             StepValidator validator = GetOrAdd<StepValidator>(stepManagerGo);
             AssemblySessionController session = GetOrAdd<AssemblySessionController>(stepManagerGo);
+            WorkflowState workflow = GetOrAdd<WorkflowState>(stepManagerGo);
+            SetRefs(workflow, ("stepRunner", runner));
 
             SetRefs(validator, ("guidanceRegistry", registry));
             SetRefs(session,
@@ -281,6 +283,7 @@ namespace AdaptiveAR.EditorTools
                 ("supportLevel", supportLevel),
                 ("validator", validator),
                 ("logger", logger),
+                ("workflow", workflow),
                 ("captionText", Tmp(scene, "DemoUICanvas/InstructionPanel/CaptionText")));
 
             // --- 5. HUDs on the existing canvases ---
@@ -449,6 +452,73 @@ namespace AdaptiveAR.EditorTools
                 instructionAudio = spec.partObject == "crankshaft"
                     ? AssetDatabase.LoadAssetAtPath<AudioClip>(AudioCrankshaft)
                     : null
+            };
+
+            // ---------------- substeps ----------------
+            // One instruction at a time. The participant sees "Locate", then "Place", rather
+            // than a paragraph, which is what keeps L3 from overflowing the card.
+            //
+            // Fastener and tool actions are authored but DISABLED, because the assets do not
+            // support them yet: the bolts and caps exist only as baked sub-meshes of the oil
+            // pan and the pistons, and there is no tool model in the repository at all. They
+            // are recorded here so the procedure is visible and the log can show what was
+            // skipped, rather than being silently absent. See CHANGES.md.
+            step.actions = new List<AssemblyAction>
+            {
+                new AssemblyAction
+                {
+                    actionId = spec.stepId + ".locate",
+                    kind = ActionKind.Acknowledge,
+                    instruction = "Find the " + spec.shortLabel.ToLowerInvariant() + " in the parts tray.",
+                    detail = spec.breakdown.Length > 0 ? spec.breakdown[0] : "",
+                    ghostKeys = new string[0],
+                    showArrow = true,
+                    partKey = PartKeyPrefix + spec.partObject,
+                    enabled = true
+                },
+                new AssemblyAction
+                {
+                    actionId = spec.stepId + ".place",
+                    kind = ActionKind.Place,
+                    instruction = spec.shortGoal,
+                    detail = spec.whereItGoes,
+                    partKey = PartKeyPrefix + spec.partObject,
+                    interchangeablePartKeys = spec.partObject.StartsWith("piston")
+                        ? new[] { PartKeyPrefix + "piston001", PartKeyPrefix + "piston002",
+                                  PartKeyPrefix + "piston003", PartKeyPrefix + "piston004" }
+                        : new string[0],
+                    targetKey = spec.ghostKey,
+                    ghostKeys = new[] { spec.ghostKey },
+                    positionToleranceMeters = 0.04f,
+                    rotationToleranceDegrees = 25f,
+                    settleSeconds = 0.45f,
+                    showArrow = true,
+                    enabled = true,
+                    audioCue = spec.partObject == "crankshaft"
+                        ? AssetDatabase.LoadAssetAtPath<AudioClip>(AudioCrankshaft)
+                        : null
+                },
+                new AssemblyAction
+                {
+                    actionId = spec.stepId + ".fasten",
+                    kind = ActionKind.Fasten,
+                    instruction = "Fit the retaining cap and bolts.",
+                    detail = "",
+                    enabled = false,
+                    disabledReason = "No separately movable fastener exists. crankHolderBolt002-016 " +
+                                     "and crankHolder001-004 are baked sub-meshes of the oilPan ghost; " +
+                                     "pistonBolt/PistonNut are child meshes of each piston."
+                },
+                new AssemblyAction
+                {
+                    actionId = spec.stepId + ".tighten",
+                    kind = ActionKind.ToolAction,
+                    instruction = "Tighten the fasteners with the tool.",
+                    detail = "",
+                    enabled = false,
+                    disabledReason = "No tool model exists in the repository. Architecture is in place; " +
+                                     "assign a tool prefab and a detection rule once supplied."
+                }
             };
 
             EditorUtility.SetDirty(step);
