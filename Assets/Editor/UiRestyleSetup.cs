@@ -43,11 +43,11 @@ namespace AdaptiveAR.EditorTools
         // --- spatial layout, metres. Canvas scale is 0.001, so 1 canvas unit = 1 mm ---
         private static readonly Vector3 InstructionPos = new Vector3(-0.34f, 1.18f, 0.92f);
         private static readonly Vector3 InstructionEuler = new Vector3(0f, -20f, 0f);
-        private static readonly Vector2 InstructionSize = new Vector2(430f, 380f);
+        private static readonly Vector2 InstructionSize = new Vector2(420f, 300f);
 
         private static readonly Vector3 TaskListPos = new Vector3(0.36f, 1.18f, 0.92f);
         private static readonly Vector3 TaskListEuler = new Vector3(0f, 20f, 0f);
-        private static readonly Vector2 TaskListSize = new Vector2(300f, 330f);
+        private static readonly Vector2 TaskListSize = new Vector2(290f, 300f);
 
         private static readonly Vector3 DebugPos = new Vector3(0f, 1.58f, 1.05f);
         private static readonly Vector3 DebugEuler = Vector3.zero;
@@ -149,12 +149,11 @@ namespace AdaptiveAR.EditorTools
 
             PlaceCanvas(canvas, InstructionPos, InstructionEuler, InstructionSize);
 
-            // Hide the old prototype chrome without deleting it, so nothing else that
-            // references those objects breaks.
-            HideChild(canvas, "BackgroundPanel");
-            HideChild(canvas, "ButtonsPanel");
-            HideChild(canvas, "IntermissionPanel");
-            HideChild(canvas, "BackButton");
+            // Hide EVERY legacy child except the ones this tool owns. Naming them one by
+            // one is what left the old InstructionPanel bar and the TaskA/B/C rows on
+            // screen in the first snapshot.
+            HideLegacyChildren(canvas, "Panel", "HomePanel", "CompletePanel",
+                               "Surface", "ISDK_RayCanvasInteraction");
 
             GameObject panel = EnsurePanel(canvas, "Panel", panelSprite, borderSprite, InstructionSize);
 
@@ -220,7 +219,10 @@ namespace AdaptiveAR.EditorTools
                 ("label", chip.GetComponentInChildren<TextMeshProUGUI>(true)));
 
             // --- Next button, bottom right ---
-            GameObject next = Find(scene, "DemoUICanvas/NextButton");
+            // Look inside Panel first: a previous run already reparented it there, and
+            // searching only the canvas root would miss it and silently skip restyling.
+            GameObject next = Find(scene, "DemoUICanvas/Panel/NextButton")
+                              ?? Find(scene, "DemoUICanvas/NextButton");
             if (next != null)
             {
                 ReparentKeepingName(next, panel.transform);
@@ -232,6 +234,11 @@ namespace AdaptiveAR.EditorTools
                 nr.sizeDelta = new Vector2(160f, 52f);
                 nr.anchoredPosition = new Vector2(-MrTheme.PanelPadding, MrTheme.PanelPadding);
             }
+
+            // The step label must not claim "STEP 01 / 06" before a step exists.
+            stepLabel.text = "";
+            title.text = "";
+            body.text = "";
 
             // --- hand the presenter its new fields ---
             if (presenter != null)
@@ -246,7 +253,145 @@ namespace AdaptiveAR.EditorTools
             if (session != null)
                 SetRefs(session, ("captionText", title));
 
+            // --- home and completion screens, and the flow that switches between them ---
+            BuildHomeAndComplete(scene, canvas, panel, panelSprite, borderSprite, session, runner, stepLabel);
+
             return 6;
+        }
+
+        // =====================================================================
+        // Home / Complete screens
+        //
+        // The first snapshot had no way in at all: the Begin control lived inside
+        // ButtonsPanel, which the restyle hid. A dedicated home screen with its own
+        // Start button fixes that and gives the session a proper beginning and end.
+        // =====================================================================
+
+        private static void BuildHomeAndComplete(Scene scene, GameObject canvas, GameObject stepPanel,
+                                                 Sprite panelSprite, Sprite borderSprite,
+                                                 AssemblySessionController session, StepRunner runner,
+                                                 TextMeshProUGUI stepLabel)
+        {
+            // ---------- HOME ----------
+            GameObject home = EnsurePanel(canvas, "HomePanel", panelSprite, borderSprite, InstructionSize);
+            float inner = InstructionSize.x - MrTheme.PanelPadding * 2f;
+            float y = -MrTheme.PanelPadding - 22f;
+
+            TextMeshProUGUI hEyebrow = EnsureText(home, "Eyebrow", "MIXED REALITY GUIDANCE",
+                MrTheme.SizeEyebrow, MrTheme.Accent, FontStyles.Bold | FontStyles.UpperCase);
+            hEyebrow.characterSpacing = MrTheme.EyebrowCharacterSpacing;
+            PlaceRow(hEyebrow.rectTransform, inner, 24f, ref y);
+            y -= 8f;
+
+            TextMeshProUGUI hTitle = EnsureText(home, "Title", "V8 Engine Assembly",
+                MrTheme.SizeTitle, MrTheme.TextPrimary, FontStyles.Bold);
+            hTitle.textWrappingMode = TextWrappingModes.Normal;
+            PlaceRow(hTitle.rectTransform, inner, 88f, ref y);
+            y -= 6f;
+
+            TextMeshProUGUI hBody = EnsureText(home, "Body",
+                "Place the printed marker flat on the bench where you can reach it.\n\n" +
+                "Press Start, then look at the marker to anchor the engine.",
+                MrTheme.SizeBody, MrTheme.TextSecondary, FontStyles.Normal);
+            hBody.textWrappingMode = TextWrappingModes.Normal;
+            hBody.lineSpacing = 10f;
+            PlaceRow(hBody.rectTransform, inner, 110f, ref y);
+
+            GameObject startBtn = EnsureButton(home, "StartButton", panelSprite, "Start", primary: true);
+            var sr = Rect(startBtn);
+            sr.anchorMin = sr.anchorMax = new Vector2(1f, 0f);
+            sr.pivot = new Vector2(1f, 0f);
+            sr.sizeDelta = new Vector2(170f, 56f);
+            sr.anchoredPosition = new Vector2(-MrTheme.PanelPadding, MrTheme.PanelPadding);
+
+            // ---------- COMPLETE ----------
+            GameObject complete = EnsurePanel(canvas, "CompletePanel", panelSprite, borderSprite, InstructionSize);
+            float cy = -MrTheme.PanelPadding - 22f;
+
+            TextMeshProUGUI cEyebrow = EnsureText(complete, "Eyebrow", "SESSION",
+                MrTheme.SizeEyebrow, MrTheme.Success, FontStyles.Bold | FontStyles.UpperCase);
+            cEyebrow.characterSpacing = MrTheme.EyebrowCharacterSpacing;
+            PlaceRow(cEyebrow.rectTransform, inner, 24f, ref cy);
+            cy -= 8f;
+
+            TextMeshProUGUI cTitle = EnsureText(complete, "Title", "Assembly complete",
+                MrTheme.SizeTitle, MrTheme.TextPrimary, FontStyles.Bold);
+            cTitle.textWrappingMode = TextWrappingModes.Normal;
+            PlaceRow(cTitle.rectTransform, inner, 88f, ref cy);
+            cy -= 6f;
+
+            TextMeshProUGUI cBody = EnsureText(complete, "Body", "",
+                MrTheme.SizeBody, MrTheme.TextSecondary, FontStyles.Normal);
+            cBody.textWrappingMode = TextWrappingModes.Normal;
+            cBody.lineSpacing = 10f;
+            PlaceRow(cBody.rectTransform, inner, 130f, ref cy);
+
+            // ---------- flow ----------
+            var flow = canvas.GetComponent<AppFlowController>();
+            if (flow == null) flow = Undo.AddComponent<AppFlowController>(canvas);
+
+            GameObject taskCanvas = Find(scene, "OverviewCanvas");
+
+            SetRefs(flow,
+                ("homePanel", home),
+                ("stepPanel", stepPanel),
+                ("completePanel", complete),
+                ("taskListRoot", taskCanvas),
+                ("session", session),
+                ("stepRunner", runner),
+                ("completeHeadline", cTitle),
+                ("completeBody", cBody),
+                ("stepLabel", stepLabel));
+
+            // Start must drive BOTH: StepManager begins marker detection, the flow swaps panels.
+            var startButton = startBtn.GetComponent<Button>();
+            StepManager stepManager = FindComponent<StepManager>(scene);
+
+            if (startButton != null)
+            {
+                Undo.RecordObject(startButton, "Wire start button");
+                for (int i = startButton.onClick.GetPersistentEventCount() - 1; i >= 0; i--)
+                    UnityEditor.Events.UnityEventTools.RemovePersistentListener(startButton.onClick, i);
+
+                UnityEditor.Events.UnityEventTools.AddVoidPersistentListener(
+                    startButton.onClick, flow.BeginSession);
+
+                EditorUtility.SetDirty(startButton);
+            }
+
+            // StepManager adds its own listener to whatever is in beginButton, so pointing it
+            // at the new Start button is all that is needed to keep marker detection working.
+            if (stepManager != null && startButton != null)
+                SetRefs(stepManager, ("beginButton", startButton));
+
+            // Correct starting visibility; AppFlowController re-asserts this at runtime.
+            SetActiveRecorded(home, true);
+            SetActiveRecorded(stepPanel, false);
+            SetActiveRecorded(complete, false);
+        }
+
+        private static void SetActiveRecorded(GameObject go, bool active)
+        {
+            if (go == null || go.activeSelf == active) return;
+            Undo.RecordObject(go, "Set panel visibility");
+            go.SetActive(active);
+        }
+
+        private static GameObject EnsureButton(GameObject parent, string name, Sprite fill,
+                                               string label, bool primary)
+        {
+            GameObject go = EnsureChild(parent, name);
+
+            if (go.GetComponent<Button>() == null) Undo.AddComponent<Button>(go);
+
+            // A button needs a Graphic to be clickable at all.
+            if (go.GetComponent<Image>() == null) Undo.AddComponent<Image>(go);
+
+            if (go.transform.Find("Label") == null)
+                EnsureText(go, "Label", label, MrTheme.SizeButton, MrTheme.Accent, FontStyles.Bold);
+
+            StyleButton(go, fill, null, label, primary);
+            return go;
         }
 
         // =====================================================================
@@ -261,11 +406,7 @@ namespace AdaptiveAR.EditorTools
 
             PlaceCanvas(canvas, TaskListPos, TaskListEuler, TaskListSize);
 
-            HideChild(canvas, "BackgroundPanel");
-            HideChild(canvas, "BottomPanel");
-            HideChild(canvas, "IntermissionPanel");
-            HideChild(canvas, "CalibrationPanel");
-            HideChild(canvas, "TopPanel");
+            HideLegacyChildren(canvas, "Panel", "Surface", "ISDK_RayCanvasInteraction");
 
             GameObject panel = EnsurePanel(canvas, "Panel", panelSprite, borderSprite, TaskListSize);
 
@@ -335,10 +476,7 @@ namespace AdaptiveAR.EditorTools
 
             // The old participant-facing metrics move into this HUD, so their original
             // rows are hidden rather than deleted.
-            foreach (string n in new[] { "BackgroundPanel", "TopPanel", "BottomPanel", "TimerText",
-                                         "ErrorText", "ProgressText", "ProgressBar",
-                                         "IntermissionPanel", "CalibrationPanel" })
-                HideChild(canvas, n);
+            HideLegacyChildren(canvas, "Panel", "Surface", "ISDK_RayCanvasInteraction");
 
             GameObject panel = EnsurePanel(canvas, "Panel", panelSprite, borderSprite, DebugSize);
 
@@ -431,7 +569,10 @@ namespace AdaptiveAR.EditorTools
             bimg.type = Image.Type.Sliced;
             bimg.color = MrTheme.PanelBorder;
             bimg.raycastTarget = false;
-            borderGo.transform.SetAsLastSibling();
+            // First sibling, not last: it draws above the panel fill but behind the content.
+            // As last sibling it would re-order on every re-run and end up covering the
+            // buttons.
+            borderGo.transform.SetAsFirstSibling();
 
             return panel;
         }
@@ -540,6 +681,25 @@ namespace AdaptiveAR.EditorTools
         {
             if (go.transform.parent == parent) return;
             Undo.SetTransformParent(go.transform, parent, "Reparent UI element");
+        }
+
+        /// <summary>
+        /// Deactivates every direct child of a canvas whose name is not in the keep list.
+        /// Robust against legacy objects this tool has never heard of, which a hard-coded
+        /// hide list is not.
+        /// </summary>
+        private static void HideLegacyChildren(GameObject canvas, params string[] keep)
+        {
+            var keepSet = new HashSet<string>(keep);
+
+            for (int i = 0; i < canvas.transform.childCount; i++)
+            {
+                GameObject child = canvas.transform.GetChild(i).gameObject;
+                if (keepSet.Contains(child.name) || !child.activeSelf) continue;
+
+                Undo.RecordObject(child, "Hide legacy panel");
+                child.SetActive(false);
+            }
         }
 
         private static void HideChild(GameObject parent, string name)

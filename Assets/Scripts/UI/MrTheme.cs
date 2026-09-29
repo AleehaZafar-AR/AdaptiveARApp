@@ -25,13 +25,13 @@ namespace AdaptiveAR.UI
         // =====================================================================
 
         /// <summary>Panel body. Dark charcoal, translucent so passthrough reads through it.</summary>
-        public static readonly Color PanelFill = new Color32(0x16, 0x1A, 0x1E, 0xD4);
+        public static readonly Color PanelFill = new Color32(0x0E, 0x12, 0x16, 0xF0);
 
         /// <summary>Slightly lighter charcoal for a nested row or an inset field.</summary>
-        public static readonly Color PanelFillRaised = new Color32(0x20, 0x26, 0x2B, 0xD9);
+        public static readonly Color PanelFillRaised = new Color32(0x1B, 0x22, 0x28, 0xF2);
 
         /// <summary>Hairline border. Low alpha so it reads as an edge, not a frame.</summary>
-        public static readonly Color PanelBorder = new Color32(0x6F, 0x7C, 0x85, 0x4D);
+        public static readonly Color PanelBorder = new Color32(0x8A, 0x99, 0xA3, 0x66);
 
         /// <summary>Primary guidance accent.</summary>
         public static readonly Color Accent = new Color32(0x3F, 0xD8, 0xD4, 0xFF);
@@ -63,10 +63,10 @@ namespace AdaptiveAR.UI
         // screen. Body text below ~22 gets unreliable on passthrough.
         // =====================================================================
 
-        public const float SizeEyebrow = 20f;   // small uppercase label above a title
-        public const float SizeTitle = 42f;   // the instruction headline
-        public const float SizeBody = 26f;   // supporting sentence
-        public const float SizeList = 24f;   // task list rows, numbered sub-steps
+        public const float SizeEyebrow = 18f;   // small uppercase label above a title
+        public const float SizeTitle = 36f;   // the instruction headline
+        public const float SizeBody = 23f;   // supporting sentence
+        public const float SizeList = 22f;   // task list rows, numbered sub-steps
         public const float SizeButton = 24f;
         public const float SizeMetric = 28f;   // debug HUD values
         public const float SizeMetricLabel = 18f;
@@ -78,7 +78,7 @@ namespace AdaptiveAR.UI
         // Metrics
         // =====================================================================
 
-        public const float PanelPadding = 28f;
+        public const float PanelPadding = 24f;
         public const float RowSpacing = 16f;
         public const float SectionSpacing = 24f;
         public const float CornerRadiusPx = 24f;

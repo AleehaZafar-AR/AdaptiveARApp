@@ -269,7 +269,17 @@ namespace AdaptiveAR.Steps
             // Never let a confirm press start the sequence. The sequence begins only when
             // StepManager has locked the ArUco anchor, so pressing confirm beforehand
             // must do nothing rather than skip the anchoring step.
-            if (!stepRunner.HasStarted) return;
+            //
+            // This is logged rather than silent: an unexplained dead button on device is
+            // very hard to tell apart from a broken one, which is exactly what happened
+            // when the Begin control went missing.
+            if (!stepRunner.HasStarted)
+            {
+                if (logToConsole)
+                    Debug.Log("[Session] Advance ignored: the sequence has not started yet. " +
+                              "Press Start, then look at the ArUco marker to anchor the engine.");
+                return;
+            }
 
             if (stepRunner.IsOnLastStep)
             {
