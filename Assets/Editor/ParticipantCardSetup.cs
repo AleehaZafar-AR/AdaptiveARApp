@@ -65,8 +65,33 @@ namespace AdaptiveAR.EditorTools
         private const float FeedbackMin = 13f, FeedbackMax = 17f;
         private const float ButtonMin = 16f, ButtonMax = 20f;   // well under ButtonH
 
-        [MenuItem("AdaptiveAR/UI/3 - Build Participant Card (single card)", false, 12)]
-        public static void Build()
+        /// <summary>
+        /// OBSOLETE menu path. It hid the Steps and Status canvases to leave one card, which
+        /// the adaptive multi-panel direction supersedes. Use
+        /// 'AdaptiveAR > UI > 4 - Build Adaptive UI' instead; it calls BuildInstructionCard
+        /// below and keeps the context panels.
+        /// </summary>
+        [MenuItem("AdaptiveAR/UI/OBSOLETE - 3 Build Single Card (do not run)", false, 90)]
+        public static void BuildObsoleteSingleCard()
+        {
+            if (!EditorUtility.DisplayDialog(
+                    "Superseded command",
+                    "This builds the one-card layout and HIDES the Steps and Performance panels.\n\n" +
+                    "The adaptive multi-panel UI replaces it. Use 'UI > 4 - Build Adaptive UI'.\n\n" +
+                    "Run this anyway?",
+                    "Run anyway", "Cancel"))
+                return;
+
+            BuildInstructionCard();
+            HideCanvas(SceneManager.GetActiveScene(), "OverviewCanvas");
+            HideCanvas(SceneManager.GetActiveScene(), "StatusCanvas");
+        }
+
+        /// <summary>
+        /// Builds the instruction card only. Leaves every other canvas alone, so the
+        /// adaptive multi-panel builder can own what else is on screen.
+        /// </summary>
+        public static void BuildInstructionCard()
         {
             Scene scene = SceneManager.GetActiveScene();
             if (scene.name != ExpectedSceneName)
@@ -133,9 +158,6 @@ namespace AdaptiveAR.EditorTools
             bar.SetSegmentSprite(panelSprite);
             SetRefs(bar, ("session", session), ("stepRunner", runner), ("workflow", workflow));
 
-            // --- the other participant canvases are gone: one card only ---
-            int hidden = HideCanvas(scene, "OverviewCanvas") + HideCanvas(scene, "StatusCanvas");
-
             Undo.CollapseUndoOperations(group);
             EditorSceneManager.MarkSceneDirty(scene);
 
@@ -143,7 +165,7 @@ namespace AdaptiveAR.EditorTools
                 "[Card] Single participant card built.\n" +
                 $"  Card            : {CardWidth / 1000f:F2} x {CardHeight / 1000f:F2} m, fixed layout\n" +
                 $"  Rows            : header, progress, label, divider, title, body, feedback, controls\n" +
-                $"  Participant canvases hidden : {hidden} (Steps and Status are researcher concerns now)\n" +
+                "  Context panels are left alone; the adaptive builder owns their presence.\n" +
                 "  Every row has an explicit RectTransform and a bounded auto-size range, so\n" +
                 "  content cannot move a row or escape the card.\n" +
                 "  Background is anchored to the full card bounds - no uncovered region.\n" +

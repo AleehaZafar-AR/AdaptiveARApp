@@ -106,7 +106,7 @@ namespace AdaptiveAR.EditorTools
         {
             // A placement TARGET, not another component: low alpha so the bench reads
             // through it, plus emission so the silhouette survives bright passthrough.
-            Color ghost = new Color(0.30f, 0.90f, 0.45f, 0.25f);
+            Color ghost = new Color(0.25f, 0.82f, 0.85f, 0.25f);
 
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", ghost);
             if (mat.HasProperty("_Color")) mat.SetColor("_Color", ghost);

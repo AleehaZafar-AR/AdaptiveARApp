@@ -904,3 +904,191 @@ In Claude → Reviewer report:
 - [PC] physical calibration items.
 
 Continue autonomously on reversible implementation work. Stop only for a genuine missing physical/procedural fact, destructive source-asset operation, or research-methodology decision.
+
+---
+
+## Claude → Reviewer — 2026-09-30 — Adaptive multi-panel UI + real piston assembly
+
+Implements the correction. All functional-recovery work from the previous pass is intact:
+root-Rigidbody/collider repair, PanelRig decoupling, ray controls, URP transparency,
+target-derived arrows, bounded TMP, validation gating, snap/lock, WorkflowState progress,
+logging, AI seam.
+
+### 1. What changed relative to the functional-recovery pass
+
+The one-card direction is superseded. `UI ▸ 3` is renamed **`UI ▸ OBSOLETE - 3 Build Single
+Card (do not run)`** and now shows a confirmation dialog explaining what replaced it, so it
+cannot be run by accident. Its card-building code was extracted into
+`ParticipantCardSetup.BuildInstructionCard()` and is reused — the card itself was fine; what
+was wrong was hiding the context panels.
+
+`UI ▸ 4 - Build Adaptive UI (current)` is the single current UI path.
+
+### 2. L1 / L2 / L3 panel behaviour
+
+| Zone | Position | L1 | L2 | L3 |
+|---|---|---|---|---|
+| 1 Instruction | left | Full | Full | Full |
+| 2 Steps / What's Next | right | Full | Reduced | Hidden |
+| 3 Performance | right, below | Full | Reduced | Hidden |
+| 4 Research / System | far right, low | Faded | Faded | Hidden |
+
+`Reduced` = 55% alpha, still interactive. `Faded` = 18%, **not** interactive. `Hidden` = 0%
+and the GameObject switched off.
+
+Higher support therefore means **richer immediate guidance and less competing peripheral
+information**, which is the stated principle. The implementation is neutral: it decides what
+is shown, how brightly, and whether it accepts rays. It encodes no claim about effects on a
+participant.
+
+The **centre is empty at every level** — panels flank it so the engine, ghost, arrow and
+local validation cue own the middle.
+
+Transitions are alpha fades over 0.35 s. A panel below 50% alpha stops blocking raycasts, so
+a faded panel cannot swallow a ray meant for the work behind it. `AdaptivePanelController`
+touches visibility only — it never reads or writes workflow state, so switching support
+cannot reset progress, duplicate a canvas or clear an instruction.
+
+### 3. Panel ownership and lifecycle
+
+| Zone | Canvas | Sole runtime writer |
+|---|---|---|
+| 1 | DemoUICanvas | `ParticipantCard` |
+| 2 | OverviewCanvas | `TaskListHud` |
+| 3 | StatusCanvas | `StatusHud` |
+| 4 | ResearchCanvas (created) | `ResearcherHud` |
+
+Presence is owned by `AdaptivePanelController` alone; no HUD changes its own visibility.
+Support level is **not** shown on any participant panel — it lives only in zone 4.
+
+### 4. Stability and reachability, preserved
+
+All four canvases are children of `PanelRig`, which still unparents itself from
+`MarkerAnchor` on anchor lock, so no zone inherits marker corrections after calibration.
+Every canvas keeps its `ISDK_RayCanvasInteraction` block and its `Surface` is resized with
+it, so ray targets match visible bounds. Controls remain 170 × 56 mm with `raycastTarget` on
+the button's own Image.
+
+### 5. Piston assembly — how it became manipulable without destroying source assets
+
+Non-destructive by construction. For each piston the tool creates **derived duplicates**:
+
+```
+Components/PistonKits/PistonKit00N     kit root - the growing assembly
+  PistonHead, ConnectingRod, ...       grabbable duplicates, staged in the tray
+Ghosties/PistonKits/PistonKit00N       ghost targets at the assembled poses,
+                                       positioned at a bench build zone
+```
+
+The original `Components/piston00N` is **deactivated, never deleted**. The imported model
+and its prefab are untouched; `git checkout` of the scene reverts everything regardless.
+
+`PistonAssembly` owns the change of manipulation unit: as each component is validated and
+locked it is parented into the kit (world pose preserved), and when every required component
+is in, the kit's own grab components are enabled so the finished piston becomes the thing
+being installed. It watches `PlacementLock` state rather than subscribing to the validator,
+so it stays correct whatever completed a part and in what order.
+
+Each derived part gets the shape the grab diagnosis proved is required: **one** Rigidbody at
+the root, no nested bodies, convex mesh colliders, and a cloned ISDK block with its Rigidbody
+references retargeted. Ghost copies have all interaction stripped — a target is never
+grabbable.
+
+### 6. Piston substeps: functional vs blocked
+
+Per piston: `locate → head → rod → connecting pin → rod end → retaining bolt → install`.
+
+| Substep | Component | State |
+|---|---|---|
+| locate | — | enabled |
+| head | `PistonHead` | enabled |
+| rod | `ConnectingRod` | enabled |
+| connecting pin | `ConnectingPin` | enabled |
+| rod end | `PistonEnd` | enabled |
+| retaining bolt | `pistonBolt` | enabled |
+| nut, second bolt, second nut | `PistonNut`, `pistonBoltOther`, `PistonNutOther` | **authored, disabled** |
+| install | kit → `ghost.piston00N` | enabled |
+
+The three disabled fasteners are a **session-length** decision, not a procedural claim: six
+enabled actions × four pistons is already ~24 placements. The reason is stored in the asset
+and written to the log; flip `enabled` for a full-procedure run.
+
+**The piston fasteners are separable** — I verified they are child meshes with their own
+mesh filters, so duplicating them into independent objects works. That part of the earlier
+audit's "blocked" verdict does **not** apply to pistons. It still applies to the crank
+bolts, which are baked into the oil pan.
+
+Nothing about torque, thread direction or bolt count was invented — only the component
+meshes the model contains.
+
+### 7. Ghost colour
+
+Active target ghosts are now **cyan** (`0.25, 0.82, 0.85`, alpha 0.25). Green is reserved for
+confirmed success. Transparency setup is unchanged from the last pass and still correct:
+URP **Unlit**, alpha blend, alpha clip off, `_ZWrite 0`, depth and shadow passes disabled,
+**no emission**.
+
+---
+
+## AUTHORITATIVE RUN ORDER — this supersedes every earlier list
+
+Open `Assets/1 - ArUcoMarkerTracking.unity`, then run **in this order**:
+
+```
+1.  AdaptiveAR ▸ Grab        ▸ 1 - Diagnose Grabbability (dry run)
+2.  AdaptiveAR ▸ Grab        ▸ 2 - Repair Grabbability
+3.  AdaptiveAR ▸ Assembly    ▸ 2 - Apply Full Assembly Content
+4.  AdaptiveAR ▸ Piston      ▸ 1 - Validate Piston Kits (dry run)
+5.  AdaptiveAR ▸ Piston      ▸ 2 - Build Piston Kits
+6.  AdaptiveAR ▸ Piston      ▸ 3 - Author Piston Substeps
+7.  AdaptiveAR ▸ Interaction ▸ 1 - Apply Ghost Target Material
+8.  AdaptiveAR ▸ UI          ▸ 2 - Apply UI Restyle          (creates PanelRig)
+9.  AdaptiveAR ▸ UI          ▸ 4 - Build Adaptive UI (current)
+10. AdaptiveAR ▸ Interaction ▸ 3 - Wire Guidance Arrow
+```
+
+Then **Ctrl+S**. Steps 1 and 4 change nothing — read their Console output before continuing.
+
+### Do NOT run these
+
+| Command | Why |
+|---|---|
+| `UI ▸ OBSOLETE - 3 Build Single Card` | Superseded. Hides Steps and Performance. Now behind a confirmation dialog. |
+| `Interaction ▸ 2 - Make All Parts Grabbable` | Re-adds the nested Rigidbodies that made the pistons ungrabbable. `Grab ▸ 2` replaces it. |
+| `Fasteners ▸ 1 / 2 / 3` | Crank-bolt extraction. Out of scope this pass, and it restructures the oil pan. |
+| `Phase 1 ▸ 3 / 4 / 5`, `Test Fixtures ▸ *` | Superseded by the Assembly and Piston tools. |
+| `Alignment ▸ *` | Already applied. Only re-run if the anchor scale regresses. |
+
+Yes — **`UI ▸ 4` supersedes `UI ▸ 3`**, and the Fastener and `Interaction ▸ 2` tools remain
+skipped.
+
+### [QV] Quest checks
+
+1. Pistons grabbable after `Grab ▸ 2` — the nested-Rigidbody fix, still unproven on device.
+2. Piston **components** individually grabbable at their real size; they are small, and hand
+   tracking may struggle. This is the likeliest failure in this pass.
+3. Whether the bench build zone is reachable and clear of the engine.
+4. Panels stable, no jitter, rays reach the buttons from the seated pose.
+5. Ghost reads as a transparent target, not a solid part.
+6. Arrow orientation correct (`meshForward` may need one change once the prefab axis is seen).
+7. Panels fade rather than pop on support change, with no stale text.
+
+### [PC] Physical calibration
+
+- Component tolerances: 25 mm / 25° for piston parts, 40 mm / 25° for installs. Provisional.
+- Build-zone position and per-kit spacing (0.22 m apart).
+- Tray staging grid spacing (45 mm).
+- Ghost alpha 0.25; panel `Reduced` 0.55 and `Faded` 0.18 alpha.
+- Rig height 0.20 m above and 0.10 m beyond the marker.
+
+### Genuine blockers, unchanged
+
+- **No tool model.** `ToolInteraction` has four switchable detection rules and is ready for a
+  prefab.
+- **Crank bolts and caps are baked into the oil pan.** Extraction exists but is out of scope
+  here.
+- **No camshaft-specific holders in this model**, so the camshaft stage stays
+  place-and-validate.
+
+Nothing in this pass has run on a headset. Both assemblies compile with zero errors; that is
+not validation.
