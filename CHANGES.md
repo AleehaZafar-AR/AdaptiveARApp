@@ -709,3 +709,198 @@ fits all the evidence, but if pistons still cannot be picked up after the repair
 is elsewhere in the ISDK configuration, and the Quest-side symptom would narrow it fast —
 specifically whether the part shows a hover highlight but refuses to grab, or shows no
 highlight at all.
+
+
+---
+
+## Reviewer → Claude — 2026-09-29 — CORRECTION: adaptive multi-panel UI + real piston assembly
+
+### Context and priority
+
+Keep the useful functional-recovery fixes from the latest pass: root-Rigidbody/collider repair, UI decoupling from MarkerAnchor after calibration, ray-based controls, real URP transparency, target-derived arrows, bounded TMP layout, validation gating, snap/lock, WorkflowState progress, logging and the AI seam.
+
+The user has NOT run most of the latest Editor apply/setup commands yet. Update the tooling now so she does not apply an obsolete UI/workflow and then undo it.
+
+Two assumptions are corrected:
+
+1. Do NOT reduce the application to one participant card at all support levels.
+2. Do NOT treat each piston as a preassembled parent whose only task is placement into the engine.
+
+Functional Quest usability remains P0. UI adaptation is built on top of a working grab/place/validate/lock loop.
+
+### 1. Adaptive multi-panel participant UI
+
+The interface should be capable of changing information density and task focus across support levels. Do not encode or claim that a particular panel “causes stress.” Implement the behavior neutrally as peripheral information being visible, reduced, faded, collapsed or hidden.
+
+Keep the CENTER of view open for the physical engine, target ghost, arrow and local validation cue.
+
+Use up to four restrained zones:
+
+**Panel 1 — Instruction / Guidance (primary, left)**
+- current major stage/action;
+- concise instruction;
+- validation feedback;
+- Help/Replay only when authored;
+- Back/Continue where appropriate.
+- Remains at every support level.
+
+**Panel 2 — Steps / What's Next (secondary)**
+- compact completed/current/upcoming overview;
+- enough context to know where the participant is and what comes next;
+- no duplicate instruction paragraphs.
+
+**Panel 3 — Performance (secondary)**
+- restrained participant-visible metrics already available, such as overall progress, elapsed task time and/or attempt/error feedback;
+- do not invent metrics;
+- not a debug dump.
+
+**Panel 4 — Research/System (tertiary)**
+- support level, validation/decision diagnostics and future AI/physiology fields;
+- primarily hidden, researcher-toggleable, or extremely low salience/faded;
+- must never compete with the task.
+
+Use the supplied inspiration's visual language: charcoal translucent cards, cyan/teal guidance accent, white primary type, muted secondary type, amber correction, restrained green success, consistent padding/borders. Do NOT resurrect the old giant Overview/Status appearance.
+
+#### Support-level presentation
+
+**L1 — minimal task assistance / information-rich context**
+- concise goal/instruction;
+- Steps/What's Next visible;
+- Performance visible;
+- Research/System hidden or extremely subdued;
+- minimal task-specific spatial assistance.
+
+**L2 — guided**
+- primary instruction remains;
+- Steps remains but can condense/reduce salience;
+- Performance remains but lower salience;
+- transparent target ghost/spatial cue available;
+- Research/System hidden/subdued.
+
+**L3 — assisted/focused**
+- richer IMMEDIATE task assistance while reducing peripheral information;
+- Steps collapses/fades out;
+- Performance collapses/fades out;
+- Research/System hidden;
+- strong primary instruction card;
+- optionally a small contextual Parts card if useful;
+- one decomposed actionable instruction at a time;
+- transparent ghost + correct directional cue;
+- Help/Replay/audio only where authored.
+
+Design principle: **higher support = richer immediate task guidance, not more simultaneous screen information.**
+
+Transitions should be calm fades/collapses. Support switching must not reset workflow state, duplicate canvases or leave stale text.
+
+#### Supersede the one-card builder
+
+The current `UI ▸ 3 - Build Participant Card` hides OverviewCanvas/StatusCanvas and creates “one card only.” Revise/supersede it BEFORE the user runs it.
+
+Provide ONE idempotent current UI build/apply path for the adaptive multi-panel system. Running it twice must not duplicate objects/components. Explicitly mark the old one-card command obsolete if its behavior remains in code.
+
+All TMP fields remain hard-bounded: fixed RectTransforms, bounded autosize, wrapping only where intended, truncate/split rather than render outside bounds. Button label regions stay inside button bounds. Ray hit areas must match visible controls. Participant UI remains decoupled from continuously corrected MarkerAnchor after calibration.
+
+### 2. Ghost visual correction
+
+The latest handoff says alpha 0.25, **green**. Change active target ghosts to the inspiration's **cyan/teal**. Green is reserved for confirmed/completed success.
+
+Keep the technically correct transparency setup: URP transparent surface, alpha blend, alpha clip off, appropriate ZWrite/depth/shadow behavior, and no emission that defeats transparency. The real engine/environment must be clearly visible THROUGH the ghost on Quest.
+
+### 3. Real piston workflow: assemble it first
+
+The intended task is NOT “grab complete piston001 and insert it.”
+
+The hierarchy audit already identified:
+- `PistonHead`
+- `ConnectingRod`
+- `ConnectingPin`
+- `PistonEnd`
+- `pistonBolt`
+- `PistonNut`
+- corresponding “Other” fastener meshes.
+
+For each piston, the user's intended procedure is:
+
+1. **Piston head** — identify/grab the piston head.
+2. **Connecting rod** — identify/grab and position the connecting rod relative to the piston head.
+3. **Join head + rod** — connect them using the intended connecting bolt/pin hardware.
+4. **Attach rod end/cap** — attach `PistonEnd` to the connecting rod using the intended bolt/nut hardware.
+5. **Install completed piston assembly** — place the assembled piston into the correct engine location, validate, snap/lock.
+
+Do NOT invent exact bolt counts, torque, threading direction, or finer mechanical sequence not established by the model/user.
+
+#### Runtime architecture
+
+The piston parent cannot be the sole manipulation unit if its children are assembled independently.
+
+Use a NON-DESTRUCTIVE strategy:
+- preserve original imported/source assets;
+- create derived runtime prefabs/duplicates if necessary;
+- make PistonHead, ConnectingRod, ConnectingPin/bolt, PistonEnd and required fasteners independently interactable;
+- give required joins explicit target transforms/ghosts;
+- after a child is correctly joined, lock/parent it into the growing piston assembly while preserving the next interaction;
+- after assembly is complete, allow the completed piston assembly to be manipulated as the unit for final engine placement.
+
+Do not destructively edit the only source model/prefab.
+
+If a required fastener is genuinely inseparable, report the exact blocker. The audit says piston fasteners are child meshes, so verify whether they can become independent runtime objects before calling the piston sequence blocked.
+
+### 4. Piston workflow and support granularity
+
+All support levels require the SAME physical completion.
+
+- **L1:** broader goal-level guidance where feasible, with contextual panels visible.
+- **L2:** current assembly action + relevant target/ghost.
+- **L3:** physical sequence exposed one actionable substep at a time (head → rod → connector → end/cap + fasteners → installation), while peripheral panels fade/collapse and immediate spatial guidance strengthens.
+
+L3 must not be a longer paragraph.
+
+The exact L1/L2 grouping must remain validation-safe: downstream progression cannot occur until physical prerequisites are actually completed.
+
+### 5. Keep functional recovery as P0
+
+Do not regress the required physical loop:
+
+**instruction → grab → manipulate → release → validate → correction OR success → snap/lock → clear guidance → progress update → next action**
+
+The next build must specifically prove:
+- crankshaft grab/validate/lock;
+- independent piston-head grab;
+- independent connecting-rod grab;
+- first piston join interaction as far as implemented;
+- gated progression;
+- no stale text;
+- stable non-jittering panels;
+- reachable ray buttons;
+- transparent cyan ghost;
+- correctly oriented target-derived arrow.
+
+Fastener/tool architecture may remain opt-in/blocked where assets or procedure are genuinely missing. Do not let camshaft asset gaps block this iteration.
+
+### 6. Current run-order requirement
+
+Because the user has not run most previous menu operations, finish by giving ONE clean current Unity menu run order.
+
+Explicitly state:
+- which commands to run;
+- which old commands are obsolete and must NOT be run;
+- whether any new setup command supersedes `UI ▸ 3 - Build Participant Card`;
+- whether existing Fastener/Interaction tools should remain skipped.
+
+Do not make the user reconcile contradictory historical run orders herself.
+
+### 7. Next handoff
+
+In Claude → Reviewer report:
+- what changed relative to the functional-recovery pass;
+- L1/L2/L3 panel visibility/transition behavior;
+- ownership/lifecycle of each panel;
+- how stable positioning and ray reachability are preserved;
+- how piston source hierarchy became independently manipulable without destroying source assets;
+- which piston substeps are functional vs blocked;
+- exact current menu run order;
+- obsolete commands NOT to run;
+- [QV] Quest checks;
+- [PC] physical calibration items.
+
+Continue autonomously on reversible implementation work. Stop only for a genuine missing physical/procedural fact, destructive source-asset operation, or research-methodology decision.
