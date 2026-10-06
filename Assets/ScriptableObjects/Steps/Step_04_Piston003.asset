@@ -20,7 +20,7 @@ MonoBehaviour:
   stepId: step_04_piston003
   displayName: Piston 3
   defaultGhostSpawnOffset: {x: 0, y: 0, z: 0}
-  taskComplexity: 0
+  taskComplexity: 1
   requiresValidation: 1
   validationPartKey: part.piston003
   validationTargetKey: ghost.piston003
@@ -35,29 +35,156 @@ MonoBehaviour:
   actions:
   - actionId: step_04_piston003.locate
     kind: 0
-    instruction: Find the piston 3 in the parts tray.
-    detail: Take piston 3 from the tray.
-    partKey: part.piston003
+    instruction: Find the piston components in the parts tray.
+    detail: You will build the piston, then install it.
+    partKey: 
     interchangeablePartKeys: []
     targetKey: 
     positionToleranceMeters: 0.04
     rotationToleranceDegrees: 25
     settleSeconds: 0.45
     ghostKeys: []
+    showArrow: 0
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_04_piston003.PistonHead
+    kind: 1
+    instruction: Fit the piston head onto the build area.
+    detail: 
+    partKey: part.PistonKit003.PistonHead
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.PistonHead
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.PistonHead
     showArrow: 1
     audioCue: {fileID: 0}
     enabled: 1
     disabledReason: 
-  - actionId: step_04_piston003.place
+  - actionId: step_04_piston003.ConnectingRod
     kind: 1
-    instruction: Fit piston 3.
-    detail: Fit piston 3 into the third cylinder bore.
-    partKey: part.piston003
-    interchangeablePartKeys:
-    - part.piston001
-    - part.piston002
-    - part.piston003
-    - part.piston004
+    instruction: Align the connecting rod with the piston head.
+    detail: 
+    partKey: part.PistonKit003.ConnectingRod
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.ConnectingRod
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.ConnectingRod
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_04_piston003.ConnectingPin
+    kind: 1
+    instruction: Fit the connecting pin to join the rod to the head.
+    detail: 
+    partKey: part.PistonKit003.ConnectingPin
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.ConnectingPin
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.ConnectingPin
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_04_piston003.PistonEnd
+    kind: 1
+    instruction: Fit the rod end cap onto the connecting rod.
+    detail: 
+    partKey: part.PistonKit003.PistonEnd
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.PistonEnd
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.PistonEnd
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_04_piston003.pistonBolt
+    kind: 2
+    instruction: Fit the retaining bolt.
+    detail: 
+    partKey: part.PistonKit003.pistonBolt
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.pistonBolt
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.pistonBolt
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_04_piston003.PistonNut
+    kind: 2
+    instruction: Fit the retaining nut.
+    detail: 
+    partKey: part.PistonKit003.PistonNut
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.PistonNut
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.PistonNut
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 0
+    disabledReason: Authored but off by default to keep a run inside the 15 minute
+      session target. Enable for a full-procedure run.
+  - actionId: step_04_piston003.pistonBoltOther
+    kind: 2
+    instruction: Fit the second retaining bolt.
+    detail: 
+    partKey: part.PistonKit003.pistonBoltOther
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.pistonBoltOther
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.pistonBoltOther
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 0
+    disabledReason: Authored but off by default to keep a run inside the 15 minute
+      session target. Enable for a full-procedure run.
+  - actionId: step_04_piston003.PistonNutOther
+    kind: 2
+    instruction: Fit the second retaining nut.
+    detail: 
+    partKey: part.PistonKit003.PistonNutOther
+    interchangeablePartKeys: []
+    targetKey: ghost.PistonKit003.PistonNutOther
+    positionToleranceMeters: 0.025
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.PistonKit003.PistonNutOther
+    showArrow: 1
+    audioCue: {fileID: 0}
+    enabled: 0
+    disabledReason: Authored but off by default to keep a run inside the 15 minute
+      session target. Enable for a full-procedure run.
+  - actionId: step_04_piston003.install
+    kind: 1
+    instruction: Install the assembled piston into its cylinder bore.
+    detail: Lower the completed assembly onto the highlighted target.
+    partKey: part.PistonKit003
+    interchangeablePartKeys: []
     targetKey: ghost.piston003
     positionToleranceMeters: 0.04
     rotationToleranceDegrees: 25
@@ -68,39 +195,6 @@ MonoBehaviour:
     audioCue: {fileID: 0}
     enabled: 1
     disabledReason: 
-  - actionId: step_04_piston003.fasten
-    kind: 2
-    instruction: Fit the retaining cap and bolts.
-    detail: 
-    partKey: 
-    interchangeablePartKeys: []
-    targetKey: 
-    positionToleranceMeters: 0.04
-    rotationToleranceDegrees: 25
-    settleSeconds: 0.45
-    ghostKeys: []
-    showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: No separately movable fastener exists. crankHolderBolt002-016
-      and crankHolder001-004 are baked sub-meshes of the oilPan ghost; pistonBolt/PistonNut
-      are child meshes of each piston.
-  - actionId: step_04_piston003.tighten
-    kind: 3
-    instruction: Tighten the fasteners with the tool.
-    detail: 
-    partKey: 
-    interchangeablePartKeys: []
-    targetKey: 
-    positionToleranceMeters: 0.04
-    rotationToleranceDegrees: 25
-    settleSeconds: 0.45
-    ghostKeys: []
-    showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: No tool model exists in the repository. Architecture is in place;
-      assign a tool prefab and a detection rule once supplied.
   expectedDurationSeconds: 90
   defaultSupportLevel: 2
   l1Minimal:

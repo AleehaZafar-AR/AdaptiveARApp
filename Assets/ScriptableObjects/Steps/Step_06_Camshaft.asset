@@ -20,7 +20,7 @@ MonoBehaviour:
   stepId: step_06_camshaft
   displayName: Camshaft
   defaultGhostSpawnOffset: {x: 0, y: 0, z: 0}
-  taskComplexity: 0
+  taskComplexity: 2
   requiresValidation: 1
   validationPartKey: part.camshaft
   validationTargetKey: ghost.camshaft

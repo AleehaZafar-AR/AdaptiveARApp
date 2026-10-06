@@ -20,7 +20,7 @@ MonoBehaviour:
   stepId: step_01_crankshaft
   displayName: Crankshaft
   defaultGhostSpawnOffset: {x: 0, y: 0, z: 0}
-  taskComplexity: 0
+  taskComplexity: 3
   requiresValidation: 1
   validationPartKey: part.crankshaft
   validationTargetKey: ghost.crankshaft
