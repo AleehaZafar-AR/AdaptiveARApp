@@ -50,13 +50,26 @@ namespace AdaptiveAR.EditorTools
         private static readonly Vector2 PerfSize = new Vector2(300f, 130f);
         private static readonly Vector2 ResearchSize = new Vector2(280f, 300f);
 
-        [MenuItem("AdaptiveAR/UI/4 - Build Adaptive UI (current)", false, 13)]
+        [MenuItem("AdaptiveAR/UI/4 - Build Adaptive UI (overwrites panel layout)", false, 13)]
         public static void Build()
         {
             Scene scene = SceneManager.GetActiveScene();
             if (scene.name != ExpectedSceneName)
             {
                 Debug.LogError($"[AdaptiveUI] Wrong scene '{scene.name}'. Aborted.");
+                return;
+            }
+
+            // The panel positions, widths and text sizes in the scene were tuned by hand on
+            // the Quest after this tool last ran. Re-running it re-places and re-sizes them.
+            if (!EditorUtility.DisplayDialog(
+                    "Overwrite the tuned panel layout?",
+                    "This rebuilds the four UI zones and REPOSITIONS and RESIZES the panels, " +
+                    "replacing the layout that was tuned by hand on the headset.\n\n" +
+                    "Only run this on a scene whose UI you intend to regenerate.",
+                    "Cancel (recommended)", "Rebuild anyway"))
+            {
+                Debug.Log("[AdaptiveUI] Cancelled; the scene's panel layout is unchanged.");
                 return;
             }
 

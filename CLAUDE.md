@@ -168,7 +168,7 @@ Prefer changes that leave the system **runnable on-device at every step**. A sub
 
 | | |
 |---|---|
-| Unity | **6000.0.32f1** (Unity 6 LTS), URP |
+| Unity | **6000.0.32f1** (Unity 6 LTS). **Built-in render pipeline** — no URP asset is assigned in Graphics or Quality settings; scene materials use the built-in Standard shader |
 | XR loader (Android + Standalone) | **OpenXR** (`Assets/XR/Loaders/OpenXRLoader.asset`). The Oculus loader asset exists but is *not* in the loader list |
 | Meta SDK | `com.meta.xr.sdk.all` **83.0.1** (OVRCameraRig, OVRManager, OVRPassthroughLayer, Interaction SDK) |
 | CV | OpenCV for Unity (EnoxSoftware), full package + examples |
@@ -220,11 +220,13 @@ PassthroughCameraAccess ──GetTexture()──┐      ──GetCameraPose()�
 
 ### 7.2 ✅ Confirmed working on-device — do not break
 
-**The end-to-end launch flow runs on a Quest 3 today:**
+**The end-to-end launch flow that ran on a Quest 3 (marker path):**
 
 > launch → look at the ArUco marker → the **oil pan / engine model anchors** to the physical marker → **all other engine parts appear in the trays beside it** → the **first instruction step becomes active**.
 
 This is the baseline every change must preserve. It is the concrete meaning of constraint 1.
+
+**Current participant startup (since 2026-10-06, not yet device-verified):** the study uses fully virtual components, so the marker is bypassed. `StepManager.useSurfacePlacement` (default on) creates a `WorkspacePlacement` that poses **the same `MarkerAnchor` transform** from a desk surface hit (Meta `EnvironmentRaycastManager`, fallback plane) after the participant confirms a reticle. ArUco code, scene objects and the marker path are intact; turn the flag off to restore the flow above. Downstream systems only see `AnchorLocked` / `EngineAnchor` either way.
 
 Component parts of that flow:
 

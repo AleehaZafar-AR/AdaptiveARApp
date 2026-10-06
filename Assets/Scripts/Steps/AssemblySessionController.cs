@@ -34,6 +34,12 @@ namespace AdaptiveAR.Steps
         [Tooltip("Optional. Completes ToolAction substeps when a tool is used on a fastener.")]
         [SerializeField] private ToolInteraction toolInteraction;
 
+        [Tooltip("Shows and clears per-action guidance. Found on this object when empty.")]
+        [SerializeField] private StepPresenter presenter;
+
+        [Tooltip("Source of the workspace placement events that are logged. Found on this object when empty.")]
+        [SerializeField] private StepManager stepManager;
+
         [Header("Participant")]
         [Tooltip("Recorded as a decision-layer input. Free text, e.g. novice / experienced.")]
         [SerializeField] private string operatorExperience = "unspecified";
@@ -86,6 +92,7 @@ namespace AdaptiveAR.Steps
         private bool _stepOpen;
         private StepData _currentStep;
         private int _currentIndex = -1;
+        private bool _placementSubscribed;
 
         /// <summary>
         /// Latest physiological reading, or null when nothing is attached.
@@ -113,10 +120,21 @@ namespace AdaptiveAR.Steps
             {
                 validator.OnAttemptEvaluated += HandleAttempt;
                 validator.OnStepValidated += HandleStepValidated;
+                validator.OnPartGrabbed += HandlePartGrabbed;
+                validator.OnPartReleased += HandlePartReleased;
             }
 
             if (toolInteraction != null)
                 toolInteraction.OnToolActionCompleted += HandleToolActionCompleted;
+
+            if (presenter == null) presenter = GetComponent<StepPresenter>();
+            if (stepManager == null) stepManager = GetComponent<StepManager>();
+
+            if (stepManager != null && stepManager.Placement != null && !_placementSubscribed)
+            {
+                stepManager.Placement.OnPlaced += HandleWorkspacePlaced;
+                _placementSubscribed = true;
+            }
         }
 
         private void OnDisable()
@@ -134,10 +152,35 @@ namespace AdaptiveAR.Steps
             {
                 validator.OnAttemptEvaluated -= HandleAttempt;
                 validator.OnStepValidated -= HandleStepValidated;
+                validator.OnPartGrabbed -= HandlePartGrabbed;
+                validator.OnPartReleased -= HandlePartReleased;
             }
 
             if (toolInteraction != null)
                 toolInteraction.OnToolActionCompleted -= HandleToolActionCompleted;
+
+            if (stepManager != null && stepManager.Placement != null)
+                stepManager.Placement.OnPlaced -= HandleWorkspacePlaced;
+            _placementSubscribed = false;
+        }
+
+        private void HandlePartGrabbed(string partKey)
+        {
+            if (logger != null) logger.LogComponentGrabbed(partKey);
+        }
+
+        private void HandlePartReleased(string partKey)
+        {
+            if (logger != null) logger.LogComponentReleased(partKey);
+        }
+
+        private void HandleWorkspacePlaced(bool reposition)
+        {
+            var p = stepManager != null ? stepManager.Placement : null;
+            if (logger == null || p == null) return;
+
+            logger.LogWorkspacePlaced(p.ActiveProvider.ToString(), p.LastPlacedPosition,
+                                      p.LastSurfaceNormal, p.LastNormalConfidence, reposition);
         }
 
         /// <summary>A tool action satisfies its substep the same way a placement does.</summary>
@@ -148,6 +191,14 @@ namespace AdaptiveAR.Steps
 
         private void Start()
         {
+            // The placement provider may be created in StepManager.Awake after this
+            // component's OnEnable ran; make sure its events are logged either way.
+            if (!_placementSubscribed && stepManager != null && stepManager.Placement != null)
+            {
+                stepManager.Placement.OnPlaced += HandleWorkspacePlaced;
+                _placementSubscribed = true;
+            }
+
             if (beginSessionOnStart)
                 BeginSession();
         }
@@ -255,6 +306,10 @@ namespace AdaptiveAR.Steps
                                      "not be armed; it must be confirmed manually.");
             }
 
+            // Guidance for THIS action replaces whatever the previous action showed.
+            if (presenter != null)
+                presenter.PresentAction(action);
+
             if (logger != null && action != null)
                 logger.LogActionEnter(resolved, action.Id, action.kind.ToString(),
                                       action.enabled, action.disabledReason);
@@ -286,6 +341,9 @@ namespace AdaptiveAR.Steps
         {
             if (workflow != null)
                 workflow.CompleteStage(workflow.StageIndex);
+
+            if (presenter != null)
+                presenter.PresentAction(null);
 
             AdvanceStep("stage_complete");
         }
@@ -362,12 +420,18 @@ namespace AdaptiveAR.Steps
 
             if (logger != null && _currentStep != null)
             {
+                AssemblyAction a = validator != null ? validator.CurrentAction : null;
+                float posTol = a != null ? a.positionToleranceMeters : _currentStep.positionToleranceMeters;
+                float rotTol = a != null ? a.rotationToleranceDegrees : _currentStep.rotationToleranceDegrees;
+
                 logger.LogValidationAttempt(_attemptsOnStep, success, posErr, rotErr,
-                                            _currentStep.positionToleranceMeters,
-                                            _currentStep.rotationToleranceDegrees,
+                                            posTol, rotTol,
                                             validator != null ? validator.PartKey : null,
                                             validator != null ? validator.TargetKey : null,
                                             trigger);
+
+                if (success)
+                    logger.LogComponentLocked(validator != null ? validator.PartKey : null, posErr, rotErr);
             }
 
             RaiseStateChanged();
@@ -390,8 +454,8 @@ namespace AdaptiveAR.Steps
             if (!SessionActive || SequenceFinished || stepRunner == null) return;
 
             // Never let a confirm press start the sequence. The sequence begins only when
-            // StepManager has locked the ArUco anchor, so pressing confirm beforehand
-            // must do nothing rather than skip the anchoring step.
+            // StepManager has locked the workspace (placed, or the marker found), so pressing
+            // confirm beforehand must do nothing rather than skip the anchoring step.
             //
             // This is logged rather than silent: an unexplained dead button on device is
             // very hard to tell apart from a broken one, which is exactly what happened
@@ -400,7 +464,7 @@ namespace AdaptiveAR.Steps
             {
                 if (logToConsole)
                     Debug.Log("[Session] Advance ignored: the sequence has not started yet. " +
-                              "Press Start, then look at the ArUco marker to anchor the engine.");
+                              "Place the workspace and press Begin first.");
                 return;
             }
 
@@ -458,8 +522,13 @@ namespace AdaptiveAR.Steps
             if (logger != null)
                 logger.LogNote("sequence_complete");
 
-            if (captionText != null)
+            // The ParticipantCard owns the card text when present; writing here too would
+            // mean two writers for one field. The completion screen shows the message.
+            if (captionText != null && (presenter == null || !presenter.TextOwnedByParticipantCard))
                 captionText.text = completionMessage;
+
+            if (validator != null) validator.Clear();
+            if (presenter != null) presenter.ClearGuidance();
 
             OnSessionComplete?.Invoke();
             RaiseStateChanged();

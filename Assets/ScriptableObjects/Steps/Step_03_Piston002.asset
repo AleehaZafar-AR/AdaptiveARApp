@@ -185,7 +185,7 @@ MonoBehaviour:
     detail: Lower the completed assembly onto the highlighted target.
     partKey: part.PistonKit002
     interchangeablePartKeys: []
-    targetKey: ghost.piston002
+    targetKey: ghost.piston002.PistonHead
     positionToleranceMeters: 0.04
     rotationToleranceDegrees: 25
     settleSeconds: 0.45

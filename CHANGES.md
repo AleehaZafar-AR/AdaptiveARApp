@@ -1092,3 +1092,241 @@ skipped.
 
 Nothing in this pass has run on a headset. Both assemblies compile with zero errors; that is
 not validation.
+
+---
+
+## Claude → Reviewer — 2026-10-06 — Interaction layer freeze: surface placement, lifecycle, snap assembly, physics
+
+Your manual scene is the base. It was committed untouched first (`2bd1a17`), so every
+line of this pass is diffable against it. Nothing in this pass runs an Editor builder.
+
+### What I did NOT touch (verified against the checkpoint)
+
+| Item | Diff vs `2bd1a17` |
+|---|---|
+| Panel positions, widths, text/layout | none |
+| `GhostTarget.mat` (green) | none |
+| `arrow.prefab` rotation | none |
+| Piston components and their grab config | none |
+| `1 - ArUcoMarkerTracking.unity` | **one line**: the serialized `Demo:` caption blanked |
+
+### 1. Surface placement replaces the ArUco startup
+
+**How the workspace transform is established.** A new `WorkspacePlacement`
+(`Assets/Scripts/MR/`) is created at runtime by `StepManager.Awake` when
+`useSurfacePlacement` is on (default). It writes the **same transform ArUco wrote**:
+`MarkerAnchor`, the top of the anchor chain. Everything below it — `CalibrationOffset`
+(grounding lift), `EngineAnchor`, trays, ghosts, `TabletopSupport`, `PanelRig` — keeps
+its marker-relative geometry, so downstream code did not change.
+
+Pose convention is the marker's: MarkerAnchor **+Z = surface normal (up)**, +Y points
+away from the viewer, `yawOffsetDegrees` about the normal, plus `surfaceUpOffset`
+(1 cm) above the hit. `CalibrationOffset` still lifts the model by its grounded
+0.224 m, so the oil pan sits on the desk and the pad collider lies on it.
+
+**Surface source.** Meta's `EnvironmentRaycastManager` (MR Utility Kit, Depth API,
+no room setup). `EnvironmentDepthManager` is created with occlusion shaders OFF and
+runs only while placing. If depth is unsupported or silent for 4 s, a horizontal
+plane at `fallbackTableHeight` (0.72 m above floor) is used and the screen says so.
+The Editor always uses the plane, so the flow is play-mode testable.
+
+**Pointing ray**: tracked controller → hand pointer pose → head gaze.
+**Confirm**: the `Place Workspace` button (ray-clickable), index trigger, or index
+pinch. **Reposition**: right thumbstick click; the engine follows the reticle until
+confirmed again. Panels do not move on reposition — they are already detached.
+
+**Flow**: passthrough → placement screen on the Home panel (same panel, same button)
+→ reticle → confirm → `StepManager.AnchorLocked` → PanelRig locks → onboarding →
+Begin → sequence. Logged as `workspace_placed` (provider, position, normal, confidence,
+reposition flag).
+
+**What happens to ArUco at runtime.** With `useSurfacePlacement` on: the
+`[ApplicationCoordinator]` is disabled before its `Start()`, the CV debug quad is
+deactivated, and the `Passthrough Camera Access` object is switched off, so no camera
+permission or CPU goes to it. The code, the scene objects and the marker path are
+intact; set `useSurfacePlacement` off to get the original startup back. `StepManager`
+never waits for marker 0 any more.
+
+### 2. The `Demo:` text — exact source
+
+`DemoUICanvas/Panel/CaptionText` (TextMeshProUGUI, fileID 1676478110) carried the
+serialized string `Demo: Insert the crankshaft (click Got It when ready)` from the
+original prototype. It is `StepPresenter.captionText`, the single-field fallback.
+Because `titleText` is also assigned, the presenter took the preferred path and
+**never wrote or cleared the fallback**, so the serialized string stayed on screen
+for the whole session. Two fixes: the string is blanked in the scene (the one-line
+scene change), and `StepPresenter.ClearText` now always clears the fallback even when
+it is not the active layout. `Step_0_Demo.asset`, `DemoScene.unity`, `main.unity` and
+`DemoUICanvas.prefab` still contain the text; none is in the build set or the runner.
+
+### 3. One presentation lifecycle
+
+Three components used to write the same TextMeshPro fields (StepPresenter,
+ParticipantCard, AssemblySessionController). Now:
+
+- **ParticipantCard** is the only writer of card text. `StepPresenter` detects it and
+  only clears the legacy fields. The session controller's completion caption is
+  skipped when a card exists.
+- **Action guidance was never shown.** `AssemblyAction.ghostKeys` had no consumer:
+  the piston component targets (`ghost.PistonKit001.PistonHead` …) never appeared.
+  `StepPresenter.PresentAction()` is now called from `EnterAction`: it deactivates
+  the previous action's ghosts, then shows this action's (falling back to the
+  stage's level block when the action has none). Whether a level shows ghosts at all
+  still comes from the authored level block, not code.
+- Every transition clears first: ghosts, spawned prefabs, correction feedback
+  (success feedback finishes its 1.2 s hold), AlignmentChip baseline, status line.
+- Ghosts are made **inert** when shown: kinematic, no gravity, colliders and grab
+  off. The kit ghosts carried a Rigidbody and `releaseToGravityOnEnable`, so they
+  would have fallen the moment they appeared.
+- A support-level change re-presents the same stage **and the same action**; it
+  touches no workflow state.
+- Sequence completion clears all guidance.
+
+### 4. Registry binds to your hierarchy by convention
+
+The `part.PistonKit00N.*` entries pointed at deleted objects (`fileID 0`).
+`GuidanceRegistry` now resolves unbound keys against the live scene and logs each
+binding once:
+
+```
+part.PistonKit001.ConnectingRod -> Components/PistonKits/piston001/ConnectingRod
+part.PistonKit001               -> .../piston001/PistonHead   (the kit handle)
+ghost.piston001.PistonHead      -> Ghosties/piston001/PistonHead
+```
+
+The four step assets' `install` actions now target `ghost.piston00N.PistonHead`
+(the head's pose) instead of the ghost group pivot. `ghostKeys` still show the whole
+ghost piston.
+
+### 5. Piston mating — how collisions are suppressed and restored
+
+In `StepValidator`:
+
+- **Grab state is read from the Interaction SDK** (`PointableElement.SelectingPointsCount`)
+  instead of inferred from `isKinematic`. The old inference read a kinematic-by-design
+  part as "held forever" and never judged it.
+- Within `assistRadiusMeters` (8 cm, or 1.5× tolerance) of the target:
+  `Physics.IgnoreCollision` is set between the moving part (and anything joined to it)
+  and the **receiving set** — every non-trigger collider under the workspace root
+  except the part itself and bench furniture (`tray*`, `Plane`, `TabletopSupport`).
+  Mating geometry may overlap; the table stays solid.
+- **Release inside the radius** freezes the part where the hand let go and judges
+  it after 0.12 s. Valid → snap, lock, join, assist stays off for that part.
+  Invalid → kinematic state restored, collisions restored (the engine pushes the
+  overlap apart at 1 m/s, not the project's 10 m/s), feedback shown, next attempt.
+- **Leaving the radius** restores collisions. Away from the target everything is as
+  before: free, solid, under gravity.
+- **Kits**: a locked `part.PistonKit001.X` is parented under the kit handle
+  (`PistonHead`). When the `install` action begins, the handle's lock is lifted so it
+  can be grabbed; the joined components ride with it as transform children and stay
+  locked. Install is judged head-vs-ghost-head.
+
+Sequence per piston: head → rod → pin → rod end → retaining bolt → install, with the
+other three fasteners authored but disabled as before.
+
+### 6. Slow-motion physics — what caused it
+
+Project time and gravity are normal (`fixedDeltaTime 0.02`, `timeScale 1`, gravity
+−9.81, drag 0, mass 1, scale of the parts is irrelevant to fall speed). No script
+sets any of them. The cause is in `DropIntoTray`, which overrides every part's
+Rigidbody in `Awake` regardless of the Inspector values you see:
+
+1. **`ContinuousSpeculative` CCD** on every part. Speculative contacts are created
+   ahead of motion, so a small part decelerates *before* it touches anything — the
+   classic floaty, hovering look.
+2. **Project contact offset 1 cm** (`DynamicsManager.m_DefaultContactOffset`) — a
+   1 cm cushion on a 2 cm pin, so parts rest and interact visibly above surfaces.
+3. **`RigidbodyInterpolation.Interpolate`** forced on. A kinematic body moved by the
+   hand through its Transform renders a physics step behind the hand, so carried
+   parts lag and smear.
+
+Fix (no scene edit, no grab-config change): a new `physicsProfile` field, default
+`Tuned`, which applies to every existing part because the field is new: sweep-based
+`ContinuousDynamic` (tunnelling still prevented), interpolation `None`, contact offset
+3 mm on the part's own colliders, depenetration 1 m/s. `PerObject` restores the two
+authored fields on that object. This is a diagnosis from inspection; it is **[QV]**.
+
+### 7. Progression
+
+Unchanged in principle, confirmed in code: progress derives from validated actions in
+`WorkflowState`, increments once (idempotent set), participant Continue is gated by
+`CanAdvance`, a support change cannot advance/reset/unlock/duplicate.
+
+### Files changed
+
+```
+new   Assets/Scripts/MR/WorkspacePlacement.cs
+mod   Assets/Scripts/Steps/StepManager.cs            provider swap, ArUco bypass
+mod   Assets/Scripts/Steps/StepValidator.cs          SDK grab state, snap assist, kit join
+mod   Assets/Scripts/Steps/StepPresenter.cs          action ghosts, text ownership, inert ghosts
+mod   Assets/Scripts/Steps/GuidanceRegistry.cs       convention binding
+mod   Assets/Scripts/Steps/AssemblySessionController.cs  PresentAction hook, grab/lock/placement logs
+mod   Assets/Scripts/UI/OnboardingSequence.cs        placement screen first
+mod   Assets/Scripts/UI/ParticipantCard.cs           feedback cleared per action
+mod   Assets/Scripts/UI/AlignmentChip.cs             per-action tolerance and reset
+mod   Assets/Scripts/UI/ResearcherHud.cs             WORKSPACE line, assist flag
+mod   Assets/Scripts/DropIntoTray.cs                 Tuned physics profile
+mod   Assets/Scripts/Logging/SessionLogger.cs        workspace_placed event
+del   Assets/Scripts/Steps/PistonAssembly.cs         superseded, was never in the scene
+mod   Assets/Editor/PistonAssemblySetup.cs           OBSOLETE menu names + confirm dialog
+mod   Assets/Editor/AdaptiveUiSetup.cs               confirm dialog: overwrites tuned layout
+mod   Assets/ScriptableObjects/Steps/Step_02..05     install targetKey -> ghost.piston00N.PistonHead
+mod   Assets/1 - ArUcoMarkerTracking.unity           one line: Demo caption blanked
+mod   CLAUDE.md                                      startup + render pipeline corrected
+```
+
+### Editor commands to run: **none**
+
+Open the scene, press Play or build. Unity will generate
+`WorkspacePlacement.cs.meta`; commit it. Do **not** run `UI ▸ 4`, any `Piston ▸ *`,
+`Interaction ▸ 2`, `Fasteners ▸ *` or `UI ▸ OBSOLETE 3`; the two that could damage the
+tuned scene now ask for confirmation.
+
+Optional, Inspector only: add a `WorkspacePlacement` component to `StepManager` to
+expose its tunables (`surfaceUpOffset`, `yawOffsetDegrees`, `fallbackTableHeight`,
+reposition button). Without it the runtime-created one uses the defaults above.
+
+### Quest acceptance test — in this order, all [QV]
+
+1. Launch: passthrough, no marker prompt, no camera-permission dialog. The Home panel
+   reads "SET UP / Place the workspace". **[QV]**
+2. Point at the desk with the controller (or hand). **[QV]**
+3. A cyan ring with a centre dot sits on the desk and follows the ray smoothly; amber
+   on a wall. **[QV]** If the body text says "estimated table height", depth was
+   unavailable — note it.
+4. Press `Place Workspace` (or trigger / pinch). The ring disappears; "Workspace
+   placed." **[QV]**
+5. Engine and tray parts appear on the desk, not inside it, and stay put. **[QV]**
+   If the engine is rotated relative to you, set `yawOffsetDegrees`. **[PC]**
+6. Panels sit where you tuned them (20 cm above the placed workspace) and do not move
+   afterwards. **[QV]**
+7. No `Demo:` text anywhere, through all stages. **[QV]**
+8. Crankshaft: grab, place on the green ghost, release → "Placed correctly", lock,
+   progress 1 action, next instruction, old ghost gone. **[QV]**
+9. Piston head grabs. **[QV]**
+10. Bring the rod to the head ghost: within ~8 cm it passes into the head instead of
+    bouncing off. **[QV]** The build zone is `Ghosties/PistonKits/PistonKit00N`
+    (16 cm above the desk, 58 cm along +Z); move those four roots if it is not
+    reachable. **[PC]**
+11. Release the rod in place: snaps, locks, joins the head. Release it badly: it is
+    pushed out gently and the card says why. **[QV]**
+12. Pin inserts and snaps the same way. **[QV]**
+13. Drop a free part from 10 cm: it falls at normal speed and rests on the tray, not
+    1 cm above it; carried parts do not trail the hand. **[QV]**
+14. Between actions: instruction, feedback, ghost and arrow all change together, with
+    nothing left from the previous action. **[QV]**
+15. Progress changes exactly once per completed required action; B/Y support changes
+    change nothing but panels and detail. **[QV]**
+16. Right thumbstick click: engine follows the ring; confirm; panels unchanged. **[QV]**
+
+### Physical calibration **[PC]**
+
+- `surfaceUpOffset` 1 cm, `yawOffsetDegrees` 0, `fallbackTableHeight` 0.72 m.
+- `assistRadiusMeters` 8 cm, `nearReleaseSettleSeconds` 0.12 s.
+- Contact offset 3 mm, depenetration 1 m/s.
+- Position of the four ghost kit build zones.
+
+### Not done, by instruction
+
+AI, OpenAI, HRV/BLE, simulation, WebXR, visual redesign, tool model. The crank bolts
+remain baked into the oil pan. Nothing here has run on a headset.

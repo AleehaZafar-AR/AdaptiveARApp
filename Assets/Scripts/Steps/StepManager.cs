@@ -1,9 +1,19 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using TryAR.MarkerTracking;
+using AdaptiveAR.MR;
 using AdaptiveAR.Steps;
 
+/// <summary>
+/// Owns the anchoring step: when the engine appears, and where.
+///
+/// Two registration providers exist. The participant startup uses surface placement
+/// (point at the desk, confirm). The ArUco marker path is kept intact and can be
+/// re-enabled by turning useSurfacePlacement off; nothing of it was deleted.
+/// Downstream systems only ever see <see cref="AnchorLocked"/> and EngineAnchor, so
+/// they do not know which provider was used.
+/// </summary>
 public class StepManager : MonoBehaviour
 {
     [Header("UI")]
@@ -15,6 +25,19 @@ public class StepManager : MonoBehaviour
     public ArUcoTrackingAppCoordinator arucoCoordinator;
     public ArUcoMarkerTracking arucoTracking;
     public int blockMarkerId;
+
+    [Header("Workspace placement (participant startup)")]
+    [Tooltip("ON: the participant places the workspace on the desk; no marker is needed and " +
+             "ArUco never runs. OFF: the original marker-anchored startup, unchanged.")]
+    public bool useSurfacePlacement = true;
+
+    [Tooltip("Optional. Left empty, a WorkspacePlacement is created on this object at runtime " +
+             "with its default settings. Add one to the scene to tune it in the Inspector.")]
+    public WorkspacePlacement placement;
+
+    [Tooltip("While surface placement is in use, also switch off the passthrough camera " +
+             "stream and the CV debug quad so no camera permission or CPU is spent on them.")]
+    public bool disableCameraAccessWhenBypassed = true;
 
     [Header("Parts")]
     public GameObject crankshaftPrefab;
@@ -32,11 +55,14 @@ public class StepManager : MonoBehaviour
     private bool anchorLocked = false;
     private bool partsSpawned = false;
 
-    /// <summary>True once the ArUco anchor has been found and frozen.</summary>
+    /// <summary>True once the workspace has been placed (or the ArUco anchor found) and frozen.</summary>
     public bool AnchorLocked { get { return anchorLocked; } }
 
+    /// <summary>The placement provider in use, or null on the marker path.</summary>
+    public WorkspacePlacement Placement { get { return placement; } }
+
     /// <summary>
-    /// Starts marker detection from outside. The onboarding flow calls this instead of
+    /// Starts the session from outside. The onboarding flow calls this instead of
     /// wiring the button straight to StartSession: that wiring also ran
     /// beginButton.SetActive(false), which hid the shared onboarding button after the
     /// first press and left the later screens with no way forward.
@@ -44,6 +70,14 @@ public class StepManager : MonoBehaviour
     public void StartSessionExternal()
     {
         StartSession();
+    }
+
+    void Awake()
+    {
+        // Set up before anyone's Start() so the onboarding can find the placement
+        // provider on its first frame.
+        if (useSurfacePlacement)
+            EnsurePlacement();
     }
 
     void Start()
@@ -57,9 +91,90 @@ public class StepManager : MonoBehaviour
         if (beginButton != null)
             beginButton.gameObject.SetActive(true);
 
-        // ❌ hide block initially
-        oilPan.SetActive(false);
+        // Hidden until the workspace exists.
+        if (oilPan != null)
+            oilPan.SetActive(false);
+
+        if (useSurfacePlacement)
+            BypassAruco();
     }
+
+    // ---------------- SURFACE PLACEMENT ----------------
+
+    private void EnsurePlacement()
+    {
+        if (placement == null)
+            placement = FindAnyObjectByType<WorkspacePlacement>(FindObjectsInactive.Include);
+
+        if (placement == null)
+        {
+            placement = gameObject.AddComponent<WorkspacePlacement>();
+            Debug.Log("[StepManager] WorkspacePlacement created at runtime with default settings. " +
+                      "Add one to the scene to tune it in the Inspector.");
+        }
+
+        // MarkerAnchor is the top of the anchor chain; EngineAnchor hangs under it. Posing the
+        // root keeps CalibrationOffset, the trays, the ghosts and the PanelRig exactly as
+        // they were relative to the marker.
+        Transform root = oilPan != null ? oilPan.transform.root : null;
+        placement.Configure(root, Camera.main != null ? Camera.main.transform : null);
+
+        placement.OnPlaced -= HandleWorkspacePlaced;
+        placement.OnPlaced += HandleWorkspacePlaced;
+    }
+
+    private void OnDestroy()
+    {
+        if (placement != null)
+            placement.OnPlaced -= HandleWorkspacePlaced;
+    }
+
+    /// <summary>
+    /// Keeps the ArUco implementation in the project but out of the participant path:
+    /// no detection, no camera stream, no debug quad. Turning useSurfacePlacement off
+    /// restores all of it.
+    /// </summary>
+    private void BypassAruco()
+    {
+        if (arucoCoordinator != null)
+            arucoCoordinator.enabled = false;
+
+        // The coordinator's Start() normally hides this quad. With the coordinator off that
+        // never runs, so hide it here or a blank quad sits in front of the camera.
+        var debugQuad = FindAnyObjectByType<CameraImageAduster>(FindObjectsInactive.Include);
+        if (debugQuad != null)
+            debugQuad.gameObject.SetActive(false);
+
+        if (disableCameraAccessWhenBypassed)
+        {
+            var cam = FindAnyObjectByType<Meta.XR.PassthroughCameraAccess>(FindObjectsInactive.Include);
+            if (cam != null)
+                cam.gameObject.SetActive(false);
+        }
+
+        Debug.Log("[StepManager] ArUco startup bypassed: surface placement provides the workspace pose.");
+    }
+
+    private void HandleWorkspacePlaced(bool reposition)
+    {
+        if (reposition)
+        {
+            if (captionText != null && !anchorLocked)
+                captionText.text = "Workspace moved.";
+            return;
+        }
+
+        // Same effect the marker lock had: freeze the pose, reveal the engine.
+        anchorLocked = true;
+
+        if (oilPan != null)
+            oilPan.SetActive(true);
+
+        if (captionText != null)
+            captionText.text = "Workspace placed.";
+    }
+
+    // ---------------- SESSION ----------------
 
     void StartSession()
     {
@@ -75,28 +190,30 @@ public class StepManager : MonoBehaviour
         if (beginButton != null)
             beginButton.gameObject.SetActive(false);
 
-        if (captionText != null)
-            captionText.text = "Look at the marker to anchor the engine.";
+        if (captionText != null && !anchorLocked)
+            captionText.text = useSurfacePlacement
+                ? "Place the workspace to begin."
+                : "Look at the marker to anchor the engine.";
     }
 
     void Update()
     {
         if (!sessionStarted) return;
 
-        // 🟢 Detect marker directly (correct way)
-        if (!anchorLocked && IsMarkerDetected(blockMarkerId))
+        // Marker path only. With surface placement the lock comes from HandleWorkspacePlaced.
+        if (!useSurfacePlacement && !anchorLocked && IsMarkerDetected(blockMarkerId))
         {
             ActivateAndLockBlock();
         }
 
-        // 🟢 Spawn parts after lock
+        // Spawn parts / begin the sequence once the workspace exists.
         if (anchorLocked && !partsSpawned)
         {
             SpawnParts();
         }
     }
 
-    // ---------------- MARKER DETECTION ----------------
+    // ---------------- MARKER DETECTION (ArUco path, unchanged) ----------------
 
     bool IsMarkerDetected(int markerId)
     {
@@ -126,10 +243,10 @@ public class StepManager : MonoBehaviour
     {
         anchorLocked = true;
 
-        // ✅ now show block (it will already be aligned by ArUco)
+        // now show block (it will already be aligned by ArUco)
         oilPan.SetActive(true);
 
-        // 🔒 STOP tracking → no jitter forever
+        // STOP tracking -> no jitter forever
         if (arucoCoordinator != null)
             arucoCoordinator.enabled = false;
 
@@ -143,7 +260,7 @@ public class StepManager : MonoBehaviour
     {
         partsSpawned = true;
 
-        // 🔀 If a StepRunner is assigned, hand the first instruction over to the
+        // If a StepRunner is assigned, hand the first instruction over to the
         // configurable step / support-level system. If it is NOT assigned, the
         // original hard-coded path below runs unchanged.
         if (stepRunner != null)

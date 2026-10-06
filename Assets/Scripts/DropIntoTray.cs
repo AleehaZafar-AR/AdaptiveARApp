@@ -11,22 +11,51 @@ using UnityEngine;
 ///
 /// Three changes address that, all of them configurable rather than hard-coded:
 ///   1. Parts stay put by default instead of being dropped (releaseToGravityOnEnable).
-///   2. Continuous (speculative) collision detection, which works for kinematic and
-///      dynamic bodies alike, so a fast-moving small part cannot tunnel.
+///   2. Continuous collision detection, so a fast-moving small part cannot tunnel.
 ///   3. Out-of-bounds recovery, so a part that escapes is returned to its authored
 ///      pose instead of ending the bench session.
 ///
-/// The original drop behaviour is still available by ticking releaseToGravityOnEnable.
+/// Physics feel
+/// ------------
+/// The first version of (2) used ContinuousSpeculative and forced Interpolate on
+/// every part. On the headset that read as slow motion: speculative contacts make a
+/// small part decelerate before it touches anything, the project's 1 cm contact
+/// offset is a large cushion for a 2 cm pin, and interpolation makes a kinematic
+/// part moved by the hand lag a physics step behind it. The Tuned profile below uses
+/// sweep-based CCD (tunnelling is still prevented), no interpolation, and a small
+/// contact offset. It applies to every existing part without touching the scene;
+/// choose PerObject to go back to this object's own fields.
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 public class DropIntoTray : MonoBehaviour
 {
+    public enum PhysicsProfile
+    {
+        /// <summary>Sweep CCD, no interpolation, small contact offset. Normal-feeling parts.</summary>
+        Tuned = 0,
+
+        /// <summary>Use the collisionDetection / interpolation fields on this object as authored.</summary>
+        PerObject = 1
+    }
+
     [Header("Spawn Behaviour")]
     [Tooltip("Original behaviour: release to gravity as soon as this part is enabled. " +
              "Left OFF, the part stays exactly where it was authored and never free-falls.")]
     [SerializeField] private bool releaseToGravityOnEnable = false;
 
-    [Header("Collision")]
+    [Header("Physics")]
+    [Tooltip("Tuned: sweep CCD, no interpolation, small contact offset (recommended). " +
+             "PerObject: the two fields below are used as authored on this object.")]
+    [SerializeField] private PhysicsProfile physicsProfile = PhysicsProfile.Tuned;
+
+    [Tooltip("Contact offset for this part's colliders under the Tuned profile, metres. The " +
+             "project default is 1 cm, which floats small parts visibly above surfaces.")]
+    [SerializeField] private float tunedContactOffset = 0.003f;
+
+    [Tooltip("How fast overlapping geometry is pushed apart under the Tuned profile, m/s.")]
+    [SerializeField] private float tunedMaxDepenetrationVelocity = 1f;
+
+    [Header("Collision (PerObject profile)")]
     [Tooltip("Speculative continuous detection is valid for both kinematic and dynamic " +
              "bodies, which matters because hand-held parts are moved kinematically and fast.")]
     [SerializeField] private CollisionDetectionMode collisionDetection = CollisionDetectionMode.ContinuousSpeculative;
@@ -61,14 +90,24 @@ public class DropIntoTray : MonoBehaviour
     private bool authoredPoseCaptured;
     private int recoveryCount;
 
+    /// <summary>Collision mode this part actually runs with.</summary>
+    public CollisionDetectionMode EffectiveCollisionDetection
+    {
+        get { return physicsProfile == PhysicsProfile.Tuned ? CollisionDetectionMode.ContinuousDynamic : collisionDetection; }
+    }
+
+    /// <summary>Interpolation this part actually runs with.</summary>
+    public RigidbodyInterpolation EffectiveInterpolation
+    {
+        get { return physicsProfile == PhysicsProfile.Tuned ? RigidbodyInterpolation.None : interpolation; }
+    }
+
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
 
         CaptureAuthoredPose();
-
-        rb.collisionDetectionMode = collisionDetection;
-        rb.interpolation = interpolation;
+        ApplyPhysicsProfile();
 
         rb.isKinematic = true; // no physics until explicitly released
     }
@@ -105,6 +144,28 @@ public class DropIntoTray : MonoBehaviour
             RecoverToAuthoredPose();
     }
 
+    private void ApplyPhysicsProfile()
+    {
+        if (rb == null) return;
+
+        rb.collisionDetectionMode = EffectiveCollisionDetection;
+        rb.interpolation = EffectiveInterpolation;
+
+        if (physicsProfile != PhysicsProfile.Tuned) return;
+
+        // When overlapping geometry is made solid again (a rejected near-target release)
+        // the engine separates it. The project default of 10 m/s flings a small part
+        // across the bench; this is a gentle push instead.
+        rb.maxDepenetrationVelocity = tunedMaxDepenetrationVelocity;
+
+        // Only this object's own colliders: a joined kit child keeps its own setting.
+        foreach (Collider c in GetComponents<Collider>())
+        {
+            if (c == null) continue;
+            c.contactOffset = Mathf.Max(0.0005f, tunedContactOffset);
+        }
+    }
+
     /// <summary>Records the pose this part was authored at, used as the recovery target.</summary>
     private void CaptureAuthoredPose()
     {
@@ -125,7 +186,7 @@ public class DropIntoTray : MonoBehaviour
     {
         if (rb == null) return;
 
-        rb.collisionDetectionMode = collisionDetection;
+        rb.collisionDetectionMode = EffectiveCollisionDetection;
         rb.isKinematic = false;
     }
 

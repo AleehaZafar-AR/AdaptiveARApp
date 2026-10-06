@@ -55,6 +55,9 @@ namespace AdaptiveAR.Logging
             public const string ComponentLocked = "component_locked";
             public const string HelpRequested = "help_requested";
             public const string FastenerAction = "fastener_action";
+
+            // --- workspace registration (surface placement replaced the marker) ---
+            public const string WorkspacePlaced = "workspace_placed";
         }
 
         [Header("Participant")]
@@ -379,6 +382,27 @@ namespace AdaptiveAR.Logging
         {
             var w = NewLine(Events.Note);
             w.Str("note", note);
+            Write(w);
+        }
+
+        /// <summary>
+        /// Where the virtual workspace was put and by which provider. Recorded so a session's
+        /// spatial layout is reproducible and a fallback-plane placement is distinguishable
+        /// from a real surface hit.
+        /// </summary>
+        public void LogWorkspacePlaced(string provider, Vector3 position, Vector3 surfaceNormal,
+                                       float normalConfidence, bool reposition)
+        {
+            var w = NewLine(Events.WorkspacePlaced);
+            w.Str("provider", provider);
+            w.Num("position_x_m", position.x);
+            w.Num("position_y_m", position.y);
+            w.Num("position_z_m", position.z);
+            w.Num("normal_x", surfaceNormal.x);
+            w.Num("normal_y", surfaceNormal.y);
+            w.Num("normal_z", surfaceNormal.z);
+            w.Num("normal_confidence", normalConfidence);
+            w.Bool("reposition", reposition);
             Write(w);
         }
 

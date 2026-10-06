@@ -40,6 +40,7 @@ namespace AdaptiveAR.UI
         private float _timer;
         private float _errorAtStepStart = -1f;
         private StepData _watchedStep;
+        private AssemblyAction _watchedAction;
 
         private void OnEnable()
         {
@@ -86,6 +87,16 @@ namespace AdaptiveAR.UI
                 return;
             }
 
+            // Each action is judged against its own tolerance, and the "has it moved yet"
+            // baseline restarts with it, so a chip from the previous action cannot linger.
+            AssemblyAction action = validator.CurrentAction;
+            if (action != _watchedAction)
+            {
+                _watchedAction = action;
+                _errorAtStepStart = -1f;
+                SetShown(false);
+            }
+
             validator.GetCurrentError(out float posErr, out float rotErr);
 
             if (_errorAtStepStart < 0f)
@@ -97,8 +108,10 @@ namespace AdaptiveAR.UI
                 return;
             }
 
-            bool ok = posErr <= step.positionToleranceMeters
-                   && rotErr <= step.rotationToleranceDegrees;
+            float posTol = action != null ? action.positionToleranceMeters : step.positionToleranceMeters;
+            float rotTol = action != null ? action.rotationToleranceDegrees : step.rotationToleranceDegrees;
+
+            bool ok = posErr <= posTol && rotErr <= rotTol;
 
             SetShown(true);
             Apply(ok);

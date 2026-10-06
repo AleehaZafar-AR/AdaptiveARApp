@@ -59,6 +59,8 @@ namespace AdaptiveAR.UI
         private float _timer;
         private float _successUntil;
         private string _lastFeedback;
+        private bool _feedbackIsSuccess;
+        private string _lastActionKey;
 
         private void OnEnable()
         {
@@ -89,9 +91,12 @@ namespace AdaptiveAR.UI
             if (success)
             {
                 Show(feedbackText, "Placed correctly", MrTheme.Success);
+                _feedbackIsSuccess = true;
                 _successUntil = Time.time + successHoldSeconds;
                 return;
             }
+
+            _feedbackIsSuccess = false;
 
             // Specific enough to act on. "Alignment needed" tells the participant nothing.
             string msg;
@@ -121,6 +126,19 @@ namespace AdaptiveAR.UI
 
             StepData stage = workflow != null ? workflow.CurrentStage : stepRunner.CurrentStep;
             AssemblyAction action = workflow != null ? workflow.CurrentAction : null;
+
+            // --- entering a new action clears the previous action's correction feedback. A
+            // --- success confirmation is allowed to finish its short hold, then goes too.
+            string actionKey = (stage != null ? stage.StepIdentifier : "") + "/" + (action != null ? action.Id : "");
+            if (actionKey != _lastActionKey)
+            {
+                _lastActionKey = actionKey;
+                if (!_feedbackIsSuccess)
+                {
+                    Show(feedbackText, "", MrTheme.TextSecondary);
+                    _successUntil = 0f;
+                }
+            }
 
             // --- one compact progress line: stage position, stage name, action position.
             // --- Every number comes from WorkflowState, so it cannot disagree with reality.
@@ -178,9 +196,10 @@ namespace AdaptiveAR.UI
             if (feedbackText != null && Time.time > _successUntil && !string.IsNullOrEmpty(_lastFeedback))
             {
                 bool blocked = session != null && !session.CanAdvance;
-                if (!blocked)
+                if (!blocked || _feedbackIsSuccess)
                 {
                     Show(feedbackText, "", MrTheme.TextSecondary);
+                    _feedbackIsSuccess = false;
                 }
             }
 
@@ -212,6 +231,8 @@ namespace AdaptiveAR.UI
             Show(counterText, "", MrTheme.TextMuted);
             Show(instructionText, "", MrTheme.TextPrimary);
             Show(feedbackText, "", MrTheme.TextSecondary);
+            _feedbackIsSuccess = false;
+            _lastActionKey = null;
 
             if (detailText != null)
             {

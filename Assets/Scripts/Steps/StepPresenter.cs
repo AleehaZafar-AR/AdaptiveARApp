@@ -1,14 +1,25 @@
 // File: StepPresenter.cs
-// Renders the (current step x current support level) pair.
+// Renders the guidance for (current stage x current support level x current action).
 //
-// Reads from StepRunner and SupportLevelController; writes to neither. A support
-// level change re-presents the SAME step, which is what keeps L1 -> L2 -> L3 from
-// advancing the assembly sequence.
+// Reads from StepRunner, SupportLevelController and WorkflowState; writes to none of
+// them. A support level change re-presents the SAME stage and the SAME action, which
+// is what keeps L1 -> L2 -> L3 from advancing or resetting the assembly.
 //
-// Content resolution is per-field: any field left empty on the level falls back to
-// the step-level default on StepData. That is what lets the three level blocks
-// stay genuinely empty (unauthored) while the existing crankshaft instruction
-// keeps working from the step defaults.
+// One presentation lifecycle
+// --------------------------
+// Every transition clears before it renders: the previous action's ghosts, the
+// stage's spawned prefabs, and (when this component owns them) the text fields. That
+// is what stops a ghost or a sentence surviving into the next action.
+//
+// Text ownership: when a ParticipantCard exists in the scene it is the single writer
+// of the card text. This component then only CLEARS the legacy fields it knows about
+// (the old caption and the anchoring status line) and never writes them, so the two
+// can no longer fight over the same TextMeshPro.
+//
+// Ghost policy: ghost guidance for an action comes from the action's own ghostKeys
+// when it has any, otherwise from the stage's level block. Whether ghosts appear at
+// all at a level is decided by the authored level block (a level with no ghost
+// guidance authored shows none), not by anything in code.
 
 using System.Collections.Generic;
 using AdaptiveAR.Support;
@@ -23,6 +34,9 @@ namespace AdaptiveAR.Steps
         [SerializeField] private StepRunner stepRunner;
         [SerializeField] private SupportLevelController supportLevel;
         [SerializeField] private GuidanceRegistry guidanceRegistry;
+
+        [Tooltip("Supplies the current action. Found on this object when empty.")]
+        [SerializeField] private WorkflowState workflow;
 
         [Header("Output")]
         [Tooltip("Single-field fallback. Used only when titleText below is not assigned, so the " +
@@ -43,15 +57,15 @@ namespace AdaptiveAR.Steps
         [Tooltip("Supplies the step number and count for the label above.")]
         [SerializeField] private StepRunner stepRunnerForLabel;
 
-        [Tooltip("Anchoring status line, e.g. \"Look at the marker\" / \"Block placed.\". " +
-                 "StepManager writes here, and it is hidden for good once the first step is " +
-                 "presented so that text cannot linger over the instructions.")]
+        [Tooltip("Anchoring status line, e.g. \"Workspace placed.\". StepManager writes here, " +
+                 "and it is hidden for good once the first step is presented so that text " +
+                 "cannot linger over the instructions.")]
         [SerializeField] private TextMeshProUGUI statusLineText;
 
         [Tooltip("Existing scene AudioSource used for instruction audio.")]
         [SerializeField] private AudioSource audioSource;
 
-        [Tooltip("Marker-anchored root that spawned ghosts are positioned against (EngineAnchor).")]
+        [Tooltip("Anchored root that spawned ghosts are positioned against (EngineAnchor).")]
         [SerializeField] private Transform anchorRoot;
 
         [Header("Behaviour")]
@@ -61,15 +75,43 @@ namespace AdaptiveAR.Steps
         [Tooltip("Parent spawned ghost prefabs to the anchor root. Off reproduces the original world-space spawn.")]
         [SerializeField] private bool parentSpawnedGhostsToAnchor = false;
 
+        [Tooltip("Make activated ghosts inert: kinematic, no gravity, no colliders, no grab. " +
+                 "A target must never fall, collide, or be picked up.")]
+        [SerializeField] private bool makeGhostsInert = true;
+
         [Header("Debug")]
         [SerializeField] private bool logPresentation = true;
 
-        private readonly List<GameObject> _activatedSceneObjects = new List<GameObject>();
+        private readonly List<GameObject> _activatedGhosts = new List<GameObject>();
+        private readonly List<GameObject> _activatedArrows = new List<GameObject>();
         private readonly List<GameObject> _spawnedInstances = new List<GameObject>();
+        private readonly HashSet<GameObject> _madeInert = new HashSet<GameObject>();
 
         private StepData _presentedStep;
         private SupportLevel _presentedLevel;
         private bool _hasPresented;
+
+        private string[] _stageGhostKeys;
+        private GameObject[] _stageGhostPrefabs;
+        private Vector3 _stageGhostOffset;
+        private bool _levelShowsGhosts;
+
+        private AssemblyAction _currentAction;
+        private bool _textOwnedByCard;
+
+        /// <summary>True when a ParticipantCard owns the card text and this component only clears.</summary>
+        public bool TextOwnedByParticipantCard { get { return _textOwnedByCard; } }
+
+        private void Awake()
+        {
+            if (workflow == null) workflow = GetComponent<WorkflowState>();
+
+            _textOwnedByCard = FindAnyObjectByType<AdaptiveAR.UI.ParticipantCard>(FindObjectsInactive.Include) != null;
+
+            if (_textOwnedByCard && logPresentation)
+                Debug.Log("[StepPresenter] ParticipantCard found: it owns the instruction text; " +
+                          "this presenter handles ghosts, arrows and audio only.");
+        }
 
         private void OnEnable()
         {
@@ -98,6 +140,18 @@ namespace AdaptiveAR.Steps
 
         private void HandleStepChanged(StepData step, int index, string reason)
         {
+            // A new stage starts with no action until the session controller enters one.
+            _currentAction = null;
+
+            // StepRunner applies the stage's default level BEFORE raising this event, so the
+            // level-change handler may already have presented this stage. Re-apply the
+            // ghosts anyway so nothing from the previous stage's action can survive.
+            if (_hasPresented && _presentedStep == step && _presentedLevel == CurrentLevel())
+            {
+                ApplyGhosts();
+                return;
+            }
+
             Present(step, CurrentLevel());
         }
 
@@ -130,8 +184,8 @@ namespace AdaptiveAR.Steps
         }
 
         /// <summary>
-        /// Renders one (step, level) pair. Safe to call repeatedly; identical
-        /// consecutive requests are ignored.
+        /// Renders one (step, level) pair, then re-applies the current action on top.
+        /// Safe to call repeatedly; identical consecutive requests are ignored.
         /// </summary>
         public void Present(StepData step, SupportLevel level)
         {
@@ -146,8 +200,12 @@ namespace AdaptiveAR.Steps
 
             StepSupportContent content = step.GetContent(level);
 
-            PresentText(step, content);
-            PresentGhosts(step, content);
+            if (!_textOwnedByCard)
+                PresentText(step, content);
+            else
+                UpdateStepLabel(step);
+
+            CacheStageGhosts(step, content);
             PresentArrows(step, content);
             PresentAudio(step, content);
             WarnUnsupportedMedia(step, content, level);
@@ -156,8 +214,52 @@ namespace AdaptiveAR.Steps
             _presentedLevel = level;
             _hasPresented = true;
 
+            // The action survives a level change; its ghosts are re-applied at the new level.
+            // Only adopt the workflow's action when it belongs to THIS stage.
+            if (_currentAction == null && workflow != null && stepRunner != null
+                && workflow.StageIndex == stepRunner.CurrentStepIndex)
+                _currentAction = workflow.CurrentAction;
+
+            ApplyGhosts();
+
             if (logPresentation)
-                Debug.Log($"[StepPresenter] Presenting '{step.StepIdentifier}' at {level}.");
+                Debug.Log($"[StepPresenter] Presenting '{step.StepIdentifier}' at {level}" +
+                          (_currentAction != null ? $", action '{_currentAction.Id}'." : "."));
+        }
+
+        /// <summary>
+        /// Removes every ghost, arrow and spawned prefab. Used when the sequence finishes so
+        /// the last stage's guidance does not stay on the engine.
+        /// </summary>
+        public void ClearGuidance()
+        {
+            _currentAction = null;
+            _levelShowsGhosts = false;
+            ClearPresentation();
+
+            if (logPresentation)
+                Debug.Log("[StepPresenter] Guidance cleared.");
+        }
+
+        /// <summary>
+        /// Called by the session controller when an action is entered. Clears the previous
+        /// action's ghosts first, then shows this one's. Called with null when a stage has
+        /// no further action.
+        /// </summary>
+        public void PresentAction(AssemblyAction action)
+        {
+            _currentAction = action;
+            ApplyGhosts();
+
+            if (action != null && action.audioCue != null && audioSource != null)
+            {
+                audioSource.clip = action.audioCue;
+                audioSource.Play();
+            }
+
+            if (logPresentation)
+                Debug.Log("[StepPresenter] Action " + (action != null ? $"'{action.Id}'" : "<none>") +
+                          $" presented with {_activatedGhosts.Count} ghost(s).");
         }
 
         private void PresentText(StepData step, StepSupportContent content)
@@ -171,8 +273,7 @@ namespace AdaptiveAR.Steps
                 step.stepDescription);
 
             // Preferred: separate fields, so the headline holds its position and weight at
-            // every support level and only the detail below it grows. That is what makes
-            // L1 -> L2 -> L3 read as progressive disclosure rather than a restyle.
+            // every support level and only the detail below it grows.
             if (titleText != null)
             {
                 titleText.text = headline;
@@ -180,7 +281,6 @@ namespace AdaptiveAR.Steps
                 if (bodyText != null)
                 {
                     bodyText.text = detail ?? string.Empty;
-                    // Collapse the body entirely at L1 so the panel does not leave a gap.
                     bodyText.gameObject.SetActive(!string.IsNullOrEmpty(detail));
                 }
 
@@ -200,13 +300,15 @@ namespace AdaptiveAR.Steps
         }
 
         /// <summary>
-        /// Blanks every text field before the new step is written. Without this the
-        /// previous step's wording stays on screen whenever the incoming step leaves a
-        /// field empty - which is exactly what happens at L1, where the body is blank.
+        /// Blanks every text field this component knows about before anything new is
+        /// written. The legacy caption is always cleared, even when a ParticipantCard owns
+        /// the card: it is where the old prototype's serialized "Demo:" sentence lived, and
+        /// nothing else ever wrote it again.
         /// </summary>
         private void ClearText()
         {
-            if (titleText != null) titleText.text = string.Empty;
+            if (captionText != null && captionText.text.Length > 0)
+                captionText.text = string.Empty;
 
             // The anchoring status line has done its job by the time a step is shown.
             if (statusLineText != null && statusLineText.gameObject.activeSelf)
@@ -215,14 +317,16 @@ namespace AdaptiveAR.Steps
                 statusLineText.gameObject.SetActive(false);
             }
 
+            if (_textOwnedByCard)
+                return;
+
+            if (titleText != null) titleText.text = string.Empty;
+
             if (bodyText != null)
             {
                 bodyText.text = string.Empty;
                 bodyText.gameObject.SetActive(false);
             }
-
-            if (captionText != null && titleText == null)
-                captionText.text = string.Empty;
         }
 
         private void UpdateStepLabel(StepData step)
@@ -244,29 +348,53 @@ namespace AdaptiveAR.Steps
                 : $"STEP {index + 1:00} / {count:00}";
         }
 
-        private void PresentGhosts(StepData step, StepSupportContent content)
-        {
-            bool activatedAny = ActivateByKeys(content != null ? content.ghostKeys : null);
+        // ---------------- Ghosts ----------------
 
-            GameObject[] prefabs = (content != null && HasItems(content.ghostPrefabs))
+        private void CacheStageGhosts(StepData step, StepSupportContent content)
+        {
+            _stageGhostKeys = content != null ? content.ghostKeys : null;
+
+            _stageGhostPrefabs = (content != null && HasItems(content.ghostPrefabs))
                 ? content.ghostPrefabs
                 : (step.ghostPrefab != null ? new[] { step.ghostPrefab } : null);
 
-            Vector3 offset = content != null ? content.ghostSpawnOffset : Vector3.zero;
+            _stageGhostOffset = (content != null && HasItems(content.ghostPrefabs))
+                ? content.ghostSpawnOffset
+                : step.defaultGhostSpawnOffset;
 
-            // Step-level fallback keeps the original spawn offset authored on the step.
-            if (content == null || !HasItems(content.ghostPrefabs))
-                offset = step.defaultGhostSpawnOffset;
+            // Authored data decides whether this level shows ghost guidance at all.
+            _levelShowsGhosts = HasItems(_stageGhostKeys) || HasItems(_stageGhostPrefabs);
+        }
 
-            bool spawnedAny = SpawnPrefabs(prefabs, offset);
+        /// <summary>
+        /// The one place ghosts are switched on. Always clears first, so a ghost from the
+        /// previous action cannot survive, then shows the action's own ghosts or, when it
+        /// has none, the stage's.
+        /// </summary>
+        private void ApplyGhosts()
+        {
+            DeactivateAll(_activatedGhosts);
+            DestroyAll(_spawnedInstances);
 
-            if (!activatedAny && !spawnedAny && logPresentation)
-                Debug.Log($"[StepPresenter] '{step.StepIdentifier}' presents no ghost guidance at this level.");
+            if (!_levelShowsGhosts)
+                return;
+
+            bool actionHasOwn = _currentAction != null && HasItems(_currentAction.ghostKeys);
+            string[] keys = actionHasOwn ? _currentAction.ghostKeys : _stageGhostKeys;
+
+            bool activatedAny = ActivateByKeys(keys, _activatedGhosts);
+
+            bool spawnedAny = false;
+            if (!actionHasOwn)
+                spawnedAny = SpawnPrefabs(_stageGhostPrefabs, _stageGhostOffset);
+
+            if (!activatedAny && !spawnedAny && logPresentation && _presentedStep != null)
+                Debug.Log($"[StepPresenter] '{_presentedStep.StepIdentifier}' presents no ghost guidance for this action/level.");
         }
 
         private void PresentArrows(StepData step, StepSupportContent content)
         {
-            ActivateByKeys(content != null ? content.arrowKeys : null);
+            ActivateByKeys(content != null ? content.arrowKeys : null, _activatedArrows);
 
             GameObject[] prefabs = (content != null && HasItems(content.arrowPrefabs))
                 ? content.arrowPrefabs
@@ -305,7 +433,7 @@ namespace AdaptiveAR.Steps
 
         // ---------------- Helpers ----------------
 
-        private bool ActivateByKeys(string[] keys)
+        private bool ActivateByKeys(string[] keys, List<GameObject> into)
         {
             if (!HasItems(keys) || guidanceRegistry == null)
                 return false;
@@ -317,12 +445,46 @@ namespace AdaptiveAR.Steps
                 if (!guidanceRegistry.TryResolve(key, out GameObject target))
                     continue;
 
+                if (makeGhostsInert) MakeInert(target);
+
                 target.SetActive(true);
-                _activatedSceneObjects.Add(target);
+                into.Add(target);
                 any = true;
             }
 
             return any;
+        }
+
+        /// <summary>
+        /// A ghost is a picture of a pose. Some scene ghosts carry a Rigidbody, a DropIntoTray
+        /// or a collider copied from the part they depict; left alone they would fall, be
+        /// shoved, or block the real part from reaching the pose they show.
+        /// </summary>
+        private void MakeInert(GameObject ghost)
+        {
+            if (ghost == null || _madeInert.Contains(ghost)) return;
+            _madeInert.Add(ghost);
+
+            foreach (DropIntoTray d in ghost.GetComponentsInChildren<DropIntoTray>(true))
+                d.enabled = false;
+
+            foreach (Rigidbody rb in ghost.GetComponentsInChildren<Rigidbody>(true))
+            {
+                rb.isKinematic = true;
+                rb.useGravity = false;
+                rb.detectCollisions = false;
+            }
+
+            foreach (Collider c in ghost.GetComponentsInChildren<Collider>(true))
+                c.enabled = false;
+
+            foreach (MonoBehaviour mb in ghost.GetComponentsInChildren<MonoBehaviour>(true))
+            {
+                if (mb == null) continue;
+                string ns = mb.GetType().Namespace;
+                if (!string.IsNullOrEmpty(ns) && ns.StartsWith("Oculus.Interaction"))
+                    mb.enabled = false;
+            }
         }
 
         private bool SpawnPrefabs(GameObject[] prefabs, Vector3 offset)
@@ -352,6 +514,8 @@ namespace AdaptiveAR.Steps
 
                 instance.transform.localScale = Vector3.one;
 
+                if (makeGhostsInert) MakeInert(instance);
+
                 _spawnedInstances.Add(instance);
                 any = true;
             }
@@ -361,22 +525,32 @@ namespace AdaptiveAR.Steps
 
         private void ClearPresentation()
         {
-            foreach (GameObject target in _activatedSceneObjects)
+            DeactivateAll(_activatedGhosts);
+            DeactivateAll(_activatedArrows);
+            DestroyAll(_spawnedInstances);
+
+            if (clearRegistryBeforePresent && guidanceRegistry != null)
+                guidanceRegistry.DeactivateAll();
+        }
+
+        private static void DeactivateAll(List<GameObject> list)
+        {
+            foreach (GameObject target in list)
             {
                 if (target != null)
                     target.SetActive(false);
             }
-            _activatedSceneObjects.Clear();
+            list.Clear();
+        }
 
-            foreach (GameObject instance in _spawnedInstances)
+        private static void DestroyAll(List<GameObject> list)
+        {
+            foreach (GameObject instance in list)
             {
                 if (instance != null)
                     Destroy(instance);
             }
-            _spawnedInstances.Clear();
-
-            if (clearRegistryBeforePresent && guidanceRegistry != null)
-                guidanceRegistry.DeactivateAll();
+            list.Clear();
         }
 
         private static string FirstNonEmpty(string preferred, string fallback)

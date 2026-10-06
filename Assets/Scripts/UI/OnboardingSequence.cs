@@ -10,8 +10,16 @@
 // only ever one thing on screen and nothing from a previous screen can survive.
 //
 // Participant-facing wording only: no L1/L2/L3, no research terminology.
+//
+// Workspace placement
+// -------------------
+// The first thing shown is not the welcome but the placement screen: the participant
+// points at the desk and presses "Place Workspace". Only after the workspace exists
+// does the introduction begin. The same panel and button are reused, so nothing new
+// has to be wired in the scene.
 
 using System;
+using AdaptiveAR.MR;
 using System.Collections.Generic;
 using AdaptiveAR.Logging;
 using AdaptiveAR.Steps;
@@ -40,6 +48,15 @@ namespace AdaptiveAR.UI
         [SerializeField] private StepRunner stepRunner;
         [SerializeField] private SessionLogger logger;
         [SerializeField] private AppFlowController flow;
+
+        [Tooltip("Optional. Found through StepManager at runtime when empty. When present and " +
+                 "the workspace is not yet placed, a placement screen precedes the introduction.")]
+        [SerializeField] private WorkspacePlacement placement;
+
+        [Header("Placement screen")]
+        [SerializeField] private string placementEyebrow = "SET UP";
+        [SerializeField] private string placementTitle = "Place the workspace";
+        [SerializeField] private string placementButtonLabel = "Place Workspace";
 
         [Header("Fields")]
         [SerializeField] private TextMeshProUGUI eyebrowText;
@@ -79,6 +96,9 @@ namespace AdaptiveAR.UI
         public int Index { get; private set; } = -1;
         public bool IsFinished { get; private set; }
 
+        /// <summary>True while the placement screen is up, before the introduction.</summary>
+        public bool IsPlacingWorkspace { get; private set; }
+
         /// <summary>Raised when the participant presses Begin on the last screen.</summary>
         public event Action OnCompleted;
 
@@ -94,20 +114,83 @@ namespace AdaptiveAR.UI
         {
             if (advanceButton != null)
                 advanceButton.onClick.RemoveListener(Advance);
+
+            if (placement != null)
+                placement.OnPlaced -= HandleWorkspacePlaced;
         }
 
-        /// <summary>Restarts the sequence at screen one.</summary>
+        /// <summary>Restarts the sequence: placement first if needed, then screen one.</summary>
         public void Begin()
         {
             IsFinished = false;
             Index = -1;
             _startedAtMs = Time.time * 1000f;
+
+            ResolvePlacement();
+
+            if (placement != null && !placement.IsPlaced)
+            {
+                EnterPlacement();
+                return;
+            }
+
             Advance();
+        }
+
+        private void ResolvePlacement()
+        {
+            if (placement != null) return;
+
+            var stepManager = FindAnyObjectByType<StepManager>(FindObjectsInactive.Include);
+            if (stepManager != null) placement = stepManager.Placement;
+        }
+
+        private void EnterPlacement()
+        {
+            IsPlacingWorkspace = true;
+
+            placement.OnPlaced -= HandleWorkspacePlaced;
+            placement.OnPlaced += HandleWorkspacePlaced;
+            placement.BeginPlacement();
+
+            if (eyebrowText != null) eyebrowText.text = placementEyebrow;
+            if (titleText != null) titleText.text = placementTitle;
+            if (bodyText != null) bodyText.text = placement.StatusText;
+            if (advanceLabel != null) advanceLabel.text = placementButtonLabel;
+
+            if (logger != null) logger.LogOnboardingEnter(-1, "workspace_placement");
+        }
+
+        private void HandleWorkspacePlaced(bool reposition)
+        {
+            if (!IsPlacingWorkspace) return;
+
+            placement.OnPlaced -= HandleWorkspacePlaced;
+            IsPlacingWorkspace = false;
+
+            // The workspace exists; the introduction starts on the same panel.
+            Index = -1;
+            Advance();
+        }
+
+        private void Update()
+        {
+            // Live status while placing, so "no surface yet" and "ready" are visible.
+            if (IsPlacingWorkspace && placement != null && bodyText != null)
+                bodyText.text = placement.StatusText;
         }
 
         public void Advance()
         {
             if (IsFinished) return;
+
+            // On the placement screen the button confirms the placement instead of paging.
+            // A failed confirm leaves the screen up with the reason in the body text.
+            if (IsPlacingWorkspace)
+            {
+                if (placement != null) placement.TryConfirm();   // success arrives via OnPlaced
+                return;
+            }
 
             Index++;
 

@@ -54,6 +54,7 @@ namespace AdaptiveAR.UI
 
         private float _timer;
         private readonly StringBuilder _sb = new StringBuilder(512);
+        private StepManager _stepManager;
 
         private void Awake()
         {
@@ -129,21 +130,43 @@ namespace AdaptiveAR.UI
                 _sb.Append("<b>SUPPORT CHANGES</b>  ").Append(session.SupportChangesTotal).Append('\n');
             }
 
+            // --- workspace registration ---
+            if (_stepManager == null) _stepManager = FindAnyObjectByType<StepManager>(FindObjectsInactive.Include);
+            _sb.Append("<b>WORKSPACE</b>  ");
+            if (_stepManager != null && _stepManager.Placement != null)
+            {
+                var p = _stepManager.Placement;
+                _sb.Append(p.IsPlacing ? Colorize("placing", MrTheme.Warning)
+                           : p.IsPlaced ? Colorize("placed", MrTheme.Success)
+                           : Colorize("not placed", MrTheme.TextMuted))
+                   .Append("  ").Append(p.ActiveProvider.ToString());
+                if (p.IsPlaced)
+                    _sb.Append($"  conf {p.LastNormalConfidence:F2}");
+            }
+            else
+            {
+                _sb.Append(_stepManager != null && _stepManager.AnchorLocked ? "marker locked" : "marker");
+            }
+            _sb.Append('\n');
+
             // --- live placement error ---
             if (validator != null && validator.IsActive)
             {
                 validator.GetCurrentError(out float pos, out float rot);
-                bool inTol = step != null
-                             && pos <= step.positionToleranceMeters
-                             && rot <= step.rotationToleranceDegrees;
+                AssemblyAction action = validator.CurrentAction;
+                float posTol = action != null ? action.positionToleranceMeters : (step != null ? step.positionToleranceMeters : 0f);
+                float rotTol = action != null ? action.rotationToleranceDegrees : (step != null ? step.rotationToleranceDegrees : 0f);
+                bool inTol = pos <= posTol && rot <= rotTol;
 
                 _sb.Append("<b>PLACEMENT</b>  ")
                    .Append(Colorize($"{pos * 100f:F1} cm / {rot:F0}°",
                                     MrTheme.AlignmentColor(inTol)));
 
-                if (step != null)
-                    _sb.Append("   tol ").Append((step.positionToleranceMeters * 100f).ToString("F1"))
-                       .Append(" cm / ").Append(step.rotationToleranceDegrees.ToString("F0")).Append('°');
+                _sb.Append("   tol ").Append((posTol * 100f).ToString("F1"))
+                   .Append(" cm / ").Append(rotTol.ToString("F0")).Append('°');
+
+                if (validator.IsAssisting)
+                    _sb.Append("   ").Append(Colorize("assist", MrTheme.Accent));
 
                 _sb.Append('\n');
             }

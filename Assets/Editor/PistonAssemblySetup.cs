@@ -61,11 +61,31 @@ namespace AdaptiveAR.EditorTools
             ("PistonNutOther",  "Fit the second retaining nut.",                             false)
         };
 
+        /// <summary>
+        /// The reviewer replaced the generated kit copies with the original piston
+        /// components, moved under Components/PistonKits and given working grab
+        /// interaction on device. Running this tool again would duplicate meshes over
+        /// that working hierarchy and overwrite the registry. It stays in the repo as
+        /// history; it must not run on the current scene.
+        /// </summary>
+        private static bool ConfirmObsolete(string what)
+        {
+            return EditorUtility.DisplayDialog(
+                "OBSOLETE piston tool",
+                what + " is obsolete.\n\n" +
+                "The current scene already has working piston components under " +
+                "Components/PistonKits/piston00N, tuned on the Quest. Running this would " +
+                "duplicate meshes over them and rewrite the registry.\n\n" +
+                "Runtime code now binds part.PistonKit00N.* keys to that hierarchy by " +
+                "convention, so no tool is needed.",
+                "Cancel (recommended)", "Run anyway") == false;
+        }
+
         // =====================================================================
         // 1. DRY RUN
         // =====================================================================
 
-        [MenuItem("AdaptiveAR/Piston/1 - Validate Piston Kits (dry run)", false, 10)]
+        [MenuItem("AdaptiveAR/Piston/OBSOLETE - 1 Validate Piston Kits (do not run)", false, 90)]
         public static void Validate()
         {
             Scene scene = SceneManager.GetActiveScene();
@@ -121,9 +141,11 @@ namespace AdaptiveAR.EditorTools
         // 2. APPLY
         // =====================================================================
 
-        [MenuItem("AdaptiveAR/Piston/2 - Build Piston Kits", false, 11)]
+        [MenuItem("AdaptiveAR/Piston/OBSOLETE - 2 Build Piston Kits (do not run)", false, 91)]
         public static void Apply()
         {
+            if (ConfirmObsolete("Build Piston Kits")) return;
+
             Scene scene = SceneManager.GetActiveScene();
             if (scene.name != ExpectedSceneName)
             {
@@ -215,10 +237,8 @@ namespace AdaptiveAR.EditorTools
                 }
 
                 // --- the kit itself becomes the manipulation unit once built ---
-                var assembly = kit.GetComponent<PistonAssembly>();
-                if (assembly == null) assembly = Undo.AddComponent<PistonAssembly>(kit.gameObject);
-                assembly.Configure(PartPrefix + kitName, required, logger);
-
+                // (The runtime PistonAssembly component this used to attach was removed: the
+                //  validator now joins locked components to the kit handle itself.)
                 MakeGrabbable(kit.gameObject, source);
                 entries.Add((PartPrefix + kitName, kit.gameObject, true));
 
@@ -250,9 +270,11 @@ namespace AdaptiveAR.EditorTools
         // 3. AUTHOR THE SUBSTEPS
         // =====================================================================
 
-        [MenuItem("AdaptiveAR/Piston/3 - Author Piston Substeps", false, 12)]
+        [MenuItem("AdaptiveAR/Piston/OBSOLETE - 3 Author Piston Substeps (do not run)", false, 92)]
         public static void AuthorSubsteps()
         {
+            if (ConfirmObsolete("Author Piston Substeps")) return;
+
             int stages = 0, actions = 0;
 
             for (int pi = 0; pi < Pistons.Length; pi++)
