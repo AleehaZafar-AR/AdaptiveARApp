@@ -1571,3 +1571,190 @@ mod   Assets/1 - ArUcoMarkerTracking.unity           AlignmentChip y 24 -> 90 (+
 13. Grab / wrong / success pulses on the hand that touched the part.
 
 Nothing in this pass has run on a headset.
+
+---
+
+## Claude → Reviewer — 2026-10-07 — Calibration/interaction cleanup: yaw, panel centring, work-surface lifecycle, role tolerances, immediate snap, READ/INTERACT, audio root cause, error rules
+
+Base: `1eeeaf1`. No scene edit by me this pass; the scene diff is your own uncommitted
+Editor work (StatusCanvas moved/rotated, a `Worksurface` object carrying
+`AssemblyWorkSurface` under `Offset`, build profile target), committed as found. Side
+panels are untouched: the rig moves as one unit.
+
+### 1. Workspace yaw
+
+`WorkspacePlacement.ApplyPose` now takes the **head's forward projected onto the
+horizontal plane at confirmation** as the viewing axis (previously the head-to-hit
+direction, so a glance sideways skewed the engine). MarkerAnchor: +Z = world up,
++Y = that axis, `yawOffsetDegrees` about up. Pitch/roll never reach the engine. Your
+EngineAnchor 90° Z correction is kept; it squares the oil pan to the axis.
+
+### 2. Main panel centred without touching the side panels
+
+Cause of "panel left of me": the rig origin was placed on the axis, but the main
+canvas sits at **(−0.30, +0.20) inside the rig**, so the panel landed 30 cm left.
+`PanelRig.ComputeTarget` now solves for the rig pose that puts the **main panel's
+centre** at `engineBlockCentre + up·heightAboveMarker + viewAxis·depthBeyondMarker`,
+facing back along the axis (`position = panelCentre − rotation · mainPanelOffset`).
+The side canvases are children with your tuned offsets; they move with the rig and
+are never written. The view axis is frozen from MarkerAnchor at placement.
+
+### 3. Work surface lifecycle and location
+
+- Created/shown by `StepManager.HandleStageChanged` only when the entering stage
+  has an enabled action with a kit part key (stages 2–5); hidden when a non-piston
+  stage enters (camshaft) — so it does not exist during the crankshaft.
+- `AssemblyWorkSurface.Place` mode `AboveEngine` (default): 10 cm above the **top of
+  the engine block**, over its centre, shifted 8 cm towards the participant, yawed to
+  face them. Your authored `Worksurface` object is used as the component host and
+  follows the engine (it is under `Offset`); set `placementMode = Authored` on it if
+  you prefer its own transform. Ghost kits are re-arranged on it each time it shows.
+
+### 4. Tolerances per role (new `StepValidator.roleTolerances`; action values are the fallback)
+
+| Role | Position | Orientation | Symmetry |
+|---|---|---|---|
+| PistonHead | 3.0 cm | 30° | full |
+| ConnectingRod | 3.5 cm | 30° | long axis + roll mod 180° |
+| ConnectingPin | 3.0 cm | 40° | axis ± (either way), roll ignored |
+| PistonEnd | 3.0 cm | 35° | long axis + roll mod 180° |
+| pistonBolt / PistonNut (and *Other) | 3.0 cm | 45° | axis ±, roll ignored |
+| crankshaft / camshaft | 4.0 cm | 25° | long axis, roll ignored (they turn in their bearings) |
+| install (kit handle) | action: 4.0 cm | 25° | full |
+
+Attempt zone = max(10 cm, 3 × position tolerance).
+
+### 5. Symmetry-aware orientation
+
+Each part's mechanical axis is its longest mesh extent in local space (pin: local Z).
+`AxialFree`: angle between part axis and target axis. `AxialFreeFlip`: the same with
+`min(a, 180−a)`. `AxialHalfTurn`: that axis angle plus the residual roll about the
+axis after the axes are aligned, taken `min(r, 180−r)`; the error is the larger of
+the two. `None`: `Quaternion.Angle`. The HUD shows the rule in force.
+
+### 6. Immediate snap
+
+The validator judges every frame; when position AND orientation are inside tolerance
+— in the hand or not — `Succeed()` runs **once** (`_completed` guard; `IsActive` false
+afterwards): exact pose → `PlacementLock.LockAt` (kinematic, SDK components disabled,
+which ends the grab) → join to the kit handle → success event → `component_locked` →
+workflow advances once. Because the SDK restores the pre-grab Rigidbody state and
+applies a throw velocity *after* the lock ran, `PlacementLock` re-asserts pose and
+kinematic state for 6 frames. No release is required. **[QV]** the "BOOM" feel.
+
+### 7. READ vs INTERACT
+
+`AssemblySessionController.IsReadState` = current action is an acknowledgement.
+- READ: `AttentionFader` dims every loose part to 45 % via `MaterialPropertyBlock`
+  (`_Color`/`_BaseColor`; materials untouched) and disables their Interaction SDK
+  components (never on locked parts); `StepPresenter` shows no ghost; `GuidanceArrow`
+  hides; the card shows **Continue →**.
+- INTERACT: blocks cleared, components re-enabled, ghost and arrow up, Continue
+  hidden; validation completes the action. If a physical action cannot be armed
+  (missing object) Continue reappears so nobody is stuck.
+- Fading touches no identity, registry, physics, validation or progress; the only log
+  effect is the optional `instruction_acknowledged` note.
+
+### 8. Continue / Back
+
+Continue: 236×66, bold 22 pt "Continue →", accent fill when active, hidden in
+INTERACT. The scene's own `AdvanceStepManually` wiring still advances; the card only
+logs `instruction_acknowledged`. **Back** (previously wired to nothing): "← Back",
+quiet fill, shown only when `CanGoBack` — i.e. from a physical action whose preceding
+enabled action in the stage is an instruction. It re-enters that instruction
+(validator cleared, ghosts off); completed-action state is never modified, nothing
+physical is undone. Otherwise hidden.
+
+### 9. One validation cue
+
+`AlignmentChip` is switched off at start. The feedback line in the main panel is the
+only cue, from `StepValidator.CurrentCue`:
+outside the attempt zone → nothing (the instruction stands); in zone, position off →
+"Move closer to the highlighted position"; position good, orientation off → "Turn the
+part to match the ghost"; released in zone without success → "Almost there — align
+with the ghost" (until the next grab); wrong part held → "That is not the required
+component"; success → "Correct" (1.2 s). No numbers.
+
+### 10. Audio — root cause and fix
+
+Two causes, both in `SpeechLibrary.cs`:
+
+1. **Unloaded clips.** The WAVs import with `Preload Audio Data` off (inherited from
+   the project's mp3 importer). Such a clip has no audio data until
+   `AudioClip.LoadAudioData()` runs; `PlayOneShot` on it is silent and `Play()` is
+   not reliably in time. The crankshaft stage was the one place a clip had been
+   touched early enough / the authored mp3 path existed, which is why only it was
+   heard. Now: `SpeechLibrary.Preload()` loads all clips at startup
+   (`Resources.LoadAll` + `LoadAudioData`), and every play waits for
+   `loadState == Loaded`.
+2. **"Correct." was cut.** Instructions called `Stop()` on the single scene
+   `AudioSource` before playing; `Stop()` also kills one-shots on that source, and
+   the next instruction always followed a success in the same frame. Now two
+   dedicated 2-D sources: instruction (replaced) and feedback (never cut); an
+   instruction requested while feedback plays waits for it (≤ 2 s).
+
+Logging on every request: `[Speech] instruction request "…" -> key '…' -> found,
+loadState=…` then `Play '…' on …/instruction, isPlaying=…`, and
+`[Speech] Preload: N clip(s)` at start — **N = 0 on device means Resources are not in
+the build.** The authored mp3 path goes through the same `PlayAuthored`. Repeat guard
+1 s; nothing per frame; nothing on support re-render. **[QV]** against logcat.
+
+### 11. Error counting and JSONL
+
+**Increments the error count:** `wrong_component_grabbed` (one per grab transition of
+an ineligible part during an INTERACT action; `error_type: wrong_component`,
+`part_key` instance, `requested_key` role) and `validation_attempt` with
+`success:false` (`error_type: incorrect_position | incorrect_orientation`).
+
+**Does not:** `component_dropped` (correct part released outside the attempt zone),
+`component_grabbed/released`, `instruction_acknowledged`, `back_to_instruction`,
+advance_blocked notes.
+
+**Attempt definition:** begins when the handled correct part enters the attempt zone;
+ends with `validation_attempt success:true error_type:placement_success`
+(trigger `aligned_in_hand` / `aligned`) or exactly one failure on `left_zone` or
+`released_in_zone`. Classification uses the closest approach: never inside position
+tolerance → `incorrect_position`; position reached, orientation never → `incorrect_orientation`.
+**Dedup:** one event per zone entry; frames inside the zone update the best values
+only; a new attempt requires leaving and re-entering, or grabbing the part again.
+Wrong-component and failed placements are distinct events with distinct
+`error_type`s. `component_locked` still records the instance (`part_key`),
+`requested_key` and `instance_name`.
+
+### 12. Files changed
+
+```
+new   Assets/Scripts/Steps/AttentionFader.cs
+mod   Assets/Scripts/Audio/SpeechLibrary.cs         preload, load-state wait, two sources, logging
+mod   Assets/Scripts/Steps/StepValidator.cs         role tolerances, symmetry, immediate snap, attempts, cues, drops
+mod   Assets/Scripts/Steps/PlacementLock.cs         re-assert after lock-while-held
+mod   Assets/Scripts/Steps/AssemblySessionController.cs  READ state, Back, acknowledgement, error rules, unarmed guard
+mod   Assets/Scripts/Steps/StepPresenter.cs         READ: no ghost, attention fader
+mod   Assets/Scripts/Steps/StepManager.cs           work surface per piston stage
+mod   Assets/Scripts/MR/AssemblyWorkSurface.cs      AboveEngine / Authored, Show/Hide
+mod   Assets/Scripts/MR/WorkspacePlacement.cs       yaw from head forward
+mod   Assets/Scripts/UI/PanelRig.cs                 main panel on the view axis
+mod   Assets/Scripts/UI/ParticipantCard.cs          states, controls, single cue
+mod   Assets/Scripts/UI/GuidanceArrow.cs            hidden while reading
+mod   Assets/Scripts/UI/ResearcherHud.cs            effective tolerance + symmetry
+mod   Assets/Scripts/Logging/SessionLogger.cs       component_dropped, error_type
+```
+
+Editor commands: **none**. Unity will generate `AttentionFader.cs.meta`.
+
+### 13. [QV]
+
+1. Engine square to your facing direction after Place; no tilt.
+2. Main panel above and beyond the oil pan on your axis; side panels at your offsets.
+3. No work surface during the crankshaft; appears above the block at the first piston
+   stage; gone at the camshaft.
+4. Pin/bolt accepted rolled or flipped; rod accepted flipped about its axis.
+5. Aligning in the hand snaps instantly, once; the hand lets go cleanly; nothing falls.
+6. READ: parts dimmed, un-grabbable, no ghost/arrow, Continue →. INTERACT: all back,
+   no Continue. Back only on a physical action, returns to its instruction.
+7. One feedback line; chip gone.
+8. Logcat shows `[Speech] Preload: 18 clip(s)`; each action speaks once; "Correct."
+   audible after a snap.
+9. Dropping the right part on the desk logs `component_dropped`, no error.
+
+Nothing in this pass has run on a headset.

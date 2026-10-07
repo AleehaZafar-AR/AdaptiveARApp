@@ -2,16 +2,16 @@
 // The single participant-facing instruction card.
 //
 // One component owns every field on the card, so entering a new action clears the
-// old one in one place. The previous design had StepManager, StepPresenter and the
-// HUDs each writing their own fields, which is why text from a finished state could
-// survive into the next one.
+// old one in one place. It renders ONE action at a time and ONE feedback line.
 //
-// It renders ONE action at a time - "Place the crankshaft", "2 of 3" - rather than a
-// paragraph, which is what lets L3 decompose a stage without overflowing.
+// Two action states, made explicit here:
+//   READ      - instruction to read; "Continue  >" is the one thing to do.
+//   INTERACT  - a part to place; Continue is gone, the ghost and arrow are up, and the
+//               feedback line says what to do with the part right now.
 //
-// It also owns the Next control's enabled state: Next is only interactive when the
-// session says progression is permitted, so the button never implies an action that
-// is unavailable.
+// The feedback line is the only validation cue in the participant interface. It is
+// derived from live validator state, in plain words, and reflects the CURRENT
+// interaction, not history. Numbers stay on the researcher HUD.
 
 using AdaptiveAR.Steps;
 using AdaptiveAR.Support;
@@ -43,12 +43,23 @@ namespace AdaptiveAR.UI
         [Tooltip("Supporting detail. Shown only at the richer support levels.")]
         [SerializeField] private TextMeshProUGUI detailText;
 
-        [Tooltip("Feedback line: amber correction, green confirmation.")]
+        [Tooltip("Feedback line: amber correction, green confirmation. The only validation cue.")]
         [SerializeField] private TextMeshProUGUI feedbackText;
 
         [Header("Controls")]
         [SerializeField] private Button nextButton;
         [SerializeField] private TextMeshProUGUI nextLabel;
+
+        [Tooltip("Optional. Found by name (\"BackButton\") in the panel when empty.")]
+        [SerializeField] private Button backButton;
+
+        [Header("Control styling")]
+        [SerializeField] private string continueLabel = "Continue  →";
+        [SerializeField] private string backLabel = "←  Back";
+        [SerializeField] private Vector2 continueSize = new Vector2(236f, 66f);
+        [SerializeField] private Vector2 backSize = new Vector2(128f, 50f);
+        [SerializeField] private float continueFontSize = 22f;
+        [SerializeField] private float backFontSize = 17f;
 
         [Header("Behaviour")]
         [Tooltip("Seconds a success confirmation stays on screen before the card moves on.")]
@@ -56,33 +67,46 @@ namespace AdaptiveAR.UI
 
         [Header("Single presentation")]
         [Tooltip("Siblings of the instruction field left over from the earlier layout. They are " +
-                 "switched off at start so only this card's fields render: one instruction, " +
-                 "one progress line, one Continue label.")]
+                 "switched off at start so only this card's fields render.")]
         [SerializeField] private string[] legacySiblingNames = { "Eyebrow", "StepLabel", "CaptionText", "StatusLine" };
 
-        [Tooltip("Guarantee the instruction field can show two wrapped lines inside the panel " +
-                 "instead of truncating a long sentence. Fields below it move down by the " +
-                 "extra height.")]
+        [Tooltip("Also switch off the old \"Alignment needed\" chip: the feedback line replaces it.")]
+        [SerializeField] private bool removeAlignmentChip = true;
+
+        [Tooltip("Guarantee the instruction field can show two wrapped lines inside the panel.")]
         [SerializeField] private bool ensureInstructionFits = true;
 
         [Tooltip("Smallest font size the instruction may shrink to before wrapping to a second line.")]
         [SerializeField] private float instructionMinFontSize = 18f;
 
+        [Header("Participant wording")]
         [SerializeField] private string wrongPartMessage = "That is not the required component";
+        [SerializeField] private string successMessage = "Correct";
+        [SerializeField] private string moveCloserMessage = "Move closer to the highlighted position";
+        [SerializeField] private string turnToMatchMessage = "Turn the part to match the ghost";
+        [SerializeField] private string almostThereMessage = "Almost there — align with the ghost";
 
         [SerializeField] private float refreshInterval = 0.12f;
 
+        private enum FeedbackKind { None, Cue, WrongPart, Failed, Success }
+
         private float _timer;
         private float _successUntil;
-        private string _lastFeedback;
-        private bool _feedbackIsSuccess;
-        private bool _feedbackIsWrongPart;
+        private FeedbackKind _feedbackKind;
         private string _lastActionKey;
+        private Image _nextImage;
+        private Image _backImage;
+        private TextMeshProUGUI _backLabel;
+
+        // =====================================================================
+        // Setup
+        // =====================================================================
 
         private void Awake()
         {
             RemoveLegacyPresentation();
             if (ensureInstructionFits) EnsureInstructionFits();
+            StyleControls();
         }
 
         private void OnEnable()
@@ -114,10 +138,10 @@ namespace AdaptiveAR.UI
         }
 
         /// <summary>
-        /// The panel still carries the fields of the earlier layout (eyebrow, step label,
-        /// caption, status line) and a second label inside the Continue button. With two
-        /// layouts active everything rendered twice. This card is the single presentation,
-        /// so the others are switched off here rather than merely blanked.
+        /// The panel still carries the fields of the earlier layout and a second label
+        /// inside the Continue button. This card is the single presentation, so they are
+        /// switched off rather than blanked. The alignment chip goes too: the feedback
+        /// line is the one validation cue now.
         /// </summary>
         private void RemoveLegacyPresentation()
         {
@@ -128,12 +152,24 @@ namespace AdaptiveAR.UI
             foreach (Transform child in panel)
             {
                 if (child == null) continue;
-                if (System.Array.IndexOf(legacySiblingNames, child.name) < 0) continue;
+                bool legacy = System.Array.IndexOf(legacySiblingNames, child.name) >= 0
+                              || (removeAlignmentChip && child.GetComponent<AlignmentChip>() != null);
+                if (!legacy) continue;
                 if (child.gameObject.activeSelf) { child.gameObject.SetActive(false); removed++; }
             }
 
-            // One label per button: anything else inside the button is the old caption.
             removed += KeepOnlyLabel(nextButton != null ? nextButton.transform : null, nextLabel);
+
+            if (backButton == null && panel != null)
+            {
+                Transform b = panel.Find("BackButton");
+                if (b != null) backButton = b.GetComponent<Button>();
+            }
+            if (backButton != null)
+            {
+                _backLabel = backButton.GetComponentInChildren<TextMeshProUGUI>(true);
+                removed += KeepOnlyLabel(backButton.transform, _backLabel);
+            }
 
             if (removed > 0)
                 Debug.Log($"[ParticipantCard] {removed} legacy presentation object(s) switched off; this card is the single writer.");
@@ -151,11 +187,6 @@ namespace AdaptiveAR.UI
             return n;
         }
 
-        /// <summary>
-        /// A long instruction was truncated because its field is one line tall with
-        /// Truncate overflow. Allow wrapping, let the font shrink a little, and give the
-        /// field room for two lines - moving only the fields below it, inside the panel.
-        /// </summary>
         private void EnsureInstructionFits()
         {
             if (instructionText == null) return;
@@ -176,8 +207,6 @@ namespace AdaptiveAR.UI
 
             ShiftDown(detailText != null ? detailText.rectTransform : null, delta);
             ShiftDown(feedbackText != null ? feedbackText.rectTransform : null, delta);
-
-            Debug.Log($"[ParticipantCard] Instruction field height {current:F0} -> {needed:F0} px so two lines fit; detail and feedback moved down {delta:F0} px.");
         }
 
         private static void ShiftDown(RectTransform rt, float px)
@@ -187,34 +216,143 @@ namespace AdaptiveAR.UI
             rt.anchoredPosition = new Vector2(p.x, p.y - px);
         }
 
-        // ---------------- feedback lifecycle: current state, not history ----------------
+        /// <summary>
+        /// Continue is the primary action: larger, filled, bold, with an arrow. Back is a
+        /// quiet secondary action. Both stay bottom-anchored where the panel has them.
+        /// </summary>
+        private void StyleControls()
+        {
+            if (nextButton != null)
+            {
+                _nextImage = nextButton.GetComponent<Image>();
+                var rt = nextButton.transform as RectTransform;
+                if (rt != null) rt.sizeDelta = continueSize;
+
+                if (nextLabel != null)
+                {
+                    nextLabel.text = continueLabel;
+                    nextLabel.enableAutoSizing = false;
+                    nextLabel.fontSize = continueFontSize;
+                    nextLabel.fontStyle = FontStyles.Bold;
+                    nextLabel.alignment = TextAlignmentOptions.Center;
+                }
+
+                nextButton.onClick.RemoveListener(OnContinuePressed);
+                nextButton.onClick.AddListener(OnContinuePressed);
+            }
+
+            if (backButton != null)
+            {
+                _backImage = backButton.GetComponent<Image>();
+                var rt = backButton.transform as RectTransform;
+                if (rt != null) rt.sizeDelta = backSize;
+
+                if (_backLabel != null)
+                {
+                    _backLabel.text = backLabel;
+                    _backLabel.enableAutoSizing = false;
+                    _backLabel.fontSize = backFontSize;
+                    _backLabel.fontStyle = FontStyles.Normal;
+                    _backLabel.alignment = TextAlignmentOptions.Center;
+                    _backLabel.color = MrTheme.TextSecondary;
+                }
+
+                if (_backImage != null) _backImage.color = MrTheme.WithAlpha(MrTheme.PanelFillRaised, 0.9f);
+
+                backButton.onClick.RemoveListener(OnBackPressed);
+                backButton.onClick.AddListener(OnBackPressed);
+            }
+        }
+
+        private void OnContinuePressed()
+        {
+            // The scene also wires this button to AdvanceStepManually; the card only logs
+            // the acknowledgement so the two cannot double-advance.
+            if (session != null) session.NoteInstructionAcknowledged();
+        }
+
+        private void OnBackPressed()
+        {
+            if (session != null) session.GoBackToInstruction();
+        }
+
+        // =====================================================================
+        // Feedback lifecycle: current interaction state, not history
+        // =====================================================================
 
         private void HandleEligibleGrabbed(string key, Transform part)
         {
-            // The right kind of part is in the hand: any correction from before is stale.
-            if (!_feedbackIsSuccess) ClearFeedback();
+            if (_feedbackKind != FeedbackKind.Success) ClearFeedback();
         }
 
         private void HandleWrongGrabbed(string key, Transform part)
         {
-            Show(feedbackText, wrongPartMessage, MrTheme.Warning);
-            _feedbackIsSuccess = false;
-            _feedbackIsWrongPart = true;
-            _successUntil = 0f;
+            SetFeedback(FeedbackKind.WrongPart, wrongPartMessage, MrTheme.Warning);
         }
 
         private void HandleWrongReleased(string key, Transform part)
         {
-            if (_feedbackIsWrongPart) ClearFeedback();
+            if (_feedbackKind == FeedbackKind.WrongPart) ClearFeedback();
+        }
+
+        private void HandleAttempt(bool success, float posErr, float rotErr, string trigger)
+        {
+            if (success)
+            {
+                SetFeedback(FeedbackKind.Success, successMessage, MrTheme.Success);
+                _successUntil = Time.time + successHoldSeconds;
+                return;
+            }
+
+            string msg = validator != null && validator.LastErrorType == "incorrect_orientation"
+                ? turnToMatchMessage
+                : almostThereMessage;
+            SetFeedback(FeedbackKind.Failed, msg, MrTheme.Warning);
+        }
+
+        private void SetFeedback(FeedbackKind kind, string text, Color color)
+        {
+            _feedbackKind = kind;
+            if (feedbackText == null) return;
+            feedbackText.text = text;
+            feedbackText.color = color;
         }
 
         private void ClearFeedback()
         {
-            Show(feedbackText, "", MrTheme.TextSecondary);
-            _feedbackIsSuccess = false;
-            _feedbackIsWrongPart = false;
+            _feedbackKind = FeedbackKind.None;
             _successUntil = 0f;
+            if (feedbackText != null) feedbackText.text = "";
         }
+
+        /// <summary>Live cue from the validator while a part is being worked with.</summary>
+        private void UpdateLiveCue()
+        {
+            if (validator == null || !validator.IsActive) return;
+
+            // Sticky states (wrong part held, success hold) win over the live cue.
+            if (_feedbackKind == FeedbackKind.WrongPart && validator.WrongPartHeld) return;
+            if (_feedbackKind == FeedbackKind.Success && Time.time < _successUntil) return;
+
+            switch (validator.CurrentCue)
+            {
+                case StepValidator.Cue.MoveCloser:
+                    SetFeedback(FeedbackKind.Cue, moveCloserMessage, MrTheme.Warning); break;
+                case StepValidator.Cue.TurnToMatch:
+                    SetFeedback(FeedbackKind.Cue, turnToMatchMessage, MrTheme.Warning); break;
+                case StepValidator.Cue.AlmostThere:
+                    SetFeedback(FeedbackKind.Cue, almostThereMessage, MrTheme.Warning); break;
+                default:
+                    // Outside the zone: a failed-attempt message may stay until the next grab;
+                    // a plain cue clears.
+                    if (_feedbackKind == FeedbackKind.Cue) ClearFeedback();
+                    break;
+            }
+        }
+
+        // =====================================================================
+        // Refresh
+        // =====================================================================
 
         private void Update()
         {
@@ -222,34 +360,6 @@ namespace AdaptiveAR.UI
             if (_timer < refreshInterval) return;
             _timer = 0f;
             Refresh();
-        }
-
-        private void HandleAttempt(bool success, float posErr, float rotErr, string trigger)
-        {
-            if (success)
-            {
-                Show(feedbackText, "Placed correctly", MrTheme.Success);
-                _feedbackIsSuccess = true;
-                _feedbackIsWrongPart = false;
-                _successUntil = Time.time + successHoldSeconds;
-                return;
-            }
-
-            _feedbackIsSuccess = false;
-            _feedbackIsWrongPart = false;
-
-            // Specific enough to act on. "Alignment needed" tells the participant nothing.
-            string msg;
-            switch (validator != null ? validator.LastRejectReason : RejectReason.None)
-            {
-                case RejectReason.WrongComponent: msg = wrongPartMessage; break;
-                case RejectReason.TooFar: msg = "Move it closer to the highlighted target"; break;
-                case RejectReason.WrongRotation: msg = "Rotate the part to match the target"; break;
-                default: msg = "Adjust the placement"; break;
-            }
-
-            Show(feedbackText, msg, MrTheme.Warning);
-            _successUntil = 0f;
         }
 
         private void Refresh()
@@ -267,17 +377,15 @@ namespace AdaptiveAR.UI
             StepData stage = workflow != null ? workflow.CurrentStage : stepRunner.CurrentStep;
             AssemblyAction action = workflow != null ? workflow.CurrentAction : null;
 
-            // --- entering a new action clears the previous action's correction feedback. A
-            // --- success confirmation is allowed to finish its short hold, then goes too.
+            // Entering a new action clears the previous action's feedback; a success
+            // confirmation is allowed to finish its short hold first.
             string actionKey = (stage != null ? stage.StepIdentifier : "") + "/" + (action != null ? action.Id : "");
             if (actionKey != _lastActionKey)
             {
                 _lastActionKey = actionKey;
-                if (!_feedbackIsSuccess) ClearFeedback();
+                if (_feedbackKind != FeedbackKind.Success) ClearFeedback();
             }
 
-            // --- one compact progress line: stage position, stage name, action position.
-            // --- Every number comes from WorkflowState, so it cannot disagree with reality.
             if (stageText != null)
             {
                 string stageName = stage != null
@@ -288,9 +396,7 @@ namespace AdaptiveAR.UI
                 int stageCount = stepRunner != null ? stepRunner.StepCount : 0;
 
                 string line = stageCount > 0 ? $"STAGE {stageNum} / {stageCount}" : "";
-
-                if (!string.IsNullOrEmpty(stageName))
-                    line += "     " + stageName.ToUpperInvariant();
+                if (!string.IsNullOrEmpty(stageName)) line += "     " + stageName.ToUpperInvariant();
 
                 if (workflow != null)
                 {
@@ -301,7 +407,6 @@ namespace AdaptiveAR.UI
                 stageText.text = line;
             }
 
-            // Optional separate counter; the combined line above covers it by default.
             if (counterText != null)
             {
                 if (workflow != null)
@@ -312,11 +417,9 @@ namespace AdaptiveAR.UI
                 else counterText.text = "";
             }
 
-            // --- the one instruction ---
             if (instructionText != null)
                 instructionText.text = action != null ? action.instruction : (stage != null ? stage.stepTitle : "");
 
-            // --- detail, revealed with support level ---
             if (detailText != null)
             {
                 bool showDetail = supportLevel != null
@@ -328,45 +431,51 @@ namespace AdaptiveAR.UI
                 detailText.gameObject.SetActive(showDetail);
             }
 
-            // --- feedback clears with its task state ---
-            if (feedbackText != null && Time.time > _successUntil && !string.IsNullOrEmpty(_lastFeedback))
-            {
-                bool blocked = session != null && !session.CanAdvance;
-                bool holdingWrong = validator != null && validator.WrongPartHeld;
-                if ((!blocked || _feedbackIsSuccess) && !holdingWrong)
-                    ClearFeedback();
-            }
+            if (_feedbackKind == FeedbackKind.Success && Time.time > _successUntil)
+                ClearFeedback();
 
-            // --- Next is only offered when progression is actually permitted ---
-            UpdateNext();
+            UpdateLiveCue();
+            UpdateControls(action);
         }
 
-        private void UpdateNext()
+        /// <summary>
+        /// READ state: Continue shown and active. INTERACT state: Continue hidden - the part
+        /// completes the action. Back only when a backward move is valid.
+        /// </summary>
+        private void UpdateControls(AssemblyAction action)
         {
-            if (nextButton == null) return;
-
+            bool read = session != null && session.IsReadState;
             bool can = session != null && session.CanAdvance;
-            nextButton.interactable = can;
 
-            var img = nextButton.GetComponent<Image>();
-            if (img != null)
-                img.color = can ? MrTheme.AccentSoft : MrTheme.WithAlpha(MrTheme.TrackEmpty, 0.5f);
-
-            if (nextLabel != null)
+            if (nextButton != null)
             {
-                nextLabel.color = can ? MrTheme.Accent : MrTheme.TextMuted;
-                nextLabel.text = can ? "Continue" : (session != null ? session.BlockedReason ?? "Continue" : "Continue");
+                bool show = read || can;
+                if (nextButton.gameObject.activeSelf != show) nextButton.gameObject.SetActive(show);
+                nextButton.interactable = can;
+
+                if (_nextImage != null)
+                    _nextImage.color = can ? MrTheme.WithAlpha(MrTheme.Accent, 0.28f) : MrTheme.WithAlpha(MrTheme.TrackEmpty, 0.5f);
+
+                if (nextLabel != null)
+                {
+                    nextLabel.color = can ? MrTheme.TextPrimary : MrTheme.TextMuted;
+                    nextLabel.text = continueLabel;
+                }
+            }
+
+            if (backButton != null)
+            {
+                bool show = session != null && session.CanGoBack;
+                if (backButton.gameObject.activeSelf != show) backButton.gameObject.SetActive(show);
             }
         }
 
         private void ClearCard()
         {
-            Show(stageText, "", MrTheme.TextPrimary);
-            Show(counterText, "", MrTheme.TextMuted);
-            Show(instructionText, "", MrTheme.TextPrimary);
-            Show(feedbackText, "", MrTheme.TextSecondary);
-            _feedbackIsSuccess = false;
-            _feedbackIsWrongPart = false;
+            if (stageText != null) stageText.text = "";
+            if (counterText != null) counterText.text = "";
+            if (instructionText != null) instructionText.text = "";
+            ClearFeedback();
             _lastActionKey = null;
 
             if (detailText != null)
@@ -374,15 +483,9 @@ namespace AdaptiveAR.UI
                 detailText.text = "";
                 detailText.gameObject.SetActive(false);
             }
-        }
 
-        private void Show(TextMeshProUGUI field, string text, Color color)
-        {
-            if (field == null) return;
-            field.text = text;
-            field.color = color;
-
-            if (field == feedbackText) _lastFeedback = text;
+            if (nextButton != null && nextButton.gameObject.activeSelf) nextButton.gameObject.SetActive(false);
+            if (backButton != null && backButton.gameObject.activeSelf) backButton.gameObject.SetActive(false);
         }
     }
 }

@@ -101,6 +101,7 @@ namespace AdaptiveAR.Steps
         private bool _textOwnedByCard;
         private InstructionSpeech _speech;
         private AudioClip _pendingStageClip;
+        private AttentionFader _attention;
 
         /// <summary>True when a ParticipantCard owns the card text and this component only clears.</summary>
         public bool TextOwnedByParticipantCard { get { return _textOwnedByCard; } }
@@ -113,6 +114,11 @@ namespace AdaptiveAR.Steps
 
             // Speech goes through the scene AudioSource the authored clips already used.
             _speech = InstructionSpeech.Ensure(audioSource);
+
+            // READ-state focus: presentation only (property blocks + suspended grab).
+            _attention = GetComponent<AttentionFader>();
+            if (_attention == null) _attention = gameObject.AddComponent<AttentionFader>();
+            _attention.Configure(guidanceRegistry);
 
             if (_textOwnedByCard && logPresentation)
                 Debug.Log("[StepPresenter] ParticipantCard found: it owns the instruction text; " +
@@ -241,6 +247,7 @@ namespace AdaptiveAR.Steps
         {
             _currentAction = null;
             _levelShowsGhosts = false;
+            if (_attention != null) _attention.SetRead(false);
             ClearPresentation();
 
             if (logPresentation)
@@ -255,6 +262,12 @@ namespace AdaptiveAR.Steps
         public void PresentAction(AssemblyAction action)
         {
             _currentAction = action;
+
+            // READ state: parts dimmed and not grabbable, no ghost, no arrow. INTERACT state:
+            // everything back, ghost up.
+            bool read = action != null && action.enabled && !action.RequiresPhysicalValidation;
+            if (_attention != null) _attention.SetRead(read);
+
             ApplyGhosts();
 
             SpeakAction(action);
@@ -379,6 +392,10 @@ namespace AdaptiveAR.Steps
             DestroyAll(_spawnedInstances);
 
             if (!_levelShowsGhosts)
+                return;
+
+            // Reading: the target is not shown until the participant presses Continue.
+            if (_currentAction != null && _currentAction.enabled && !_currentAction.RequiresPhysicalValidation)
                 return;
 
             bool actionHasOwn = _currentAction != null && HasItems(_currentAction.ghostKeys);

@@ -228,6 +228,7 @@ namespace AdaptiveAR.UI
 
             AssemblyAction action = workflow.CurrentAction;
             if (action == null || !action.enabled || !action.showArrow) return null;
+            if (!action.RequiresPhysicalValidation) return null;     // READ state: no arrow
 
             string key = handled && !string.IsNullOrEmpty(action.targetKey)
                 ? action.targetKey

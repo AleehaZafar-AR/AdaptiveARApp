@@ -153,9 +153,8 @@ namespace AdaptiveAR.UI
             if (validator != null && validator.IsActive)
             {
                 validator.GetCurrentError(out float pos, out float rot);
-                AssemblyAction action = validator.CurrentAction;
-                float posTol = action != null ? action.positionToleranceMeters : (step != null ? step.positionToleranceMeters : 0f);
-                float rotTol = action != null ? action.rotationToleranceDegrees : (step != null ? step.rotationToleranceDegrees : 0f);
+                float posTol = validator.PositionTolerance;
+                float rotTol = validator.RotationTolerance;
                 bool inTol = pos <= posTol && rot <= rotTol;
 
                 _sb.Append("<b>PLACEMENT</b>  ")
@@ -164,6 +163,8 @@ namespace AdaptiveAR.UI
 
                 _sb.Append("   tol ").Append((posTol * 100f).ToString("F1"))
                    .Append(" cm / ").Append(rotTol.ToString("F0")).Append('°');
+
+                _sb.Append("   ").Append(validator.CurrentSymmetry.ToString());
 
                 if (validator.IsAssisting)
                     _sb.Append("   ").Append(Colorize("assist", MrTheme.Accent));

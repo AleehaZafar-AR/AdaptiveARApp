@@ -105,6 +105,7 @@ namespace AdaptiveAR.Steps
         private StepData _currentStep;
         private int _currentIndex = -1;
         private bool _placementSubscribed;
+        private bool _currentActionArmed;
 
         /// <summary>
         /// Latest physiological reading, or null when nothing is attached.
@@ -136,6 +137,7 @@ namespace AdaptiveAR.Steps
                 validator.OnPartReleased += HandlePartReleased;
                 validator.OnWrongPartGrabbed += HandleWrongPartGrabbed;
                 validator.OnWrongPartReleased += HandleWrongPartReleased;
+                validator.OnComponentDropped += HandleComponentDropped;
             }
 
             if (toolInteraction != null)
@@ -170,6 +172,7 @@ namespace AdaptiveAR.Steps
                 validator.OnPartReleased -= HandlePartReleased;
                 validator.OnWrongPartGrabbed -= HandleWrongPartGrabbed;
                 validator.OnWrongPartReleased -= HandleWrongPartReleased;
+                validator.OnComponentDropped -= HandleComponentDropped;
             }
 
             if (toolInteraction != null)
@@ -193,6 +196,12 @@ namespace AdaptiveAR.Steps
 
         private void HandleWrongPartGrabbed(string partKey, Transform part)
         {
+            // A wrong component in the hand is a behavioural error: one per grab, never
+            // per frame (the validator raises this on the grab transition only).
+            _errorsOnStep++;
+            _errorsTotal++;
+            PushEnvelope();
+
             if (logger != null) logger.LogWrongComponent(partKey, validator != null ? validator.PartKey : null);
             if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
 
@@ -203,6 +212,12 @@ namespace AdaptiveAR.Steps
         private void HandleWrongPartReleased(string partKey, Transform part)
         {
             if (logger != null) logger.LogNote("wrong_component_released:" + partKey);
+        }
+
+        /// <summary>The correct part was let go far from the target. An interaction event, not an error.</summary>
+        private void HandleComponentDropped(string partKey, Transform part)
+        {
+            if (logger != null) logger.LogComponentDropped(partKey, validator != null ? validator.PartKey : null);
         }
 
         private void HandleWorkspacePlaced(bool reposition)
@@ -285,9 +300,69 @@ namespace AdaptiveAR.Steps
                 if (action == null) return true;                       // stage without actions
                 if (!action.enabled) return true;                      // designed, not performable
                 if (!action.RequiresPhysicalValidation) return true;    // read and acknowledge
+                if (!_currentActionArmed) return true;                  // cannot be validated: confirm by hand
 
                 return workflow.CurrentActionComplete;
             }
+        }
+
+        /// <summary>
+        /// READ state: the current action is an acknowledgement (read, then Continue).
+        /// Otherwise the action is physical: INTERACT state, no Continue.
+        /// </summary>
+        public bool IsReadState
+        {
+            get
+            {
+                if (!SessionActive || SequenceFinished || workflow == null) return false;
+                AssemblyAction a = workflow.CurrentAction;
+                return a != null && a.enabled && !a.RequiresPhysicalValidation;
+            }
+        }
+
+        /// <summary>
+        /// Back is valid only from a physical action whose preceding enabled action in the
+        /// same stage is an instruction. It re-reads that instruction; it never undoes a
+        /// placement or touches completed-action state.
+        /// </summary>
+        public bool CanGoBack
+        {
+            get { return PreviousInstructionIndex() >= 0; }
+        }
+
+        private int PreviousInstructionIndex()
+        {
+            if (!SessionActive || SequenceFinished || workflow == null) return -1;
+            StepData stage = workflow.CurrentStage;
+            AssemblyAction current = workflow.CurrentAction;
+            if (stage == null || stage.actions == null || current == null) return -1;
+            if (!current.RequiresPhysicalValidation) return -1;      // already reading
+
+            for (int i = workflow.ActionIndex - 1; i >= 0; i--)
+            {
+                AssemblyAction a = stage.actions[i];
+                if (a == null || !a.enabled) continue;
+                return a.RequiresPhysicalValidation ? -1 : i;         // stop at the first enabled one
+            }
+            return -1;
+        }
+
+        /// <summary>Re-enters the preceding instruction. Safe: completed actions stay completed.</summary>
+        public void GoBackToInstruction()
+        {
+            int index = PreviousInstructionIndex();
+            if (index < 0) return;
+
+            if (logger != null) logger.LogNote("back_to_instruction:" + (workflow.CurrentAction != null ? workflow.CurrentAction.Id : ""));
+            if (validator != null) validator.Clear();
+            EnterAction(index);
+        }
+
+        /// <summary>Logged by the card when Continue is pressed in the READ state.</summary>
+        public void NoteInstructionAcknowledged()
+        {
+            if (!IsReadState || logger == null || workflow == null || workflow.CurrentAction == null) return;
+            logger.LogNote("instruction_acknowledged:" + workflow.CurrentAction.Id);
         }
 
         /// <summary>Short reason the Next control is unavailable, for the participant card.</summary>
@@ -328,11 +403,12 @@ namespace AdaptiveAR.Steps
             workflow.EnterAction(resolved);
             AssemblyAction action = workflow.CurrentAction;
 
+            _currentActionArmed = false;
             if (validator != null)
             {
-                bool armed = validator.BeginAction(action);
+                _currentActionArmed = validator.BeginAction(action);
 
-                if (!armed && action != null && action.RequiresPhysicalValidation && logToConsole)
+                if (!_currentActionArmed && action != null && action.RequiresPhysicalValidation && logToConsole)
                     Debug.LogWarning("[Session] Action '" + action.Id + "' wants validation but could " +
                                      "not be armed; it must be confirmed manually.");
             }
@@ -451,15 +527,17 @@ namespace AdaptiveAR.Steps
 
             if (logger != null && _currentStep != null)
             {
-                AssemblyAction a = validator != null ? validator.CurrentAction : null;
-                float posTol = a != null ? a.positionToleranceMeters : _currentStep.positionToleranceMeters;
-                float rotTol = a != null ? a.rotationToleranceDegrees : _currentStep.rotationToleranceDegrees;
+                float posTol = validator != null ? validator.PositionTolerance : _currentStep.positionToleranceMeters;
+                float rotTol = validator != null ? validator.RotationTolerance : _currentStep.rotationToleranceDegrees;
 
+                // One line per ATTEMPT (zone entered and left, or released inside it) or
+                // per success - never per release far away, never per frame.
                 logger.LogValidationAttempt(_attemptsOnStep, success, posErr, rotErr,
                                             posTol, rotTol,
-                                            validator != null ? validator.PartKey : null,
+                                            validator != null ? validator.ActiveInstanceKey ?? validator.PartKey : null,
                                             validator != null ? validator.TargetKey : null,
-                                            trigger);
+                                            trigger,
+                                            success ? "placement_success" : (validator != null ? validator.LastErrorType : null));
 
                 if (success)
                     logger.LogComponentLocked(validator != null ? validator.ActiveInstanceKey : null, posErr, rotErr,

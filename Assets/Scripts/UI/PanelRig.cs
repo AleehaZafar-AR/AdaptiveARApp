@@ -6,15 +6,13 @@
 // ----------
 // BEFORE the workspace is placed there is no workspace to be relative to. The rig
 // parks itself once, directly in front of the participant at reading distance, and
-// stays there - world-locked, not head-locked - while they point at the desk. Only
-// the main panel is shown then (AdaptivePanelController hides the rest).
+// stays there - world-locked, not head-locked - while they point at the desk.
 //
-// AFTER the workspace is placed the rig re-settles once relative to the workspace
-// (the same marker-relative offsets as before), detaches from the anchor chain and
-// stays put for the session. The panels never follow the head.
-//
-// Movement, when it is allowed at all, uses a dead zone rather than following every
-// frame. Panels that chase the head are uncomfortable to read.
+// AFTER the workspace is placed the rig settles once so that the MAIN panel sits
+// directly above and a little beyond the engine, centred on the viewing axis the
+// workspace was placed with, then detaches from the anchor chain and stays put.
+// The side panels are children of the rig at offsets tuned by hand relative to the
+// main panel; the rig moves as one unit, so those offsets are never touched.
 
 using UnityEngine;
 
@@ -30,16 +28,15 @@ namespace AdaptiveAR.UI
         [SerializeField] private Transform head;
 
         [Header("Placement, metres")]
-        [Tooltip("How far above the workspace plane the panels sit. Raise this if they cover the engine.")]
+        [Tooltip("How far above the workspace plane the MAIN panel's centre sits.")]
         [SerializeField] private float heightAboveMarker = 0.42f;
 
-        [Tooltip("How far beyond the workspace, away from the viewer, the panels sit. " +
-                 "Keeps them off the work area without pushing them out of easy reading range.")]
+        [Tooltip("How far beyond the engine, away from the viewer, the main panel's centre sits.")]
         [SerializeField] private float depthBeyondMarker = 0.14f;
 
-        [Header("Before placement")]
-        [Tooltip("The main panel. Parked in front of the head before the workspace exists. " +
-                 "Found as the first child Canvas when empty.")]
+        [Header("Main panel")]
+        [Tooltip("The main panel. Centred on the viewing axis after placement; parked in front " +
+                 "of the head before it. Found as the first child Canvas when empty.")]
         [SerializeField] private Transform mainPanel;
 
         [Tooltip("Reading distance from the head for the parked main panel, metres.")]
@@ -68,8 +65,7 @@ namespace AdaptiveAR.UI
         [Tooltip("Used only to detect that the sequence has begun.")]
         [SerializeField] private AdaptiveAR.Steps.StepRunner stepRunner;
 
-        [Tooltip("Locks as soon as the workspace is placed, which is earlier than the " +
-                 "sequence start and covers the whole onboarding.")]
+        [Tooltip("Locks as soon as the workspace is placed.")]
         [SerializeField] private StepManager stepManager;
 
         [Tooltip("Metres. Below this the viewer is too close to the workspace for the " +
@@ -86,14 +82,13 @@ namespace AdaptiveAR.UI
 
         [SerializeField] private KeyCode recenterKey = KeyCode.R;
 
-        /// <summary>True once the panels have been parked for good.</summary>
         public bool IsLocked { get; private set; }
-
-        /// <summary>True while parked in front of the head, before the workspace exists.</summary>
         public bool IsPrePlacement { get; private set; }
 
         private Vector3 _frozenMarkerPos;
         private bool _hasFrozenMarkerPos;
+        private Vector3 _frozenViewAxis;
+        private bool _hasFrozenViewAxis;
         private Vector3 _stableDirection = Vector3.forward;
         private bool _hasStableDirection;
         private Vector3 _targetPosition;
@@ -127,16 +122,21 @@ namespace AdaptiveAR.UI
             }
         }
 
-        /// <summary>
-        /// Parks the rig so the main panel sits in front of the head at reading distance,
-        /// world-locked. The rig leaves the anchor chain now, so moving the workspace
-        /// root during placement cannot drag the panel around.
-        /// </summary>
         private void EnterPrePlacement()
         {
             IsPrePlacement = true;
             Detach(freezeMarker: false);
             ParkInFrontOfHead();
+        }
+
+        /// <summary>Offset of the main panel inside the rig (the rig has unit scale).</summary>
+        private Vector3 MainPanelOffset()
+        {
+            if (mainPanel == null) return Vector3.zero;
+            var rt = mainPanel as RectTransform;
+            return rt != null
+                ? new Vector3(rt.anchoredPosition.x, rt.anchoredPosition.y, rt.localPosition.z)
+                : mainPanel.localPosition;
         }
 
         private void ParkInFrontOfHead()
@@ -149,18 +149,7 @@ namespace AdaptiveAR.UI
 
             Vector3 centre = head.position + fwd * prePlacementDistance + Vector3.up * prePlacementHeightOffset;
             Quaternion rot = Quaternion.LookRotation(fwd, Vector3.up);
-
-            // The main panel is offset inside the rig; place the rig so the PANEL lands at
-            // the centre of view, not the rig origin.
-            Vector3 panelOffset = Vector3.zero;
-            if (mainPanel != null)
-            {
-                var rt = mainPanel as RectTransform;
-                panelOffset = rt != null
-                    ? new Vector3(rt.anchoredPosition.x, rt.anchoredPosition.y, rt.localPosition.z)
-                    : mainPanel.localPosition;
-            }
-            Vector3 pos = centre - rot * panelOffset;
+            Vector3 pos = centre - rot * MainPanelOffset();
 
             transform.SetPositionAndRotation(pos, rot);
             _targetPosition = pos;
@@ -178,14 +167,13 @@ namespace AdaptiveAR.UI
 
             bool recenter = OVRInput.GetDown(recenterButton) || Input.GetKeyDown(recenterKey);
 
-            // --- parked in front of the head until the workspace exists ---
             if (IsPrePlacement)
             {
                 if (stepManager != null && stepManager.AnchorLocked)
                 {
-                    // The workspace now exists: settle once relative to it and stay.
                     IsPrePlacement = false;
                     _hasStableDirection = false;
+                    FreezeWorkspaceFrame();
                     Recenter();
                     Detach(freezeMarker: true);
                     IsLocked = true;
@@ -198,17 +186,16 @@ namespace AdaptiveAR.UI
 
             if (recenter)
             {
-                IsLocked = false;      // an explicit recentre always wins
+                IsLocked = false;
                 Recenter();
                 if (lockWhenSequenceStarts && stepRunner != null && stepRunner.HasStarted)
                     IsLocked = true;
                 return;
             }
 
-            // Park the panels the moment the workspace is placed - before onboarding,
-            // not after it - and leave them there.
             if (!IsLocked && lockWhenSequenceStarts && stepManager != null && stepManager.AnchorLocked)
             {
+                FreezeWorkspaceFrame();
                 Recenter();
                 Detach(freezeMarker: true);
                 IsLocked = true;
@@ -228,7 +215,6 @@ namespace AdaptiveAR.UI
             if (!ComputeTarget(out Vector3 wantPos, out Quaternion wantRot))
                 return;
 
-            // Dead zone: only adopt a new target once the viewer has actually moved.
             if (!_hasTarget
                 || Vector3.Distance(wantPos, _targetPosition) > positionDeadZone
                 || Quaternion.Angle(wantRot, _targetRotation) > yawDeadZoneDegrees)
@@ -244,11 +230,20 @@ namespace AdaptiveAR.UI
         }
 
         /// <summary>
-        /// Detaches the rig from the anchor hierarchy, keeping its world pose. A child
-        /// inherits every move of its parent, so this is what actually stops the panels
-        /// moving with the workspace root. Optionally caches the workspace position so
-        /// later re-centres stay relative to where it was when the rig locked.
+        /// Captures the workspace's viewing axis at placement: MarkerAnchor's +Y is the
+        /// horizontal "away from the participant" direction the workspace was placed with.
         /// </summary>
+        private void FreezeWorkspaceFrame()
+        {
+            if (markerAnchor == null) return;
+            Vector3 axis = Vector3.ProjectOnPlane(markerAnchor.up, Vector3.up);
+            if (axis.sqrMagnitude > 1e-4f)
+            {
+                _frozenViewAxis = axis.normalized;
+                _hasFrozenViewAxis = true;
+            }
+        }
+
         private void Detach(bool freezeMarker)
         {
             if (freezeMarker && markerAnchor != null)
@@ -266,7 +261,6 @@ namespace AdaptiveAR.UI
             transform.SetPositionAndRotation(p, r);
         }
 
-        /// <summary>Drops the dead zone for one frame and re-aims at the current head pose.</summary>
         public void Recenter()
         {
             if (!ComputeTarget(out Vector3 p, out Quaternion r)) return;
@@ -277,6 +271,27 @@ namespace AdaptiveAR.UI
             transform.SetPositionAndRotation(p, r);
         }
 
+        /// <summary>Centre of the engine block in plan, if it can be found under the anchor; else the anchor point.</summary>
+        private Vector3 EngineReferencePoint(Vector3 markerPos)
+        {
+            if (markerAnchor == null) return markerPos;
+
+            foreach (Transform t in markerAnchor.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name != "oilPan") continue;
+                var rs = t.GetComponentsInChildren<Renderer>(false);
+                if (rs.Length == 0) break;
+                Bounds b = rs[0].bounds;
+                for (int i = 1; i < rs.Length; i++) b.Encapsulate(rs[i].bounds);
+                return new Vector3(b.center.x, markerPos.y, b.center.z);
+            }
+            return markerPos;
+        }
+
+        /// <summary>
+        /// Rig pose such that the MAIN panel's centre is above and beyond the engine on the
+        /// viewing axis, facing back along it. Side panels keep their rig-relative offsets.
+        /// </summary>
         private bool ComputeTarget(out Vector3 position, out Quaternion rotation)
         {
             position = transform.position;
@@ -285,37 +300,40 @@ namespace AdaptiveAR.UI
             if (markerAnchor == null || head == null)
                 return false;
 
-            // Cached once the rig detaches, so the reference survives unparenting.
             Vector3 markerPos = _hasFrozenMarkerPos ? _frozenMarkerPos : markerAnchor.position;
+            Vector3 reference = EngineReferencePoint(markerPos);
 
-            // Horizontal direction from the viewer to the workspace. The panels go a little
-            // further along it, so the engine stays nearer the viewer than the panels do.
-            Vector3 away = markerPos - head.position;
-            away.y = 0f;
-
-            if (away.magnitude < minStableDistance)
+            Vector3 away;
+            if (_hasFrozenViewAxis)
             {
-                if (_hasStableDirection) away = _stableDirection;
-                else away = Vector3.forward;
+                away = _frozenViewAxis;
             }
             else
             {
-                away.Normalize();
-                _stableDirection = away;
-                _hasStableDirection = true;
+                away = reference - head.position;
+                away.y = 0f;
+
+                if (away.magnitude < minStableDistance)
+                {
+                    away = _hasStableDirection ? _stableDirection : Vector3.forward;
+                }
+                else
+                {
+                    away.Normalize();
+                    _stableDirection = away;
+                    _hasStableDirection = true;
+                }
             }
 
-            position = markerPos + Vector3.up * heightAboveMarker + away * depthBeyondMarker;
+            Vector3 panelCentre = reference + Vector3.up * heightAboveMarker + away * depthBeyondMarker;
 
-            // Face the viewer. Canvas forward points away from its readable side, so the
-            // panels look along the same direction the viewer is looking.
-            Vector3 toViewer = position - head.position;
-            if (keepUpright) toViewer.y = 0f;
+            // Face back along the viewing axis. Canvas forward points away from its readable
+            // side, so the rotation looks along "away".
+            rotation = keepUpright
+                ? Quaternion.LookRotation(away, Vector3.up)
+                : Quaternion.LookRotation(panelCentre - head.position, Vector3.up);
 
-            if (toViewer.sqrMagnitude < 1e-4f)
-                return false;
-
-            rotation = Quaternion.LookRotation(toViewer.normalized, Vector3.up);
+            position = panelCentre - rotation * MainPanelOffset();
             return true;
         }
 
@@ -323,7 +341,6 @@ namespace AdaptiveAR.UI
         private void OnDrawGizmosSelected()
         {
             if (markerAnchor == null) return;
-
             Gizmos.color = Color.cyan;
             Gizmos.DrawLine(markerAnchor.position, transform.position);
             Gizmos.DrawWireSphere(markerAnchor.position, 0.03f);

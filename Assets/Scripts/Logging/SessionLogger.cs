@@ -61,6 +61,9 @@ namespace AdaptiveAR.Logging
 
             // --- a part that cannot satisfy the current action was picked up ---
             public const string WrongComponentGrabbed = "wrong_component_grabbed";
+
+            // --- the correct part was released away from its target: interaction, not error ---
+            public const string ComponentDropped = "component_dropped";
         }
 
         [Header("Participant")]
@@ -276,7 +279,8 @@ namespace AdaptiveAR.Logging
                                          string rejectReason = null)
         {
             var w = NewLine(Events.ValidationAttempt);
-            w.Str("reject_reason", rejectReason);
+            // "placement_success", "incorrect_position" or "incorrect_orientation".
+            w.Str("error_type", rejectReason);
             w.Num("attempt_index", attemptIndex);
             w.Bool("success", success);
             w.Num("position_error_m", positionErrorM);
@@ -375,6 +379,15 @@ namespace AdaptiveAR.Logging
         public void LogWrongComponent(string partKey, string requestedKey)
         {
             var w = NewLine(Events.WrongComponentGrabbed);
+            w.Str("part_key", partKey);
+            w.Str("requested_key", requestedKey);
+            w.Str("error_type", "wrong_component");
+            Write(w);
+        }
+
+        public void LogComponentDropped(string partKey, string requestedKey)
+        {
+            var w = NewLine(Events.ComponentDropped);
             w.Str("part_key", partKey);
             w.Str("requested_key", requestedKey);
             Write(w);

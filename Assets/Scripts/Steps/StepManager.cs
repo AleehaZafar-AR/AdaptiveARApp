@@ -124,6 +124,32 @@ public class StepManager : MonoBehaviour
 
         if (fitTrayColliders && oilPan != null)
             TrayColliders.Ensure(oilPan.transform.root);
+
+        // The piston work surface exists only while a piston is being built.
+        if (stepRunner != null)
+            stepRunner.OnStepChanged += HandleStageChanged;
+    }
+
+    private void HandleStageChanged(StepData stage, int index, string reason)
+    {
+        bool pistonStage = StageUsesKits(stage);
+
+        if (pistonStage)
+        {
+            ShowWorkSurface(true);
+        }
+        else if (workSurface != null && workSurface.IsShown)
+        {
+            workSurface.Show(false);
+        }
+    }
+
+    private static bool StageUsesKits(StepData stage)
+    {
+        if (stage == null || stage.actions == null) return false;
+        foreach (AssemblyAction a in stage.actions)
+            if (a != null && a.enabled && GuidanceRegistry.KitOf(a.partKey) != null) return true;
+        return false;
     }
 
     // ---------------- SURFACE PLACEMENT ----------------
@@ -154,6 +180,8 @@ public class StepManager : MonoBehaviour
     {
         if (placement != null)
             placement.OnPlaced -= HandleWorkspacePlaced;
+        if (stepRunner != null)
+            stepRunner.OnStepChanged -= HandleStageChanged;
     }
 
     /// <summary>
@@ -188,7 +216,7 @@ public class StepManager : MonoBehaviour
         {
             if (captionText != null && !anchorLocked)
                 captionText.text = "Workspace moved.";
-            PlaceWorkSurface();
+            if (workSurface != null && workSurface.IsShown) ShowWorkSurface(true);
             return;
         }
 
@@ -200,17 +228,15 @@ public class StepManager : MonoBehaviour
 
         if (captionText != null)
             captionText.text = "Workspace placed.";
-
-        PlaceWorkSurface();
     }
 
     /// <summary>
-    /// Creates (once) and poses the piston work surface beside the engine, a hand height
-    /// above the desk, then arranges the ghost kits on it.
+    /// Creates (once), poses and shows the piston work surface above the engine block,
+    /// and arranges the ghost kits on it. Called when a piston stage begins.
     /// </summary>
-    private void PlaceWorkSurface()
+    private void ShowWorkSurface(bool shown)
     {
-        if (!createWorkSurface || placement == null || oilPan == null) return;
+        if (!createWorkSurface || oilPan == null) return;
 
         if (workSurface == null)
             workSurface = FindAnyObjectByType<AssemblyWorkSurface>(FindObjectsInactive.Include);
@@ -223,11 +249,13 @@ public class StepManager : MonoBehaviour
         }
 
         Transform head = Camera.main != null ? Camera.main.transform : null;
-        workSurface.Place(oilPan.transform, placement.LastPlacedPosition.y, head);
+        workSurface.Place(oilPan.transform, head);
 
         var registry = GetComponent<GuidanceRegistry>();
         if (registry != null)
             workSurface.ArrangeKitGhosts(registry, head);
+
+        workSurface.Show(shown);
     }
 
     // ---------------- SESSION ----------------

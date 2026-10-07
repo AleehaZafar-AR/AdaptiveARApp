@@ -493,11 +493,12 @@ namespace AdaptiveAR.MR
             Vector3 up = Vector3.up;   // a table is horizontal; a slightly noisy normal must not tilt the engine
             Vector3 away = Vector3.forward;
 
+            // The participant's horizontal facing direction at confirmation is the viewing
+            // axis: the workspace is squared to it. Head pitch and roll never reach the engine.
             if (head != null)
             {
-                away = surfacePoint - head.position;
-                away.y = 0f;
-                if (away.sqrMagnitude < 1e-4f) away = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+                away = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+                if (away.sqrMagnitude < 1e-4f) { away = surfacePoint - head.position; away.y = 0f; }
                 if (away.sqrMagnitude < 1e-4f) away = Vector3.forward;
                 away.Normalize();
             }
