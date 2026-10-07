@@ -937,6 +937,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -1409,6 +1412,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -1968,6 +1974,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -2470,6 +2479,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -3170,6 +3182,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 0
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -3473,6 +3488,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -4853,6 +4871,9 @@ MonoBehaviour:
   arucoCoordinator: {fileID: 1066915661}
   arucoTracking: {fileID: 1254158198}
   blockMarkerId: 0
+  useSurfacePlacement: 1
+  placement: {fileID: 0}
+  disableCameraAccessWhenBypassed: 1
   crankshaftPrefab: {fileID: 2276785170046358372, guid: 8262644a8b2683b4a892731a65a0c2f6,
     type: 3}
   crankshaftSpawnOffset: {x: -0.25, y: 0.1, z: 0}
@@ -4905,6 +4926,7 @@ MonoBehaviour:
   stepRunner: {fileID: 205522880}
   supportLevel: {fileID: 205522882}
   guidanceRegistry: {fileID: 205522881}
+  workflow: {fileID: 0}
   captionText: {fileID: 1676478110}
   titleText: {fileID: 1384187973}
   bodyText: {fileID: 1967382108}
@@ -4915,6 +4937,7 @@ MonoBehaviour:
   anchorRoot: {fileID: 790534456}
   clearRegistryBeforePresent: 1
   parentSpawnedGhostsToAnchor: 0
+  makeGhostsInert: 1
   logPresentation: 1
 --- !u!114 &205522880
 MonoBehaviour:
@@ -5231,6 +5254,8 @@ MonoBehaviour:
     excludeFromAutoHide: 1
   deactivateAllOnAwake: 0
   warnOnMissingKey: 1
+  bindByConvention: 1
+  kitHandleChildName: PistonHead
 --- !u!114 &205522882
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5263,6 +5288,8 @@ MonoBehaviour:
   logger: {fileID: 205522884}
   workflow: {fileID: 205522887}
   toolInteraction: {fileID: 0}
+  presenter: {fileID: 0}
+  stepManager: {fileID: 0}
   operatorExperience: unspecified
   beginSessionOnStart: 1
   endSessionOnComplete: 1
@@ -5306,6 +5333,14 @@ MonoBehaviour:
   acceptOnRest: 1
   requireHandledBeforeRest: 1
   handledMoveThreshold: 0.05
+  assistRadiusMeters: 0.08
+  suppressCollisionsNearTarget: 1
+  freezeOnReleaseNearTarget: 1
+  nearReleaseSettleSeconds: 0.12
+  alwaysSolidNamePrefixes:
+  - tray
+  - Plane
+  - TabletopSupport
   logEvaluations: 1
 --- !u!114 &205522886
 MonoBehaviour:
@@ -6536,6 +6571,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -7004,6 +7042,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -7353,6 +7394,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 0
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -8113,6 +8157,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -8236,8 +8283,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 0}
   m_AnchorMax: {x: 1, y: 0}
-  m_AnchoredPosition: {x: -13.299988, y: 11.1}
-  m_SizeDelta: {x: 219.7, y: 92.4}
+  m_AnchoredPosition: {x: -13.299988, y: 3.399994}
+  m_SizeDelta: {x: 226.14, y: 116.1}
   m_Pivot: {x: 1, y: 0}
 --- !u!114 &359943547
 MonoBehaviour:
@@ -8562,6 +8609,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -9335,6 +9385,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -10376,6 +10429,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -11387,6 +11443,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -11928,6 +11987,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -12063,6 +12125,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -13129,6 +13194,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -13267,6 +13335,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -13676,6 +13747,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -14116,6 +14190,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 0
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -14271,6 +14348,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -14702,6 +14782,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -14968,6 +15051,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -15103,6 +15189,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -15573,7 +15662,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0.738, y: 0.2}
-  m_SizeDelta: {x: 309.2, y: 300}
+  m_SizeDelta: {x: 362.16, y: 342.8}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &732236113
 MonoBehaviour:
@@ -15672,6 +15761,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -16545,6 +16637,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -17144,14 +17239,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 790534455}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 1
   m_Children:
   - {fileID: 657294783}
   m_Father: {fileID: 290402204}
-  m_LocalEulerAnglesHint: {x: -90, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 90}
 --- !u!1 &793701829
 GameObject:
   m_ObjectHideFlags: 0
@@ -17372,6 +17467,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -18679,6 +18777,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -19181,6 +19282,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -19319,6 +19423,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -21660,6 +21767,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -22278,6 +22388,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -22613,6 +22726,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -22782,6 +22898,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -23170,6 +23289,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -24175,6 +24297,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -24358,6 +24483,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -25546,6 +25674,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -25823,6 +25954,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -26089,6 +26223,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -26269,6 +26406,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -26820,6 +26960,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -27566,6 +27709,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -28522,6 +28668,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -28799,6 +28948,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -29156,6 +29308,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -29517,6 +29672,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -29750,6 +29908,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -30425,6 +30586,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -30852,6 +31016,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -31304,6 +31471,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -31671,6 +31841,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -31851,6 +32024,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -32158,6 +32334,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -32686,6 +32865,10 @@ MonoBehaviour:
   stepRunner: {fileID: 205522880}
   logger: {fileID: 205522884}
   flow: {fileID: 1673987215}
+  placement: {fileID: 0}
+  placementEyebrow: SET UP
+  placementTitle: Place the workspace
+  placementButtonLabel: Place Workspace
   eyebrowText: {fileID: 163370035}
   titleText: {fileID: 1485874791}
   bodyText: {fileID: 1959316064}
@@ -33560,6 +33743,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 0
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -33601,7 +33787,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 10, y: -42}
+  m_AnchoredPosition: {x: 22.65, y: -42}
   m_SizeDelta: {x: 260, y: 250}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1711164846
@@ -34096,7 +34282,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 10, y: -18}
+  m_AnchoredPosition: {x: 22.65, y: -18}
   m_SizeDelta: {x: 260, y: 18}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1717364277
@@ -34246,6 +34432,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -34384,6 +34573,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -35712,7 +35904,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1810677274}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.5, y: 0.5, z: 0.5, w: 0.5}
+  m_LocalRotation: {x: -0.46632943, y: 0.531542, z: 0.531542, w: 0.46632943}
   m_LocalPosition: {x: 0.246, y: 0, z: 0.346}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -35721,7 +35913,7 @@ Transform:
   - {fileID: 776438024}
   - {fileID: 904091990}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 97.478}
 --- !u!1 &1814281491
 GameObject:
   m_ObjectHideFlags: 0
@@ -35773,6 +35965,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -36167,6 +36362,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -36396,6 +36594,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -36768,6 +36969,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -37639,6 +37843,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -38241,6 +38448,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -40786,6 +40996,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -40963,6 +41176,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -41239,6 +41455,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -41377,6 +41596,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -41946,6 +42168,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -42061,7 +42286,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 24, y: 24}
+  m_AnchoredPosition: {x: 24, y: 90}
   m_SizeDelta: {x: 230, y: 44}
   m_Pivot: {x: 0, y: 0}
 --- !u!114 &2064786628
@@ -44277,6 +44502,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -44709,6 +44937,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -44809,6 +45040,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -44946,6 +45180,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -45046,6 +45283,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1
@@ -45203,6 +45443,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   releaseToGravityOnEnable: 1
+  physicsProfile: 0
+  tunedContactOffset: 0.003
+  tunedMaxDepenetrationVelocity: 1
   collisionDetection: 3
   interpolation: 1
   recoverIfLost: 1

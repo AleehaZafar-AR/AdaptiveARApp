@@ -102,13 +102,10 @@ namespace AdaptiveAR.MR
         [SerializeField] private Color reticleInvalidColor = new Color(0.95f, 0.65f, 0.2f, 0.9f);
 
         [Header("Behaviour")]
-        [Tooltip("While placing, move the workspace root with the candidate so marker-relative " +
-                 "UI floats over the reticle. The engine stays hidden until the first placement.")]
+        [Tooltip("While REPOSITIONING an existing workspace, move the root with the candidate so " +
+                 "the engine previews where it will land. Never used before the first placement: " +
+                 "the UI is parked in front of the head then and must not move.")]
         [SerializeField] private bool previewMovesRoot = true;
-
-        [Tooltip("Where the root sits while no surface has been found yet: in front of and " +
-                 "below the head, so the placement panel is readable from the start.")]
-        [SerializeField] private Vector3 idleOffsetFromHead = new Vector3(0f, -0.45f, 0.8f);
 
         [Header("Debug")]
         [SerializeField] private bool logChanges = true;
@@ -133,6 +130,9 @@ namespace AdaptiveAR.MR
 
         /// <summary>Raised when a reposition starts, so UI can explain what to do.</summary>
         public event Action OnRepositionStarted;
+
+        /// <summary>Raised whenever placement mode begins (first placement or reposition).</summary>
+        public event Action OnPlacementBegan;
 
         public Vector3 LastPlacedPosition { get; private set; }
         public Vector3 LastSurfaceNormal { get; private set; } = Vector3.up;
@@ -254,6 +254,7 @@ namespace AdaptiveAR.MR
             SetDepthActive(true);
 
             if (_hasPlacedOnce) OnRepositionStarted?.Invoke();
+            OnPlacementBegan?.Invoke();
 
             if (logChanges)
                 Debug.Log("[WorkspacePlacement] " + (_hasPlacedOnce ? "Repositioning" : "Placing") + " the workspace.");
@@ -509,26 +510,13 @@ namespace AdaptiveAR.MR
 
         private void UpdatePreviewRoot()
         {
-            if (!previewMovesRoot || workspaceRoot == null) return;
+            // Only while repositioning: the engine follows the ring so the researcher sees
+            // where it will land. Before the first placement the root stays put - the
+            // parked UI must not move with the head.
+            if (!previewMovesRoot || workspaceRoot == null || !_hasPlacedOnce) return;
 
-            // Once an engine is on the table, preview by moving it with the candidate so the
-            // researcher sees where it will land. Before the first placement nothing is
-            // visible under the root except the UI, which simply floats over the reticle.
             if (HasValidCandidate)
-            {
                 ApplyPose(_reticleHasPos ? _reticleSmoothed : _candidatePoint, _candidateNormal);
-            }
-            else if (!_hasPlacedOnce && head != null)
-            {
-                Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
-                if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
-                fwd.Normalize();
-                Vector3 right = Vector3.Cross(Vector3.up, fwd);
-
-                Vector3 p = head.position + right * idleOffsetFromHead.x + Vector3.up * idleOffsetFromHead.y + fwd * idleOffsetFromHead.z;
-                Quaternion rot = Quaternion.LookRotation(Vector3.up, fwd);
-                workspaceRoot.SetPositionAndRotation(p, rot);
-            }
         }
 
         private void UpdateStatus()

@@ -1330,3 +1330,244 @@ reposition button). Without it the runtime-created one uses the defaults above.
 
 AI, OpenAI, HRV/BLE, simulation, WebXR, visual redesign, tool model. The crank bolts
 remain baked into the oil pan. Nothing here has run on a headset.
+
+---
+
+## Claude → Reviewer — 2026-10-06 (b) — Quest polish pass: startup panel, single UI path, arrow, trays, feedback, interchangeable pistons, work surface, speech, haptics
+
+Base: `c18bad2` (your Quest-tested build). Architecture unchanged; scene hierarchy,
+tuned panel dimensions, green ghosts, grab configuration and the placement flow are
+as you left them. Scene diff: Unity's own re-serialisation of new fields plus **one
+line** (AlignmentChip moved up). `GhostTarget.mat`, `arrow.prefab` and the ISDK prefab
+are untouched. Your open Unity had further uncommitted edits (EngineAnchor rotated
+90° about Z, StartButton and ResearchCanvas sizes, two anchored x offsets); they are
+committed exactly as found.
+
+### 1. Startup panel — exact cause and fix
+
+`PanelRig` is a **child of `MarkerAnchor`**, and during placement the previous pass
+moved `MarkerAnchor` every frame to the candidate/idle pose. A child inherits every
+move of its parent, so the whole rig — all four canvases — travelled with the head.
+
+Now (`PanelRig`, `AdaptivePanelController`, `WorkspacePlacement`):
+- At start the rig **detaches** from the anchor chain and parks the main panel
+  0.75 m in front of the head, 8 cm below eye height, facing the viewer. It is
+  **world-locked**: nothing moves it until placement. (Left thumbstick re-parks it.)
+- `AdaptivePanelController.SetPlacementMode(true)` hides Steps / Performance /
+  Research; only the main panel exists during placement and the walkthrough.
+- The workspace root no longer moves before the first placement; only the reticle
+  does. (On a *reposition*, the engine still previews under the ring — the rig is
+  already detached by then.)
+- On `Place Workspace`: the rig settles **once** relative to the placed workspace with
+  the same offsets as before and locks for the session. The side panels are revealed
+  when the participant presses **Begin Assembly** (so the walkthrough stays one
+  panel); their positions are your tuned layout, relative to the placed workspace.
+  Nothing follows the head afterwards.
+
+### 2. Duplicated Step 1 UI — exact cause
+
+Not two canvases: **two layouts inside one panel**. `DemoUICanvas/Panel` still carries
+the fields of the earlier presenter layout *and* the card layout, all active:
+
+| Earlier layout (StepPresenter era) | Card layout (ParticipantCard) |
+|---|---|
+| `Eyebrow` "V8 ASSEMBLY" (y −24) | `Header` "V8 ASSEMBLY" (y −22) |
+| `StepLabel` "STEP 01 / 06" (written by StepPresenter) | `ProgressLabel` "STAGE 1 / 6 CRANKSHAFT STEP 1 / 3" |
+| `CaptionText` (the old `Demo:` field, blanked last pass) | `TitleText` (instruction) |
+| `StatusLine` | `FeedbackText` |
+| `NextButton/Text (TMP)` "Next Step" | `NextButton/Label` "Continue" |
+
+So the header, the progression text and the Continue caption each rendered twice,
+one on top of the other. `ParticipantCard.Awake` now **switches the earlier layout's
+objects off** (`Eyebrow`, `StepLabel`, `CaptionText`, `StatusLine`, and every TMP inside
+the Continue button except its own label) — removed from the runtime path, not
+blanked. `StepPresenter` no longer writes the step label when a card owns the text.
+At runtime there is one instruction field, one progress line, one Continue label,
+one feedback field.
+
+**The "Demo step".** There is no Demo step in the workflow: `StepRunner.steps` holds
+exactly `Step_01_Crankshaft … Step_06_Camshaft` (verified by GUID). `Step_0_Demo`,
+`Step_1_Crankshaft` and `Step_Crankshaft_Phase1` are orphaned assets referenced only by
+the two dead scenes; nothing loads them. What read as a demo layer was the earlier
+layout above — it is gone. Flow is: placement → walkthrough → Step 1.
+
+### 3. Guidance arrow
+
+The prefab mesh is a flat 2-D arrow (`arrow.fbx`, geometries Plane.005/006: long axis X,
+thin axis Z, tip at the narrow end). Your prefab root rotation `(0.5, −0.5, −0.5, 0.5)`
+maps the mesh's long axis onto world ±Y — i.e. you authored it tip-down. The runtime
+ignored that: it overwrote the root rotation with its own computed `MinusY` aim, which
+is why it lay roughly parallel to the target.
+
+`GuidanceArrow` now has `orientation = AuthoredTipDown` (default): it **keeps the
+prefab's authored rotation** (tip straight down, 18 cm above part or target) and only
+**yaws it about the vertical** so the flat face is towards the head (`faceViewer`). The
+thin axis is read from the mesh bounds, not guessed. The old computed mode remains
+selectable.
+
+### 4. Trays
+
+Each tray is a thin non-convex mesh shell scaled ~60×. A thin shell has no "inside":
+a part released inside a wall is pushed out on whichever side is nearer, one authored
+overlapping the floor can be pushed down through it, and a held (kinematic) part
+passes through anything. `TrayColliders.Ensure` adds, at startup, **five thick box
+colliders** from the mesh bounds to each `tray*`: a 5 cm slab under the floor and
+four 2 cm walls extending 3 cm above the rim. Boxes have an unambiguous inside, so
+"out" is always up and over the rim. Sweep CCD from last pass stays on.
+
+The mating assist never touched the trays: its receiving set excludes any collider
+under `tray*`, `Plane`, `TabletopSupport`, and anything carrying `AssemblyWorkSurface` (checked by component, because the prefix list is already serialized in the scene). Confirmed in code.
+
+### 5. Alignment chip vs Back button
+
+Both were bottom-left anchored at (22–24, 22–24) px with the same size — the chip sat
+exactly on the button. The chip's `anchoredPosition.y` is now 90 (button 56 px + gap).
+That is the single scene line.
+
+### 6. Wrong-item feedback — lifecycle
+
+Previously "wrong component" was only a *reject reason after a release far from the
+target*, and it stayed while the action was blocked. Now the validator **watches every
+other registered part** (`OnWrongPartGrabbed` / `OnWrongPartReleased`) and the card
+tracks current state:
+
+- wrong part grabbed → amber "That is not the required component" + warning haptic +
+  spoken phrase, logged as `wrong_component_grabbed` (part key + requested role);
+- wrong part released → cleared;
+- an **eligible** part grabbed → any correction cleared immediately;
+- valid placement → "Placed correctly" (1.2 s), "Correct.", success haptic;
+- action change → everything cleared; a wrong part still in the hand re-raises.
+
+### 7. Interchangeable piston parts
+
+Validation is by **role**. `GuidanceRegistry.RoleCandidates("part.PistonKit001.PistonHead")`
+returns every registered `part.PistonKit00k.PistonHead` (k = 1..4); the validator accepts
+any of them that is not **consumed** (`_consumed` is keyed by *instance*). Rods, pins,
+ends and the enabled bolt work the same way. `interchangeableRoles` can turn it off.
+
+**Binding.** The instance that locks for the handle role (`PistonHead`) is bound to the
+kit the *action* names (`GuidanceRegistry.BindKitHandle("PistonKit001", head003)`); from
+then on `part.PistonKit001` resolves to that head, the rod/pin/end/bolt of that stage
+are parented under it when they lock, and `install` moves it. A consumed instance can
+never satisfy a later kit. Logging: `component_locked` now records `part_key` =
+**instance** (e.g. `part.PistonKit003.PistonHead`), `requested_key` = the role asked for,
+and `instance_name`; `component_grabbed/released` already carry the instance.
+
+### 8. Work surface
+
+`AssemblyWorkSurface` (runtime, created by `StepManager` after placement, re-posed on
+reposition): a 32 cm square, **10 cm above the detected desk**, placed toward the
+participant from the engine **block** (`Ghosties/oilPan` bounds + 10 cm clearance +
+half size), falling back to user-right / user-left / further out if the first spot
+overlaps the block, the trays or the parts in plan view. Faded cyan grid on a
+`Sprites/Default` quad (always-included shader, alpha-blended, edges fade — not a
+slab), plus a 2 cm `BoxCollider` slab so dropped parts rest on it. It is in the
+validator's always-solid list.
+
+**Piston sequence.** All four ghost kits (`Ghosties/PistonKits/PistonKit00N`) are posed
+on the surface at the same spot: their children are set to the **assembled relative
+poses copied from the bore ghost `Ghosties/piston00N`**, the kit is turned so the rod
+hangs below the head and the pin axis runs across the view, and lifted so the lowest
+point clears the surface by 1.5 cm. So: head target on the surface → head snaps and
+locks → rod ghost relative to that head → pin → end → bolt → the finished unit is
+unlocked and installed in the bore (`ghost.piston00N.PistonHead`), next piston reuses
+the surface. The previous "build zone" ghosts were the *staged* (spread-out) copies,
+58 cm behind the engine — that is why the head ghost was far and uncontextualised.
+
+### 9. Why rod/pin still repelled
+
+The assist radius was measured **pivot to pivot** (8 cm). A rod is ~12 cm long: its
+end touched the locked head while the pivots were still >8 cm apart, so collisions
+were still on at first contact and the release outside the radius went through the
+unfrozen path (dynamic, overlapping, pushed apart). The assist is now **shape-to-shape**:
+pivot distance minus both bounding-sphere radii, threshold `assistGapMeters` (6 cm).
+The receiving set already included the whole growing assembly (locked parts under the
+workspace root); environment, trays, work surface stay solid.
+
+### 10. Piston text truncation — cause
+
+`TitleText` is a **42 px tall** field with `overflowMode = Truncate` and auto-size
+22–30. One line of 22 pt is ~26 px, so any instruction that needs a second line at
+416 px width — every piston instruction — was cut after the first line. Not the
+strings (all complete in the assets), not another writer. `ParticipantCard.
+EnsureInstructionFits` sets overflow to Overflow, wrapping on, min size 18, height to
+two lines (49 px), and moves only the detail and feedback fields down by the 7 px
+difference. Panel width and the rest of the layout are untouched. Piston instructions
+were reworded for the work surface (and so their clips match):
+
+```
+Find the piston components in the parts tray.
+Place a piston head on the work surface target.
+Fit a connecting rod into the piston head.
+Push a connecting pin through the rod and the head.
+Fit a rod end cap onto the connecting rod.
+Fit a retaining bolt.
+Install the assembled piston into its cylinder bore.
+```
+
+### 11. Audio
+
+There is no TTS engine in the project or on Horizon OS; the Step 1 clip
+(`InsertCrankshaft.mp3`, authored only on the L3 block) was a pre-rendered file. The
+same mechanism — pre-rendered clips through the scene `AudioSource` — now covers every
+enabled action: 18 WAVs synthesised offline (Windows SAPI, Zira, fixed rate, mono
+22 kHz) into `Assets/Resources/AdaptiveAR/Speech/`, **named by a key derived from the
+exact sentence**. `SpeechLibrary.KeyFor(text)` and the generator use the same rule, so
+the clip is looked up with the string the card shows; a wording change without a
+clip logs the missing key once. Rules in `InstructionSpeech` / `StepPresenter`:
+spoken **once on action enter**, never per frame, never on a support-level re-render;
+a stage's authored clip plays only if its first action has no sentence clip.
+Feedback: "Correct." on a valid placement, "That is not the required component." on
+a wrong grab, layered so they never cut an instruction.
+
+### 12. Haptics
+
+`HapticFeedback` (static, `OVRInput.SetControllerVibration` on the controller nearest
+the part, auto-stopped): grab 60 ms @0.25, wrong part 2×70 ms @0.6, success 140 ms
+@0.9. Every call is try/caught; no controller → nothing.
+
+### Files changed
+
+```
+new   Assets/Scripts/MR/AssemblyWorkSurface.cs
+new   Assets/Scripts/MR/TrayColliders.cs
+new   Assets/Scripts/Audio/SpeechLibrary.cs          SpeechLibrary + InstructionSpeech
+new   Assets/Scripts/XR/HapticFeedback.cs
+new   Assets/Resources/AdaptiveAR/Speech/*.wav (+.meta)  18 clips
+mod   Assets/Scripts/UI/PanelRig.cs                  world-locked pre-placement park
+mod   Assets/Scripts/UI/AdaptivePanelController.cs   SetPlacementMode
+mod   Assets/Scripts/UI/GuidanceArrow.cs             AuthoredTipDown + face viewer
+mod   Assets/Scripts/UI/ParticipantCard.cs           single layout, feedback lifecycle, text fit
+mod   Assets/Scripts/Steps/StepValidator.cs          roles, wrong-part monitor, shape-gap assist, binding
+mod   Assets/Scripts/Steps/GuidanceRegistry.cs       RoleCandidates, kit bindings, PartKeys
+mod   Assets/Scripts/Steps/StepPresenter.cs          speech on action enter
+mod   Assets/Scripts/Steps/AssemblySessionController.cs  speech/haptic/log hooks, instance logging
+mod   Assets/Scripts/Steps/StepManager.cs            work surface, tray colliders, panel placement mode
+mod   Assets/Scripts/MR/WorkspacePlacement.cs        root no longer moves before first placement
+mod   Assets/Scripts/Logging/SessionLogger.cs        wrong_component_grabbed; locked instance fields
+mod   Assets/ScriptableObjects/Steps/Step_02..05     instruction wording
+mod   Assets/1 - ArUcoMarkerTracking.unity           AlignmentChip y 24 -> 90 (+ Unity field re-serialisation)
+```
+
+### Editor commands: **none.** Unity already generated the new `.meta` files; they are committed.
+
+### [QV]
+
+1. Startup: one world-locked panel in front of you; it does not move with the head.
+2. After `Place Workspace`: panel stays; after `Begin Assembly`: your three-panel layout
+   appears relative to the workspace and stays.
+3. Step 1: one header, one progress line, one instruction, one Continue, no `Demo:`.
+4. Arrow: tip down, above the part/target, face towards you.
+5. Drop a part into a tray from 15 cm: it stays in. Push one at a wall: it stays in.
+6. "Alignment needed" chip clear of Back.
+7. Grab the camshaft during Step 1: amber text + warning buzz + spoken phrase; release:
+   cleared; grab the crankshaft: cleared.
+8. Pistons: pick **any** head; it binds; rod/pin/end/bolt follow it; install.
+9. Work surface: 10 cm above the desk, toward you, beside the block, not overlapping
+   it — if it is in the wrong spot, `clearanceFromEngine` / `heightAboveDesk` **[PC]**.
+10. Rod enters the head without repulsion; pin likewise.
+11. Piston instructions complete, two lines.
+12. Each new action speaks once; B/Y re-render speaks nothing.
+13. Grab / wrong / success pulses on the hand that touched the part.
+
+Nothing in this pass has run on a headset.

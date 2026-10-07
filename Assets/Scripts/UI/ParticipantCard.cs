@@ -54,19 +54,48 @@ namespace AdaptiveAR.UI
         [Tooltip("Seconds a success confirmation stays on screen before the card moves on.")]
         [SerializeField] private float successHoldSeconds = 1.2f;
 
+        [Header("Single presentation")]
+        [Tooltip("Siblings of the instruction field left over from the earlier layout. They are " +
+                 "switched off at start so only this card's fields render: one instruction, " +
+                 "one progress line, one Continue label.")]
+        [SerializeField] private string[] legacySiblingNames = { "Eyebrow", "StepLabel", "CaptionText", "StatusLine" };
+
+        [Tooltip("Guarantee the instruction field can show two wrapped lines inside the panel " +
+                 "instead of truncating a long sentence. Fields below it move down by the " +
+                 "extra height.")]
+        [SerializeField] private bool ensureInstructionFits = true;
+
+        [Tooltip("Smallest font size the instruction may shrink to before wrapping to a second line.")]
+        [SerializeField] private float instructionMinFontSize = 18f;
+
+        [SerializeField] private string wrongPartMessage = "That is not the required component";
+
         [SerializeField] private float refreshInterval = 0.12f;
 
         private float _timer;
         private float _successUntil;
         private string _lastFeedback;
         private bool _feedbackIsSuccess;
+        private bool _feedbackIsWrongPart;
         private string _lastActionKey;
+
+        private void Awake()
+        {
+            RemoveLegacyPresentation();
+            if (ensureInstructionFits) EnsureInstructionFits();
+        }
 
         private void OnEnable()
         {
             if (session != null) session.OnStateChanged += Refresh;
             if (workflow != null) workflow.OnChanged += Refresh;
-            if (validator != null) validator.OnAttemptEvaluated += HandleAttempt;
+            if (validator != null)
+            {
+                validator.OnAttemptEvaluated += HandleAttempt;
+                validator.OnPartGrabbed += HandleEligibleGrabbed;
+                validator.OnWrongPartGrabbed += HandleWrongGrabbed;
+                validator.OnWrongPartReleased += HandleWrongReleased;
+            }
 
             Refresh();
         }
@@ -75,7 +104,116 @@ namespace AdaptiveAR.UI
         {
             if (session != null) session.OnStateChanged -= Refresh;
             if (workflow != null) workflow.OnChanged -= Refresh;
-            if (validator != null) validator.OnAttemptEvaluated -= HandleAttempt;
+            if (validator != null)
+            {
+                validator.OnAttemptEvaluated -= HandleAttempt;
+                validator.OnPartGrabbed -= HandleEligibleGrabbed;
+                validator.OnWrongPartGrabbed -= HandleWrongGrabbed;
+                validator.OnWrongPartReleased -= HandleWrongReleased;
+            }
+        }
+
+        /// <summary>
+        /// The panel still carries the fields of the earlier layout (eyebrow, step label,
+        /// caption, status line) and a second label inside the Continue button. With two
+        /// layouts active everything rendered twice. This card is the single presentation,
+        /// so the others are switched off here rather than merely blanked.
+        /// </summary>
+        private void RemoveLegacyPresentation()
+        {
+            Transform panel = instructionText != null ? instructionText.transform.parent : transform;
+            if (panel == null) return;
+
+            int removed = 0;
+            foreach (Transform child in panel)
+            {
+                if (child == null) continue;
+                if (System.Array.IndexOf(legacySiblingNames, child.name) < 0) continue;
+                if (child.gameObject.activeSelf) { child.gameObject.SetActive(false); removed++; }
+            }
+
+            // One label per button: anything else inside the button is the old caption.
+            removed += KeepOnlyLabel(nextButton != null ? nextButton.transform : null, nextLabel);
+
+            if (removed > 0)
+                Debug.Log($"[ParticipantCard] {removed} legacy presentation object(s) switched off; this card is the single writer.");
+        }
+
+        private static int KeepOnlyLabel(Transform button, TextMeshProUGUI keep)
+        {
+            if (button == null) return 0;
+            int n = 0;
+            foreach (TextMeshProUGUI t in button.GetComponentsInChildren<TextMeshProUGUI>(true))
+            {
+                if (t == null || t == keep) continue;
+                if (t.gameObject.activeSelf) { t.gameObject.SetActive(false); n++; }
+            }
+            return n;
+        }
+
+        /// <summary>
+        /// A long instruction was truncated because its field is one line tall with
+        /// Truncate overflow. Allow wrapping, let the font shrink a little, and give the
+        /// field room for two lines - moving only the fields below it, inside the panel.
+        /// </summary>
+        private void EnsureInstructionFits()
+        {
+            if (instructionText == null) return;
+
+            instructionText.overflowMode = TextOverflowModes.Overflow;
+            instructionText.textWrappingMode = TextWrappingModes.Normal;
+            instructionText.enableAutoSizing = true;
+            instructionText.fontSizeMin = Mathf.Min(instructionText.fontSizeMin, instructionMinFontSize);
+
+            var rt = instructionText.rectTransform;
+            float lineHeight = instructionText.fontSizeMin * 1.2f;
+            float needed = lineHeight * 2f + 6f;
+            float current = rt.sizeDelta.y;
+            if (current >= needed) return;
+
+            float delta = needed - current;
+            rt.sizeDelta = new Vector2(rt.sizeDelta.x, needed);
+
+            ShiftDown(detailText != null ? detailText.rectTransform : null, delta);
+            ShiftDown(feedbackText != null ? feedbackText.rectTransform : null, delta);
+
+            Debug.Log($"[ParticipantCard] Instruction field height {current:F0} -> {needed:F0} px so two lines fit; detail and feedback moved down {delta:F0} px.");
+        }
+
+        private static void ShiftDown(RectTransform rt, float px)
+        {
+            if (rt == null) return;
+            Vector2 p = rt.anchoredPosition;
+            rt.anchoredPosition = new Vector2(p.x, p.y - px);
+        }
+
+        // ---------------- feedback lifecycle: current state, not history ----------------
+
+        private void HandleEligibleGrabbed(string key, Transform part)
+        {
+            // The right kind of part is in the hand: any correction from before is stale.
+            if (!_feedbackIsSuccess) ClearFeedback();
+        }
+
+        private void HandleWrongGrabbed(string key, Transform part)
+        {
+            Show(feedbackText, wrongPartMessage, MrTheme.Warning);
+            _feedbackIsSuccess = false;
+            _feedbackIsWrongPart = true;
+            _successUntil = 0f;
+        }
+
+        private void HandleWrongReleased(string key, Transform part)
+        {
+            if (_feedbackIsWrongPart) ClearFeedback();
+        }
+
+        private void ClearFeedback()
+        {
+            Show(feedbackText, "", MrTheme.TextSecondary);
+            _feedbackIsSuccess = false;
+            _feedbackIsWrongPart = false;
+            _successUntil = 0f;
         }
 
         private void Update()
@@ -92,17 +230,19 @@ namespace AdaptiveAR.UI
             {
                 Show(feedbackText, "Placed correctly", MrTheme.Success);
                 _feedbackIsSuccess = true;
+                _feedbackIsWrongPart = false;
                 _successUntil = Time.time + successHoldSeconds;
                 return;
             }
 
             _feedbackIsSuccess = false;
+            _feedbackIsWrongPart = false;
 
             // Specific enough to act on. "Alignment needed" tells the participant nothing.
             string msg;
             switch (validator != null ? validator.LastRejectReason : RejectReason.None)
             {
-                case RejectReason.WrongComponent: msg = "That is not the right component"; break;
+                case RejectReason.WrongComponent: msg = wrongPartMessage; break;
                 case RejectReason.TooFar: msg = "Move it closer to the highlighted target"; break;
                 case RejectReason.WrongRotation: msg = "Rotate the part to match the target"; break;
                 default: msg = "Adjust the placement"; break;
@@ -133,11 +273,7 @@ namespace AdaptiveAR.UI
             if (actionKey != _lastActionKey)
             {
                 _lastActionKey = actionKey;
-                if (!_feedbackIsSuccess)
-                {
-                    Show(feedbackText, "", MrTheme.TextSecondary);
-                    _successUntil = 0f;
-                }
+                if (!_feedbackIsSuccess) ClearFeedback();
             }
 
             // --- one compact progress line: stage position, stage name, action position.
@@ -196,11 +332,9 @@ namespace AdaptiveAR.UI
             if (feedbackText != null && Time.time > _successUntil && !string.IsNullOrEmpty(_lastFeedback))
             {
                 bool blocked = session != null && !session.CanAdvance;
-                if (!blocked || _feedbackIsSuccess)
-                {
-                    Show(feedbackText, "", MrTheme.TextSecondary);
-                    _feedbackIsSuccess = false;
-                }
+                bool holdingWrong = validator != null && validator.WrongPartHeld;
+                if ((!blocked || _feedbackIsSuccess) && !holdingWrong)
+                    ClearFeedback();
             }
 
             // --- Next is only offered when progression is actually permitted ---
@@ -232,6 +366,7 @@ namespace AdaptiveAR.UI
             Show(instructionText, "", MrTheme.TextPrimary);
             Show(feedbackText, "", MrTheme.TextSecondary);
             _feedbackIsSuccess = false;
+            _feedbackIsWrongPart = false;
             _lastActionKey = null;
 
             if (detailText != null)

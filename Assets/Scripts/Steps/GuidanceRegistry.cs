@@ -63,6 +63,12 @@ namespace AdaptiveAR.Steps
 
         private readonly Dictionary<string, GameObject> _lookup = new Dictionary<string, GameObject>();
         private readonly HashSet<string> _autoBound = new HashSet<string>();
+
+        // Kit name -> the instance that is acting as that kit's handle this session.
+        private readonly Dictionary<string, Transform> _kitHandles = new Dictionary<string, Transform>();
+
+        /// <summary>The role that acts as a kit's handle (the piston head).</summary>
+        public string KitHandleRole { get { return kitHandleChildName; } }
         private readonly HashSet<string> _autoBindFailed = new HashSet<string>();
 
         private static readonly Regex KitChildKey = new Regex(@"^part\.PistonKit(\d+)\.(.+)$", RegexOptions.Compiled);
@@ -163,6 +169,78 @@ namespace AdaptiveAR.Steps
             return !string.IsNullOrEmpty(partKey) && KitHandleKey.IsMatch(partKey);
         }
 
+        /// <summary>The role of a kit part key, e.g. "part.PistonKit001.ConnectingRod" -> "ConnectingRod".</summary>
+        public static string RoleOf(string partKey)
+        {
+            if (string.IsNullOrEmpty(partKey)) return null;
+            Match m = KitChildKey.Match(partKey);
+            return m.Success ? m.Groups[2].Value : null;
+        }
+
+        /// <summary>
+        /// Every registered instance that can satisfy a key. For a kit part this is the
+        /// same ROLE from every kit (the four piston heads are interchangeable); the key
+        /// itself comes first. For a kit handle key it is the kit's bound handle. Anything
+        /// else resolves to itself.
+        /// </summary>
+        public List<string> RoleCandidates(string key)
+        {
+            var list = new List<string>();
+            if (string.IsNullOrEmpty(key)) return list;
+
+            string role = RoleOf(key);
+            if (role == null)
+            {
+                list.Add(key);
+                return list;
+            }
+
+            list.Add(key);
+            for (int k = 1; k <= 4; k++)
+            {
+                string candidate = $"part.PistonKit00{k}.{role}";
+                if (candidate == key) continue;
+                if (TryResolveQuiet(candidate, out GameObject go) && go != null)
+                    list.Add(candidate);
+            }
+            return list;
+        }
+
+        /// <summary>Records which instance is the handle of a kit for the rest of the session.</summary>
+        public void BindKitHandle(string kit, Transform handle)
+        {
+            if (string.IsNullOrEmpty(kit) || handle == null) return;
+            _kitHandles[kit] = handle;
+            // The handle key now resolves to this instance for install actions.
+            _lookup["part." + kit] = handle.gameObject;
+            Debug.Log($"[GuidanceRegistry] {kit} handle bound to '{PathOf(handle)}'.", this);
+        }
+
+        public bool TryGetKitHandle(string kit, out Transform handle)
+        {
+            handle = null;
+            return !string.IsNullOrEmpty(kit) && _kitHandles.TryGetValue(kit, out handle) && handle != null;
+        }
+
+        /// <summary>Every key that names a loose part (prefix "part."), registered or auto-bound.</summary>
+        public IEnumerable<string> PartKeys()
+        {
+            if (_lookup.Count == 0 && entries.Count > 0)
+                BuildLookup();
+
+            var seen = new HashSet<string>();
+            foreach (Entry e in entries)
+            {
+                if (e == null || string.IsNullOrEmpty(e.key) || !e.key.StartsWith("part.")) continue;
+                if (seen.Add(e.key)) yield return e.key;
+            }
+            foreach (string k in new List<string>(_lookup.Keys))
+            {
+                if (!k.StartsWith("part.")) continue;
+                if (seen.Add(k)) yield return k;
+            }
+        }
+
         /// <summary>
         /// Resolves the handle of the kit a component key belongs to, i.e. the object the
         /// finished assembly is grabbed and installed by. False when the key is not a kit
@@ -173,6 +251,8 @@ namespace AdaptiveAR.Steps
             handle = null;
             string kit = KitOf(partKey);
             if (kit == null) return false;
+
+            if (TryGetKitHandle(kit, out handle)) return true;
 
             if (TryResolveQuiet("part." + kit, out GameObject go) && go != null)
             {

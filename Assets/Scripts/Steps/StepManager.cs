@@ -39,6 +39,18 @@ public class StepManager : MonoBehaviour
              "stream and the CV debug quad so no camera permission or CPU is spent on them.")]
     public bool disableCameraAccessWhenBypassed = true;
 
+    [Header("Work surface and trays")]
+    [Tooltip("Create the virtual piston work surface once the desk is known, and pose the " +
+             "ghost kits on it.")]
+    public bool createWorkSurface = true;
+
+    [Tooltip("Optional. Created at runtime with default settings when empty.")]
+    public AssemblyWorkSurface workSurface;
+
+    [Tooltip("Fit thick container colliders to the trays at startup so parts cannot pass " +
+             "through their floor or walls.")]
+    public bool fitTrayColliders = true;
+
     [Header("Parts")]
     public GameObject crankshaftPrefab;
     public Vector3 crankshaftSpawnOffset;
@@ -60,6 +72,11 @@ public class StepManager : MonoBehaviour
 
     /// <summary>The placement provider in use, or null on the marker path.</summary>
     public WorkspacePlacement Placement { get { return placement; } }
+
+    /// <summary>The piston work surface, once created.</summary>
+    public AssemblyWorkSurface WorkSurface { get { return workSurface; } }
+
+    private AdaptiveAR.UI.AdaptivePanelController _panels;
 
     /// <summary>
     /// Starts the session from outside. The onboarding flow calls this instead of
@@ -96,7 +113,17 @@ public class StepManager : MonoBehaviour
             oilPan.SetActive(false);
 
         if (useSurfacePlacement)
+        {
             BypassAruco();
+
+            // Only the main panel until the workspace exists.
+            _panels = FindAnyObjectByType<AdaptiveAR.UI.AdaptivePanelController>(FindObjectsInactive.Include);
+            if (_panels != null && placement != null && !placement.IsPlaced)
+                _panels.SetPlacementMode(true);
+        }
+
+        if (fitTrayColliders && oilPan != null)
+            TrayColliders.Ensure(oilPan.transform.root);
     }
 
     // ---------------- SURFACE PLACEMENT ----------------
@@ -161,6 +188,7 @@ public class StepManager : MonoBehaviour
         {
             if (captionText != null && !anchorLocked)
                 captionText.text = "Workspace moved.";
+            PlaceWorkSurface();
             return;
         }
 
@@ -172,6 +200,34 @@ public class StepManager : MonoBehaviour
 
         if (captionText != null)
             captionText.text = "Workspace placed.";
+
+        PlaceWorkSurface();
+    }
+
+    /// <summary>
+    /// Creates (once) and poses the piston work surface beside the engine, a hand height
+    /// above the desk, then arranges the ghost kits on it.
+    /// </summary>
+    private void PlaceWorkSurface()
+    {
+        if (!createWorkSurface || placement == null || oilPan == null) return;
+
+        if (workSurface == null)
+            workSurface = FindAnyObjectByType<AssemblyWorkSurface>(FindObjectsInactive.Include);
+
+        if (workSurface == null)
+        {
+            var go = new GameObject("WorkSurface");
+            workSurface = go.AddComponent<AssemblyWorkSurface>();
+            Debug.Log("[StepManager] AssemblyWorkSurface created at runtime with default settings.");
+        }
+
+        Transform head = Camera.main != null ? Camera.main.transform : null;
+        workSurface.Place(oilPan.transform, placement.LastPlacedPosition.y, head);
+
+        var registry = GetComponent<GuidanceRegistry>();
+        if (registry != null)
+            workSurface.ArrangeKitGhosts(registry, head);
     }
 
     // ---------------- SESSION ----------------
@@ -184,6 +240,11 @@ public class StepManager : MonoBehaviour
         if (sessionStarted) return;
 
         sessionStarted = true;
+
+        // The walkthrough ran on the main panel alone; the full participant layout
+        // (relative to the placed workspace) appears as the assembly begins.
+        if (_panels != null && _panels.PlacementMode)
+            _panels.SetPlacementMode(false);
 
         // Only hide a button this component owns. The onboarding button is shared across
         // four screens and must survive.

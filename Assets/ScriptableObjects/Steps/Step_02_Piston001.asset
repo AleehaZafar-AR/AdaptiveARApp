@@ -50,7 +50,7 @@ MonoBehaviour:
     disabledReason: 
   - actionId: step_02_piston001.PistonHead
     kind: 1
-    instruction: Fit the piston head onto the build area.
+    instruction: Place a piston head on the work surface target.
     detail: 
     partKey: part.PistonKit001.PistonHead
     interchangeablePartKeys: []
@@ -66,7 +66,7 @@ MonoBehaviour:
     disabledReason: 
   - actionId: step_02_piston001.ConnectingRod
     kind: 1
-    instruction: Align the connecting rod with the piston head.
+    instruction: Fit a connecting rod into the piston head.
     detail: 
     partKey: part.PistonKit001.ConnectingRod
     interchangeablePartKeys: []
@@ -82,7 +82,7 @@ MonoBehaviour:
     disabledReason: 
   - actionId: step_02_piston001.ConnectingPin
     kind: 1
-    instruction: Fit the connecting pin to join the rod to the head.
+    instruction: Push a connecting pin through the rod and the head.
     detail: 
     partKey: part.PistonKit001.ConnectingPin
     interchangeablePartKeys: []
@@ -98,7 +98,7 @@ MonoBehaviour:
     disabledReason: 
   - actionId: step_02_piston001.PistonEnd
     kind: 1
-    instruction: Fit the rod end cap onto the connecting rod.
+    instruction: Fit a rod end cap onto the connecting rod.
     detail: 
     partKey: part.PistonKit001.PistonEnd
     interchangeablePartKeys: []
@@ -114,7 +114,7 @@ MonoBehaviour:
     disabledReason: 
   - actionId: step_02_piston001.pistonBolt
     kind: 2
-    instruction: Fit the retaining bolt.
+    instruction: Fit a retaining bolt.
     detail: 
     partKey: part.PistonKit001.pistonBolt
     interchangeablePartKeys: []

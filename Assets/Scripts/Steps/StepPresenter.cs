@@ -22,6 +22,7 @@
 // guidance authored shows none), not by anything in code.
 
 using System.Collections.Generic;
+using AdaptiveAR.Audio;
 using AdaptiveAR.Support;
 using TMPro;
 using UnityEngine;
@@ -98,6 +99,8 @@ namespace AdaptiveAR.Steps
 
         private AssemblyAction _currentAction;
         private bool _textOwnedByCard;
+        private InstructionSpeech _speech;
+        private AudioClip _pendingStageClip;
 
         /// <summary>True when a ParticipantCard owns the card text and this component only clears.</summary>
         public bool TextOwnedByParticipantCard { get { return _textOwnedByCard; } }
@@ -107,6 +110,9 @@ namespace AdaptiveAR.Steps
             if (workflow == null) workflow = GetComponent<WorkflowState>();
 
             _textOwnedByCard = FindAnyObjectByType<AdaptiveAR.UI.ParticipantCard>(FindObjectsInactive.Include) != null;
+
+            // Speech goes through the scene AudioSource the authored clips already used.
+            _speech = InstructionSpeech.Ensure(audioSource);
 
             if (_textOwnedByCard && logPresentation)
                 Debug.Log("[StepPresenter] ParticipantCard found: it owns the instruction text; " +
@@ -202,12 +208,12 @@ namespace AdaptiveAR.Steps
 
             if (!_textOwnedByCard)
                 PresentText(step, content);
-            else
-                UpdateStepLabel(step);
+
+            bool stageChanged = _presentedStep != step;
 
             CacheStageGhosts(step, content);
             PresentArrows(step, content);
-            PresentAudio(step, content);
+            if (stageChanged) PresentAudio(step, content);
             WarnUnsupportedMedia(step, content, level);
 
             _presentedStep = step;
@@ -251,11 +257,7 @@ namespace AdaptiveAR.Steps
             _currentAction = action;
             ApplyGhosts();
 
-            if (action != null && action.audioCue != null && audioSource != null)
-            {
-                audioSource.clip = action.audioCue;
-                audioSource.Play();
-            }
+            SpeakAction(action);
 
             if (logPresentation)
                 Debug.Log("[StepPresenter] Action " + (action != null ? $"'{action.Id}'" : "<none>") +
@@ -405,20 +407,54 @@ namespace AdaptiveAR.Steps
             SpawnPrefabs(prefabs, offset);
         }
 
+        /// <summary>
+        /// A stage's authored clip is held until its first action is presented: if that
+        /// action has its own spoken instruction the authored clip is not needed, otherwise
+        /// it is played once. Never replayed on a support-level re-render.
+        /// </summary>
         private void PresentAudio(StepData step, StepSupportContent content)
         {
-            if (audioSource == null)
-                return;
-
             AudioClip clip = (content != null && content.instructionAudio != null)
                 ? content.instructionAudio
                 : step.instructionAudio;
 
-            if (clip == null)
-                return;
+            _pendingStageClip = clip;
 
-            audioSource.clip = clip;
-            audioSource.Play();
+            // A stage with no performable action gets its clip now.
+            if (step.NextEnabledActionIndex(0) < 0)
+                FlushStageClip();
+        }
+
+        /// <summary>
+        /// Speaks the instruction exactly as the card shows it, once, when the action is
+        /// entered. An authored action clip wins; then the sentence's clip; then the
+        /// stage's authored clip as a fallback.
+        /// </summary>
+        private void SpeakAction(AssemblyAction action)
+        {
+            if (action == null) return;
+
+            if (action.audioCue != null)
+            {
+                if (_speech != null) _speech.PlayAuthored(action.audioCue);
+                _pendingStageClip = null;
+                return;
+            }
+
+            if (_speech != null && _speech.SpeakInstruction(action.instruction))
+            {
+                _pendingStageClip = null;
+                return;
+            }
+
+            FlushStageClip();
+        }
+
+        private void FlushStageClip()
+        {
+            if (_pendingStageClip == null) return;
+            if (_speech != null) _speech.PlayAuthored(_pendingStageClip);
+            _pendingStageClip = null;
         }
 
         private void WarnUnsupportedMedia(StepData step, StepSupportContent content, SupportLevel level)

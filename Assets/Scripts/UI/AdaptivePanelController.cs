@@ -93,6 +93,42 @@ namespace AdaptiveAR.UI
         [SerializeField] private bool logChanges = true;
 
         private readonly Dictionary<Zone, float> _targetAlpha = new Dictionary<Zone, float>();
+        private bool _placementMode;
+
+        /// <summary>True while only the main panel is shown, before the workspace exists.</summary>
+        public bool PlacementMode { get { return _placementMode; } }
+
+        /// <summary>
+        /// Before the workspace is placed only the main (first) zone is shown; the side
+        /// panels have nothing to be relative to yet. Turning this off re-applies the
+        /// current support level's layout.
+        /// </summary>
+        public void SetPlacementMode(bool placing)
+        {
+            _placementMode = placing;
+            Prepare();
+
+            if (!placing)
+            {
+                ApplyImmediate(CurrentLevel());
+                if (logChanges) Debug.Log("[AdaptivePanels] Placement done: " + Describe(CurrentLevel()));
+                return;
+            }
+
+            for (int i = 0; i < zones.Count; i++)
+            {
+                Zone z = zones[i];
+                if (z == null || z.group == null) continue;
+                float a = i == 0 ? 1f : 0f;
+                _targetAlpha[z] = a;
+                z.group.alpha = a;
+                z.group.interactable = a > 0.5f;
+                z.group.blocksRaycasts = a > 0.5f;
+                z.root.SetActive(a > 0.001f);
+            }
+
+            if (logChanges) Debug.Log("[AdaptivePanels] Placement mode: main panel only.");
+        }
 
         private void OnEnable()
         {
@@ -127,6 +163,8 @@ namespace AdaptiveAR.UI
 
         private void HandleLevelChanged(SupportLevel from, SupportLevel to, string reason)
         {
+            if (_placementMode) return;   // applied when placement ends
+
             // Visibility only. Nothing here touches workflow state, so a support change
             // cannot reset progress, duplicate a canvas or clear an instruction.
             foreach (Zone z in zones)

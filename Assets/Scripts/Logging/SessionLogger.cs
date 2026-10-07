@@ -58,6 +58,9 @@ namespace AdaptiveAR.Logging
 
             // --- workspace registration (surface placement replaced the marker) ---
             public const string WorkspacePlaced = "workspace_placed";
+
+            // --- a part that cannot satisfy the current action was picked up ---
+            public const string WrongComponentGrabbed = "wrong_component_grabbed";
         }
 
         [Header("Participant")]
@@ -352,12 +355,28 @@ namespace AdaptiveAR.Logging
             Write(w);
         }
 
-        public void LogComponentLocked(string partKey, float positionErrorM, float rotationErrorDeg)
+        /// <summary>
+        /// part_key is the INSTANCE that locked (e.g. part.PistonKit003.PistonHead);
+        /// requested_key is the role the action asked for. With interchangeable parts
+        /// they differ, and both are needed to reconstruct which object was used where.
+        /// </summary>
+        public void LogComponentLocked(string partKey, float positionErrorM, float rotationErrorDeg,
+                                       string requestedKey = null, string instanceName = null)
         {
             var w = NewLine(Events.ComponentLocked);
             w.Str("part_key", partKey);
+            w.Str("requested_key", requestedKey);
+            w.Str("instance_name", instanceName);
             w.Num("position_error_m", positionErrorM);
             w.Num("rotation_error_deg", rotationErrorDeg);
+            Write(w);
+        }
+
+        public void LogWrongComponent(string partKey, string requestedKey)
+        {
+            var w = NewLine(Events.WrongComponentGrabbed);
+            w.Str("part_key", partKey);
+            w.Str("requested_key", requestedKey);
             Write(w);
         }
 

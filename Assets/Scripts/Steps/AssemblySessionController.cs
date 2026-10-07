@@ -13,9 +13,11 @@
 // Tomorrow's provider calls those two methods and nothing here changes.
 
 using System;
+using AdaptiveAR.Audio;
 using AdaptiveAR.Decision;
 using AdaptiveAR.Logging;
 using AdaptiveAR.Support;
+using AdaptiveAR.XR;
 using UnityEngine;
 
 namespace AdaptiveAR.Steps
@@ -59,6 +61,16 @@ namespace AdaptiveAR.Steps
         [Tooltip("Caption to overwrite on completion. Without this the last step's text " +
                  "would stay on screen after the sequence finishes.")]
         [SerializeField] private TMPro.TextMeshProUGUI captionText;
+
+        [Header("Feedback")]
+        [Tooltip("Spoken on a valid placement.")]
+        [SerializeField] private string successPhrase = "Correct.";
+
+        [Tooltip("Spoken when a part that cannot satisfy the current action is picked up.")]
+        [SerializeField] private string wrongPartPhrase = "That is not the required component.";
+
+        [Tooltip("Controller pulses on grab, wrong part and success. Never blocks progression.")]
+        [SerializeField] private bool haptics = true;
 
         [Header("Debug")]
         [SerializeField] private bool logToConsole = true;
@@ -122,6 +134,8 @@ namespace AdaptiveAR.Steps
                 validator.OnStepValidated += HandleStepValidated;
                 validator.OnPartGrabbed += HandlePartGrabbed;
                 validator.OnPartReleased += HandlePartReleased;
+                validator.OnWrongPartGrabbed += HandleWrongPartGrabbed;
+                validator.OnWrongPartReleased += HandleWrongPartReleased;
             }
 
             if (toolInteraction != null)
@@ -154,6 +168,8 @@ namespace AdaptiveAR.Steps
                 validator.OnStepValidated -= HandleStepValidated;
                 validator.OnPartGrabbed -= HandlePartGrabbed;
                 validator.OnPartReleased -= HandlePartReleased;
+                validator.OnWrongPartGrabbed -= HandleWrongPartGrabbed;
+                validator.OnWrongPartReleased -= HandleWrongPartReleased;
             }
 
             if (toolInteraction != null)
@@ -164,14 +180,29 @@ namespace AdaptiveAR.Steps
             _placementSubscribed = false;
         }
 
-        private void HandlePartGrabbed(string partKey)
+        private void HandlePartGrabbed(string partKey, Transform part)
         {
             if (logger != null) logger.LogComponentGrabbed(partKey);
+            if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.Grab, part.position);
         }
 
-        private void HandlePartReleased(string partKey)
+        private void HandlePartReleased(string partKey, Transform part)
         {
             if (logger != null) logger.LogComponentReleased(partKey);
+        }
+
+        private void HandleWrongPartGrabbed(string partKey, Transform part)
+        {
+            if (logger != null) logger.LogWrongComponent(partKey, validator != null ? validator.PartKey : null);
+            if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
+
+            var speech = InstructionSpeech.Ensure(null);
+            if (speech != null) speech.SpeakFeedback(wrongPartPhrase);
+        }
+
+        private void HandleWrongPartReleased(string partKey, Transform part)
+        {
+            if (logger != null) logger.LogNote("wrong_component_released:" + partKey);
         }
 
         private void HandleWorkspacePlaced(bool reposition)
@@ -431,7 +462,18 @@ namespace AdaptiveAR.Steps
                                             trigger);
 
                 if (success)
-                    logger.LogComponentLocked(validator != null ? validator.PartKey : null, posErr, rotErr);
+                    logger.LogComponentLocked(validator != null ? validator.ActiveInstanceKey : null, posErr, rotErr,
+                                              validator != null ? validator.PartKey : null,
+                                              validator != null && validator.CurrentPart != null ? validator.CurrentPart.name : null);
+            }
+
+            if (success)
+            {
+                if (haptics && validator != null && validator.CurrentPart != null)
+                    HapticFeedback.Pulse(HapticFeedback.Kind.Success, validator.CurrentPart.position);
+
+                var speech = InstructionSpeech.Ensure(null);
+                if (speech != null) speech.SpeakFeedback(successPhrase);
             }
 
             RaiseStateChanged();

@@ -1,21 +1,20 @@
 // File: PanelRig.cs
-// Holds the three participant panels in one comfortable place relative to the
-// ArUco marker, instead of pinning them to fixed world coordinates.
+// Holds the participant panels in one comfortable place relative to the workspace,
+// instead of pinning them to fixed world coordinates.
 //
-// Why this exists
-// ---------------
-// The panels used to sit at hard-coded world positions set once at build time. If
-// the marker went down somewhere else, or the operator shifted in their seat, the
-// panels ended up in the wrong place or out of view entirely.
+// Two phases
+// ----------
+// BEFORE the workspace is placed there is no workspace to be relative to. The rig
+// parks itself once, directly in front of the participant at reading distance, and
+// stays there - world-locked, not head-locked - while they point at the desk. Only
+// the main panel is shown then (AdaptivePanelController hides the rest).
 //
-// Now they are anchored to the marker: the engine sits at the marker, and the
-// panels float a little behind it and a little higher, always turned towards
-// whoever is looking. The work stays in the middle of the view, the panels frame
-// it, and leaning back moves nothing out of sight.
+// AFTER the workspace is placed the rig re-settles once relative to the workspace
+// (the same marker-relative offsets as before), detaches from the anchor chain and
+// stays put for the session. The panels never follow the head.
 //
-// Movement uses a dead zone rather than following every frame. Panels that chase
-// the head continuously are uncomfortable to read; panels that only re-settle once
-// you have genuinely moved are not.
+// Movement, when it is allowed at all, uses a dead zone rather than following every
+// frame. Panels that chase the head are uncomfortable to read.
 
 using UnityEngine;
 
@@ -24,19 +23,30 @@ namespace AdaptiveAR.UI
     public class PanelRig : MonoBehaviour
     {
         [Header("Anchoring")]
-        [Tooltip("The marker-driven transform the panels follow. Normally MarkerAnchor.")]
+        [Tooltip("The workspace transform the panels are placed relative to. Normally MarkerAnchor.")]
         [SerializeField] private Transform markerAnchor;
 
         [Tooltip("Head transform. Falls back to Camera.main when empty.")]
         [SerializeField] private Transform head;
 
         [Header("Placement, metres")]
-        [Tooltip("How far above the marker plane the panels sit. Raise this if they cover the engine.")]
+        [Tooltip("How far above the workspace plane the panels sit. Raise this if they cover the engine.")]
         [SerializeField] private float heightAboveMarker = 0.42f;
 
-        [Tooltip("How far beyond the marker, away from the viewer, the panels sit. " +
+        [Tooltip("How far beyond the workspace, away from the viewer, the panels sit. " +
                  "Keeps them off the work area without pushing them out of easy reading range.")]
         [SerializeField] private float depthBeyondMarker = 0.14f;
+
+        [Header("Before placement")]
+        [Tooltip("The main panel. Parked in front of the head before the workspace exists. " +
+                 "Found as the first child Canvas when empty.")]
+        [SerializeField] private Transform mainPanel;
+
+        [Tooltip("Reading distance from the head for the parked main panel, metres.")]
+        [SerializeField] private float prePlacementDistance = 0.75f;
+
+        [Tooltip("Vertical offset of the parked panel from eye height, metres. Slightly below is comfortable.")]
+        [SerializeField] private float prePlacementHeightOffset = -0.08f;
 
         [Header("Comfort")]
         [Tooltip("Degrees of head turn tolerated before the panels re-aim. Stops them chasing you.")]
@@ -52,21 +62,18 @@ namespace AdaptiveAR.UI
         [SerializeField] private bool keepUpright = true;
 
         [Header("Locking")]
-        [Tooltip("Freeze the panels permanently once the marker has been found. The marker is " +
-                 "taped to the bench and does not move, so a fixed panel position is calmer to " +
-                 "read than one that keeps re-settling.")]
+        [Tooltip("Freeze the panels permanently once the workspace has been placed.")]
         [SerializeField] private bool lockWhenSequenceStarts = true;
 
-        [Tooltip("Used only to detect that the marker has been found and the sequence has begun.")]
+        [Tooltip("Used only to detect that the sequence has begun.")]
         [SerializeField] private AdaptiveAR.Steps.StepRunner stepRunner;
 
-        [Tooltip("Locks as soon as the ArUco anchor is found, which is earlier than the " +
+        [Tooltip("Locks as soon as the workspace is placed, which is earlier than the " +
                  "sequence start and covers the whole onboarding.")]
         [SerializeField] private StepManager stepManager;
 
-        [Tooltip("Metres. Below this the viewer is too close to the marker for the " +
-                 "look direction to be stable, so the last good direction is kept. " +
-                 "Without this the panels swing wildly when leaning over the bench.")]
+        [Tooltip("Metres. Below this the viewer is too close to the workspace for the " +
+                 "look direction to be stable, so the last good direction is kept.")]
         [SerializeField] private float minStableDistance = 0.35f;
 
         [Header("Behaviour")]
@@ -82,6 +89,9 @@ namespace AdaptiveAR.UI
         /// <summary>True once the panels have been parked for good.</summary>
         public bool IsLocked { get; private set; }
 
+        /// <summary>True while parked in front of the head, before the workspace exists.</summary>
+        public bool IsPrePlacement { get; private set; }
+
         private Vector3 _frozenMarkerPos;
         private bool _hasFrozenMarkerPos;
         private Vector3 _stableDirection = Vector3.forward;
@@ -95,6 +105,19 @@ namespace AdaptiveAR.UI
             if (head == null && Camera.main != null)
                 head = Camera.main.transform;
 
+            if (mainPanel == null)
+            {
+                var canvas = GetComponentInChildren<Canvas>(true);
+                if (canvas != null) mainPanel = canvas.transform;
+            }
+
+            bool awaitingPlacement = stepManager != null && stepManager.Placement != null && !stepManager.AnchorLocked;
+            if (awaitingPlacement)
+            {
+                EnterPrePlacement();
+                return;
+            }
+
             if (snapOnFirstFrame && ComputeTarget(out Vector3 p, out Quaternion r))
             {
                 _targetPosition = p;
@@ -102,6 +125,47 @@ namespace AdaptiveAR.UI
                 _hasTarget = true;
                 transform.SetPositionAndRotation(p, r);
             }
+        }
+
+        /// <summary>
+        /// Parks the rig so the main panel sits in front of the head at reading distance,
+        /// world-locked. The rig leaves the anchor chain now, so moving the workspace
+        /// root during placement cannot drag the panel around.
+        /// </summary>
+        private void EnterPrePlacement()
+        {
+            IsPrePlacement = true;
+            Detach(freezeMarker: false);
+            ParkInFrontOfHead();
+        }
+
+        private void ParkInFrontOfHead()
+        {
+            if (head == null) return;
+
+            Vector3 fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
+            if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
+            fwd.Normalize();
+
+            Vector3 centre = head.position + fwd * prePlacementDistance + Vector3.up * prePlacementHeightOffset;
+            Quaternion rot = Quaternion.LookRotation(fwd, Vector3.up);
+
+            // The main panel is offset inside the rig; place the rig so the PANEL lands at
+            // the centre of view, not the rig origin.
+            Vector3 panelOffset = Vector3.zero;
+            if (mainPanel != null)
+            {
+                var rt = mainPanel as RectTransform;
+                panelOffset = rt != null
+                    ? new Vector3(rt.anchoredPosition.x, rt.anchoredPosition.y, rt.localPosition.z)
+                    : mainPanel.localPosition;
+            }
+            Vector3 pos = centre - rot * panelOffset;
+
+            transform.SetPositionAndRotation(pos, rot);
+            _targetPosition = pos;
+            _targetRotation = rot;
+            _hasTarget = true;
         }
 
         private void LateUpdate()
@@ -112,7 +176,27 @@ namespace AdaptiveAR.UI
                 head = Camera.main.transform;
             }
 
-            if (OVRInput.GetDown(recenterButton) || Input.GetKeyDown(recenterKey))
+            bool recenter = OVRInput.GetDown(recenterButton) || Input.GetKeyDown(recenterKey);
+
+            // --- parked in front of the head until the workspace exists ---
+            if (IsPrePlacement)
+            {
+                if (stepManager != null && stepManager.AnchorLocked)
+                {
+                    // The workspace now exists: settle once relative to it and stay.
+                    IsPrePlacement = false;
+                    _hasStableDirection = false;
+                    Recenter();
+                    Detach(freezeMarker: true);
+                    IsLocked = true;
+                    return;
+                }
+
+                if (recenter) ParkInFrontOfHead();
+                return;
+            }
+
+            if (recenter)
             {
                 IsLocked = false;      // an explicit recentre always wins
                 Recenter();
@@ -121,12 +205,12 @@ namespace AdaptiveAR.UI
                 return;
             }
 
-            // Park the panels the moment the ArUco anchor is found - before onboarding,
+            // Park the panels the moment the workspace is placed - before onboarding,
             // not after it - and leave them there.
             if (!IsLocked && lockWhenSequenceStarts && stepManager != null && stepManager.AnchorLocked)
             {
                 Recenter();
-                DetachFromMarkerChain();
+                Detach(freezeMarker: true);
                 IsLocked = true;
                 return;
             }
@@ -134,7 +218,7 @@ namespace AdaptiveAR.UI
             if (!IsLocked && lockWhenSequenceStarts && stepRunner != null && stepRunner.HasStarted)
             {
                 Recenter();
-                DetachFromMarkerChain();
+                Detach(freezeMarker: true);
                 IsLocked = true;
                 return;
             }
@@ -160,20 +244,14 @@ namespace AdaptiveAR.UI
         }
 
         /// <summary>
-        /// Detaches the rig from the marker-driven hierarchy, keeping its world pose.
-        ///
-        /// THIS is what actually stops the jitter. The rig was parented to MarkerAnchor,
-        /// which ArUco rewrites every frame. Skipping the rig's own follow logic changed
-        /// nothing, because a child inherits its parent's transform regardless: every
-        /// pose correction and every bit of tracking noise still reached the panels.
-        /// Once detached, nothing downstream of the marker can move them.
-        ///
-        /// EngineAnchor stays under the marker chain, so the assembly itself keeps its
-        /// registration - only the participant UI is decoupled.
+        /// Detaches the rig from the anchor hierarchy, keeping its world pose. A child
+        /// inherits every move of its parent, so this is what actually stops the panels
+        /// moving with the workspace root. Optionally caches the workspace position so
+        /// later re-centres stay relative to where it was when the rig locked.
         /// </summary>
-        private void DetachFromMarkerChain()
+        private void Detach(bool freezeMarker)
         {
-            if (markerAnchor != null)
+            if (freezeMarker && markerAnchor != null)
             {
                 _frozenMarkerPos = markerAnchor.position;
                 _hasFrozenMarkerPos = true;
@@ -210,15 +288,11 @@ namespace AdaptiveAR.UI
             // Cached once the rig detaches, so the reference survives unparenting.
             Vector3 markerPos = _hasFrozenMarkerPos ? _frozenMarkerPos : markerAnchor.position;
 
-            // Horizontal direction from the viewer to the marker. The panels go a little
-            // further along it, so the marker - and the engine on it - stays nearer the
-            // viewer than the panels do.
+            // Horizontal direction from the viewer to the workspace. The panels go a little
+            // further along it, so the engine stays nearer the viewer than the panels do.
             Vector3 away = markerPos - head.position;
             away.y = 0f;
 
-            // Close to the marker the horizontal direction becomes unstable and tiny head
-            // movements swing it through large angles - that is the jitter. Hold the last
-            // good direction instead of recomputing from a degenerate vector.
             if (away.magnitude < minStableDistance)
             {
                 if (_hasStableDirection) away = _stableDirection;
