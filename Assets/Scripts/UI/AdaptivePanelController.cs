@@ -219,6 +219,9 @@ namespace AdaptiveAR.UI
                 z.group.interactable = interactive;
                 z.group.blocksRaycasts = interactive;
                 z.root.SetActive(a > 0.001f);
+                if (logChanges)
+                    Debug.Log($"[AdaptivePanels] zone={z.label} level={level} presence={z.For(level)} alpha={a:F2} " +
+                              $"active={z.root.activeSelf} activeInHierarchy={z.root.activeInHierarchy} pos={z.root.transform.position}");
             }
         }
 

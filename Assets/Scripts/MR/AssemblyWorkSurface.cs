@@ -108,8 +108,23 @@ namespace AdaptiveAR.MR
                 Debug.Log($"[WorkSurface] Placed ({placementMode}) at {transform.position}.");
         }
 
+        /// <summary>Diagnostic: hierarchy and renderer state, so a silent SHOW is explainable.</summary>
+        public void ReportState(string where)
+        {
+            var r = _visual != null ? _visual.GetComponent<MeshRenderer>() : null;
+            string chain = "";
+            for (Transform t = transform; t != null; t = t.parent)
+                chain = t.name + (t.gameObject.activeSelf ? "" : "[INACTIVE]") + "/" + chain;
+            Debug.Log($"[WorkSurface] {where}: activeInHierarchy={gameObject.activeInHierarchy} visual={(_visual != null ? _visual.activeSelf.ToString() : "none")} " +
+                      $"renderer={(r != null ? r.enabled.ToString() : "none")} collider={(_collider != null ? _collider.enabled.ToString() : "none")} " +
+                      $"pos={transform.position} scale={transform.lossyScale} chain={chain}");
+            if (_visual != null && !_visual.activeInHierarchy)
+                Debug.LogError("[WorkSurface] visual is NOT active in hierarchy after SHOW - see chain above.");
+        }
+
         public void Show(bool shown)
         {
+            if (shown && !gameObject.activeSelf) gameObject.SetActive(true);
             EnsureVisual();
             if (_visual != null && _visual.activeSelf != shown) _visual.SetActive(shown);
             if (_marking != null && _marking.activeSelf != shown) _marking.SetActive(shown);

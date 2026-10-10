@@ -80,6 +80,16 @@ namespace AdaptiveAR.Steps
                  "A target must never fall, collide, or be picked up.")]
         [SerializeField] private bool makeGhostsInert = true;
 
+        [Header("Audio A/B (one generated clip through the original scene AudioSource path)")]
+        [Tooltip("ON: the crankshaft stage's authored mp3 and exactly ONE generated clip (abTestClip, " +
+                 "the piston-head instruction) are played with the original code path - " +
+                 "scene AudioSource.clip = clip; Play() - and nothing else. Every other action " +
+                 "keeps the current mechanism.")]
+        [SerializeField] private bool audioAbTest = true;
+
+        [Tooltip("The one generated clip for the A/B test (the piston-head instruction).")]
+        [SerializeField] private AudioClip abTestClip;
+
         [Header("Debug")]
         [SerializeField] private bool logPresentation = true;
 
@@ -446,6 +456,46 @@ namespace AdaptiveAR.Steps
                 FlushStageClip();
         }
 
+        /// <summary>Keys of the ghosts currently switched on, for the [Action] line.</summary>
+        public string DescribeActiveGhosts()
+        {
+            if (_activatedGhosts.Count == 0) return "none";
+            var parts = new List<string>();
+            foreach (GameObject g in _activatedGhosts)
+                if (g != null) parts.Add($"{g.name}({(g.activeInHierarchy ? "visible" : "NOT-VISIBLE")})");
+            return string.Join(",", parts);
+        }
+
+        /// <summary>
+        /// The original audio path, byte for byte: the scene AudioSource, clip assigned,
+        /// Play(). Used only for the A/B test clips so the comparison is exact.
+        /// </summary>
+        private void PlayLegacy(AudioClip clip, string label)
+        {
+            if (audioSource == null || clip == null)
+            {
+                Debug.LogError($"[AudioAB] {label}: {(audioSource == null ? "scene AudioSource missing" : "clip is null")}");
+                return;
+            }
+            audioSource.Stop();
+            audioSource.clip = clip;
+            audioSource.Play();
+            Debug.Log($"[AudioAB] {label}: played '{clip.name}' length={clip.length:F2}s loadState={clip.loadState} " +
+                      $"channels={clip.channels} freq={clip.frequency} via scene AudioSource '{audioSource.gameObject.name}' " +
+                      $"(spatialBlend={audioSource.spatialBlend:F1}, volume={audioSource.volume:F1}, isPlaying={audioSource.isPlaying})");
+        }
+
+        private AudioClip AuthoredStageClip(StepData step)
+        {
+            if (step == null) return null;
+            foreach (SupportLevel l in new[] { SupportLevel.L3_Assisted, SupportLevel.L2_Guided, SupportLevel.L1_Minimal })
+            {
+                StepSupportContent c = step.GetContent(l);
+                if (c != null && c.instructionAudio != null) return c.instructionAudio;
+            }
+            return step.instructionAudio;
+        }
+
         /// <summary>
         /// Speaks the instruction exactly as the card shows it, once, when the action is
         /// entered. An authored action clip wins; then the sentence's clip; then the
@@ -454,6 +504,25 @@ namespace AdaptiveAR.Steps
         private void SpeakAction(AssemblyAction action)
         {
             if (action == null) return;
+
+            // --- A/B: control = the crankshaft stage's original mp3; test = one generated clip ---
+            if (audioAbTest)
+            {
+                if (_presentedStep != null && _presentedStep.StepIdentifier == "step_01_crankshaft"
+                    && !string.IsNullOrEmpty(action.partKey) && action.RequiresPhysicalValidation)
+                {
+                    AudioClip control = AuthoredStageClip(_presentedStep);
+                    PlayLegacy(control, "CONTROL (original crankshaft mp3)");
+                    _pendingStageClip = null;
+                    return;
+                }
+                if (abTestClip != null && GuidanceRegistry.RoleOf(action.partKey) == "PistonHead" && action.RequiresPhysicalValidation)
+                {
+                    PlayLegacy(abTestClip, "TEST (generated piston-head wav)");
+                    _pendingStageClip = null;
+                    return;
+                }
+            }
 
             // L1 with an authored stage-level instruction ("Repeat the procedure ..."): that
             // sentence is spoken once per stage and the atomic actions stay silent.

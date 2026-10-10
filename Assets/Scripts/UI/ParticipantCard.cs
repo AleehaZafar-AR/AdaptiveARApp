@@ -520,11 +520,12 @@ namespace AdaptiveAR.UI
         private void UpdateControls(AssemblyAction action)
         {
             bool read = session != null && session.IsReadState;
-            bool can = session != null && session.CanAdvance;
+            bool physical = session != null && session.CurrentActionType == AssemblySessionController.ActionType.PHYSICAL;
+            bool can = session != null && session.CanAdvance && !physical;
 
             if (nextButton != null)
             {
-                bool show = read || can;
+                bool show = (read || can) && !physical;
                 if (nextButton.gameObject.activeSelf != show) nextButton.gameObject.SetActive(show);
                 nextButton.interactable = can;
 

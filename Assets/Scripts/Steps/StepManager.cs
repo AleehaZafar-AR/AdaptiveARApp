@@ -125,56 +125,35 @@ public class StepManager : MonoBehaviour
         if (fitTrayColliders && oilPan != null)
             TrayColliders.Ensure(oilPan.transform.root);
 
-        // The piston work surface exists only while a piston is being built on it.
-        if (stepRunner != null)
-            stepRunner.OnStepChanged += HandleStageChanged;
-
-        _workflow = GetComponent<WorkflowState>();
-        if (_workflow != null)
-            _workflow.OnChanged += HandleWorkflowChanged;
+        // The mat's lifecycle is driven explicitly by the session controller
+        // (SetMatVisible): shown when a head/rod/pin action begins, hidden when the
+        // partial piston is installed. No stage inference.
     }
 
-    private WorkflowState _workflow;
-
-    /// <summary>Once the partial piston has been installed, the mat has done its job for this piston.</summary>
-    private void HandleWorkflowChanged()
+    /// <summary>
+    /// Explicit mat lifecycle. SHOW poses the mat for the current desk and re-arranges the
+    /// reusable head target; HIDE just hides it. Every call logs state, and a SHOW whose
+    /// renderer is not visible afterwards logs the hierarchy.
+    /// </summary>
+    public void SetMatVisible(bool visible, string reason, int piston)
     {
-        if (workSurface == null || !workSurface.IsShown || _workflow == null) return;
+        if (!createWorkSurface || oilPan == null) return;
 
-        StepData stage = _workflow.CurrentStage;
-        if (!StageUsesKits(stage)) return;
-
-        foreach (AssemblyAction a in stage.actions)
-        {
-            if (a == null || !a.enabled || !GuidanceRegistry.IsKitHandleKey(a.partKey)) continue;
-            if (_workflow.IsActionComplete(stage, a))
-            {
-                workSurface.Show(false);
-                return;
-            }
-        }
-    }
-
-    private void HandleStageChanged(StepData stage, int index, string reason)
-    {
-        bool pistonStage = StageUsesKits(stage);
-
-        if (pistonStage)
+        if (visible)
         {
             ShowWorkSurface(true);
+            if (workSurface != null)
+            {
+                Debug.Log($"[WorkSurface] SHOW piston={piston} pose={workSurface.transform.position} reason={reason}");
+                workSurface.ReportState("after SHOW");
+            }
+            else Debug.LogError("[WorkSurface] SHOW requested but no AssemblyWorkSurface exists.");
         }
         else if (workSurface != null && workSurface.IsShown)
         {
             workSurface.Show(false);
+            Debug.Log($"[WorkSurface] HIDE reason={reason} piston={piston}");
         }
-    }
-
-    private static bool StageUsesKits(StepData stage)
-    {
-        if (stage == null || stage.actions == null) return false;
-        foreach (AssemblyAction a in stage.actions)
-            if (a != null && a.enabled && GuidanceRegistry.KitOf(a.partKey) != null) return true;
-        return false;
     }
 
     // ---------------- SURFACE PLACEMENT ----------------
@@ -205,10 +184,6 @@ public class StepManager : MonoBehaviour
     {
         if (placement != null)
             placement.OnPlaced -= HandleWorkspacePlaced;
-        if (stepRunner != null)
-            stepRunner.OnStepChanged -= HandleStageChanged;
-        if (_workflow != null)
-            _workflow.OnChanged -= HandleWorkflowChanged;
     }
 
     /// <summary>

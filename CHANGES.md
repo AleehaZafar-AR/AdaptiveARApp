@@ -2072,3 +2072,132 @@ mod   Assets/Resources/AdaptiveAR/Speech/             5 new clips, 4 removed (19
 8. Picking up the crankshaft on the first screen advances the instruction.
 
 Nothing in this pass has run on a headset.
+
+---
+
+## Claude → Reviewer — 2026-10-10 (c) — STABILITY: one progression gate, wrong-component restored, explicit mat lifecycle, ghost/overview diagnostics, audio A/B, visual auto-complete, camshaft holders, self-checks
+
+Base: `bfb7f4d`. Scene: **one additive line** (A/B clip on StepPresenter) plus Unity's
+re-serialisation. No panel transforms, materials, tolerances or geometry changed.
+No Editor command. Everything below is [QV]; nothing has run on a headset.
+
+### 1. Why physical progression became bypassable
+`CanAdvance` contained `if (!_currentActionArmed) return true;` — added two passes ago
+so that a physical action the validator could not arm "could be confirmed by hand".
+On the Quest, physical actions were not arming (see 2–4), so **every** physical action
+exposed Continue. That line is gone. There is now exactly one gate:
+`AssemblySessionController.RequestAdvance(requestedBy)` — used by Continue, the
+pick-up acknowledgement, the auto-complete button and the researcher skip. READ and
+AUTO may pass it; PHYSICAL is allowed only when `workflow.CurrentActionComplete`,
+which only `HandleStepValidated` sets. Logs:
+`[Progression] action=X type=PHYSICAL advance requested by=Continue button allowed=false`
+and `[Progression] action=X validation success -> allowed=true`. The card never
+shows Continue for a PHYSICAL action (`CurrentActionType`), independent of CanAdvance.
+
+### 2. Why wrong-component feedback disappeared
+The watcher is built inside `StepValidator.BeginAction`. When arming failed (or
+threw) nothing was watched, so nothing was ever flagged. Now: arming failures carry
+`ArmFailureReason` and log as errors; `EnterAction` isolates each subsystem in
+try/catch so one failure cannot skip the rest; and every selectable grab logs
+`[Eligibility] grabbed=… requestedRole=… candidates=[…] boundKitInstance=… eligible=… reason=…`.
+Eligibility is evaluated per unique object (aliases excluded, accepted objects
+excluded by reference), so the earlier false positive cannot return. Feedback on a
+wrong grab is unchanged: pulse + haptic + one spoken warning per episode + log.
+
+### 3. Why the mat never appeared
+The mat was shown by `StepManager.HandleStageChanged`, a *later* subscriber of
+`StepRunner.OnStepChanged` than the session controller; any exception in the
+session's handler aborted the invocation list before it. It also inferred "piston
+stage" from the actions. Now explicit: the session controller calls
+`stepManager.SetMatVisible(true, reason, piston)` when a head/rod/pin action is
+entered and `SetMatVisible(false, "partial_piston_installed", piston)` on the
+install's validation success. Logs `[WorkSurface] SHOW piston=N pose=…` /
+`[WorkSurface] HIDE reason=…`, and after every SHOW `ReportState` prints
+activeInHierarchy / visual / renderer / collider / pose / the full parent chain with
+any `[INACTIVE]` ancestor, erroring if the visual is not visible.
+
+### 4. Why the crankshaft ghost disappeared
+Same chain as 2–3: `presenter.PresentAction` runs after `validator.BeginAction` in
+`EnterAction`; if arming threw, the ghost was never applied. READ-state gating is
+unchanged and correct (no ghost on "locate", ghost on "place"). Now isolated, and the
+`[Action]` line prints the ghosts actually switched on with `visible/NOT-VISIBLE`.
+
+### 5. Why the Overview disappeared
+Two owners toggled `OverviewCanvas`: `AppFlowController.Show()` (its `taskListRoot`,
+Running only) and `AdaptivePanelController` (zone root, placement mode and level).
+`AppFlowController` now leaves that root alone when an `AdaptivePanelController`
+exists. `AdaptivePanelController` logs every zone it applies
+(`zone=Steps level=… alpha=… activeInHierarchy=… pos=…`); `TaskListHud` logs
+`[Overview] visible=… level=… reason=…` on every change, with alpha, hierarchy and
+position. Rows: ✓ Workspace · Crankshaft · Piston 1 · Piston 2 · Remaining pistons ·
+Camshaft holders · Camshaft · Complete (six fields, completed rows scroll off the top).
+
+### 6. Audio A/B (one clip, original path)
+`StepPresenter.audioAbTest` (on) with `abTestClip` = the generated piston-head WAV
+(scene reference). CONTROL: on the crankshaft *place* action the stage's original
+mp3 is played by the original code — `audioSource.clip = clip; audioSource.Play()`
+on the scene AudioSource. TEST: on the piston-head action the generated WAV is played
+by that identical code. Both log
+`[AudioAB] CONTROL/TEST: played '<name>' length= loadState= channels= freq= via scene AudioSource …`.
+Nothing else in the audio path changed for those two actions; all other actions use
+the existing mechanism. Read the two lines and your ears together.
+
+### 7. Why auto-completion produced 3 physical pistons; the 6-visual fix
+The previous completer re-used **real** kits (only two remained, and `Unlock→move→Lock`
+left them in the physics world) and relied on bore ghost groups that resolved
+unevenly. Replaced: `PistonAutoCompleter` now builds **six renderer-only clones**
+(MeshFilter + MeshRenderer, real parts' shared materials; no Rigidbody, collider or
+SDK; not registered) at the authored final poses of `ghost.piston003`,
+`ghost.piston004`, `ghost.piston001 (1)` … `ghost.piston004 (1)`, parented under the
+engine. Logs `manualCompleted=2 autoCompleted=6 visualTotal=8` then
+`remaining_pistons_auto_completed count=6` (error if ≠ 6). The two unused real kits
+stay loose in the tray. Nothing can push the crankshaft.
+
+### 8. Camshaft holders
+Real objects: `Components/engineBlockSep001`, `engineBlockSep002`, `engineBlockSep003`,
+`engineBlockSep004` (Rigidbody, MeshCollider, Grabbable, DropIntoTray). Targets:
+`Ghosties/engineBlockSep001…004` (registry `ghost.engineBlockSep00N`). The registry
+resolves `part.engineBlockSep00N` by convention (`Components/<name>`). Stage 6 is now:
+locate holders (READ, pick-up acknowledges) → holder 1 → 2 → 3 → 4 (PHYSICAL, snap,
+lock, feedback) → locate camshaft (READ) → slide the camshaft through the holders
+(PHYSICAL). Six new clips.
+
+### 9. Regression self-check (`[SelfCheck] OK/FAIL …`, at first stage entry)
+Enabled actions exist; every physical action resolves a target and ≥1 part instance
+(each failure named); validator present; crankshaft ghost resolves; camshaft
+resolves; 4/4 EngineBlockSep holders + targets; 8/8 piston roles; overview
+(TaskListHud) resolves with activeInHierarchy; work surface resolves or will be
+created; selectable parts available to the watcher. Per action:
+`[Action] id=… type=READ|PHYSICAL|AUTO support=L# continue=… validator=… ghost=…`;
+a PHYSICAL action with continue=true or validator=false logs an error and stays
+blocked.
+
+### Files
+```
+mod  AssemblySessionController.cs  RequestAdvance gate, [Progression]/[Action], isolation, mat lifecycle, self-check, visual auto-complete
+mod  StepValidator.cs              ArmFailureReason, eligibility reasons
+mod  StepManager.cs                SetMatVisible (explicit), no stage inference
+mod  AssemblyWorkSurface.cs        ReportState, self-activation on SHOW
+mod  StepPresenter.cs              DescribeActiveGhosts, audio A/B legacy path
+mod  GuidanceRegistry.cs           part.<name> under Components
+mod  AppFlowController.cs          single owner for the overview root
+mod  AdaptivePanelController.cs    zone logging
+mod  ParticipantCard.cs            never Continue on PHYSICAL
+new  PistonAutoCompleter.cs        six visual clones
+new  TaskListHud.cs (rewritten)    eight rows, visibility log
+mod  Step_06_Camshaft.asset        holders + camshaft
+mod  scene                         abTestClip line
+add  6 speech clips
+```
+
+### [QV]
+1. Crankshaft place: no Continue; `[Progression] … allowed=false` if pressed anyway;
+   validation → `allowed=true`. Same for head, rod, pin, cap, bolts, nuts, holders, camshaft.
+2. Wrong grab: pulse + haptic + one warning; `[Eligibility] … eligible=false`.
+3. `[WorkSurface] SHOW piston=1 …` on the head action, mat visible; HIDE after install;
+   SHOW again for piston 2.
+4. Green crankshaft ghost on the place action; `[Action] … ghost=crankshaft(visible)`.
+5. `[Overview] visible=true` after Begin; rows as listed.
+6. logcat `[AudioAB] CONTROL …` then `[AudioAB] TEST …`; report which were audible.
+7. Button fits six visual pistons; crankshaft untouched; log count 6.
+8. Holders 1–4 then camshaft; `[SelfCheck]` all OK at task start.

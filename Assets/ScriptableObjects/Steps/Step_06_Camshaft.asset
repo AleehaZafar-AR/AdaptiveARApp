@@ -29,70 +29,123 @@ MonoBehaviour:
   rotationToleranceDegrees: 25
   snapOnSuccess: 1
   actions:
+  - actionId: step_06_camshaft.locate_holders
+    kind: 0
+    instruction: Locate the four camshaft holders in the parts tray and pick one up.
+    detail: They are the block separators; each one sits across the block.
+    partKey: part.engineBlockSep001
+    interchangeablePartKeys: []
+    targetKey: 
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys: []
+    showArrow: 0
+    audioCue: {fileID: 8300000, guid: 2f260d2ec0c0438816756231afe4206e, type: 3}
+    enabled: 1
+    disabledReason:
+    autoCompleteRemaining: 0
+  - actionId: step_06_camshaft.holder1
+    kind: 1
+    instruction: Fit camshaft holder 1 onto the block.
+    detail: Lower it onto the highlighted position.
+    partKey: part.engineBlockSep001
+    interchangeablePartKeys: []
+    targetKey: ghost.engineBlockSep001
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.engineBlockSep001
+    showArrow: 1
+    audioCue: {fileID: 8300000, guid: 36a95581347fcdc6f096c255aebad3fb, type: 3}
+    enabled: 1
+    disabledReason:
+    autoCompleteRemaining: 0
+  - actionId: step_06_camshaft.holder2
+    kind: 1
+    instruction: Fit camshaft holder 2 onto the block.
+    detail: Lower it onto the highlighted position.
+    partKey: part.engineBlockSep002
+    interchangeablePartKeys: []
+    targetKey: ghost.engineBlockSep002
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.engineBlockSep002
+    showArrow: 1
+    audioCue: {fileID: 8300000, guid: 322bd91ac70f96147f1f47f899da013d, type: 3}
+    enabled: 1
+    disabledReason:
+    autoCompleteRemaining: 0
+  - actionId: step_06_camshaft.holder3
+    kind: 1
+    instruction: Fit camshaft holder 3 onto the block.
+    detail: Lower it onto the highlighted position.
+    partKey: part.engineBlockSep003
+    interchangeablePartKeys: []
+    targetKey: ghost.engineBlockSep003
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.engineBlockSep003
+    showArrow: 1
+    audioCue: {fileID: 8300000, guid: 41f400d43fb0f3e31f0e243f27b0ebb0, type: 3}
+    enabled: 1
+    disabledReason:
+    autoCompleteRemaining: 0
+  - actionId: step_06_camshaft.holder4
+    kind: 1
+    instruction: Fit camshaft holder 4 onto the block.
+    detail: Lower it onto the highlighted position.
+    partKey: part.engineBlockSep004
+    interchangeablePartKeys: []
+    targetKey: ghost.engineBlockSep004
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.engineBlockSep004
+    showArrow: 1
+    audioCue: {fileID: 8300000, guid: 4442b094917c3d19bc1a115eee5d4a50, type: 3}
+    enabled: 1
+    disabledReason:
+    autoCompleteRemaining: 0
   - actionId: step_06_camshaft.locate
     kind: 0
     instruction: Locate the camshaft in the parts tray and pick it up.
-    detail: Take the camshaft from the tray.
+    detail: 
     partKey: part.camshaft
     interchangeablePartKeys: []
     targetKey: 
-    positionToleranceMeters: 0.04
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
-    settleSeconds: 0.45
+    settleSeconds: 0.4
     ghostKeys: []
-    showArrow: 1
+    showArrow: 0
     audioCue: {fileID: 8300000, guid: 5028de6486862fb6eb13c7b42dc867ac, type: 3}
     enabled: 1
-    disabledReason: 
+    disabledReason:
+    autoCompleteRemaining: 0
   - actionId: step_06_camshaft.place
     kind: 1
-    instruction: Fit the camshaft.
-    detail: Fit the camshaft into its bearings above the crankshaft.
+    instruction: Slide the camshaft through the four holders.
+    detail: Line it up with the holders and push it through.
     partKey: part.camshaft
     interchangeablePartKeys: []
     targetKey: ghost.camshaft
-    positionToleranceMeters: 0.04
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
-    settleSeconds: 0.45
+    settleSeconds: 0.4
     ghostKeys:
     - ghost.camshaft
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: 83f46a182b8c7b0f6d7d8eaef3a08ed6, type: 3}
+    audioCue: {fileID: 8300000, guid: fd088d877b15f45a7951495dc16c2490, type: 3}
     enabled: 1
-    disabledReason: 
-  - actionId: step_06_camshaft.fasten
-    kind: 2
-    instruction: Fit the retaining cap and bolts.
-    detail: 
-    partKey: 
-    interchangeablePartKeys: []
-    targetKey: 
-    positionToleranceMeters: 0.04
-    rotationToleranceDegrees: 25
-    settleSeconds: 0.45
-    ghostKeys: []
-    showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: No separately movable fastener exists. crankHolderBolt002-016
-      and crankHolder001-004 are baked sub-meshes of the oilPan ghost; pistonBolt/PistonNut
-      are child meshes of each piston.
-  - actionId: step_06_camshaft.tighten
-    kind: 3
-    instruction: Tighten the fasteners with the tool.
-    detail: 
-    partKey: 
-    interchangeablePartKeys: []
-    targetKey: 
-    positionToleranceMeters: 0.04
-    rotationToleranceDegrees: 25
-    settleSeconds: 0.45
-    ghostKeys: []
-    showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: No tool model exists in the repository. Architecture is in place;
-      assign a tool prefab and a detection rule once supplied.
+    disabledReason:
+    autoCompleteRemaining: 0
   expectedDurationSeconds: 120
   defaultSupportLevel: 2
   l1Minimal:

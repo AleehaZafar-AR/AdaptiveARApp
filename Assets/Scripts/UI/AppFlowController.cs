@@ -128,8 +128,10 @@ namespace AdaptiveAR.UI
             SetActive(stepPanel, screen == Screen.Running);
             SetActive(completePanel, screen == Screen.Complete);
 
-            // The task list is only meaningful while the sequence is running.
-            SetActive(taskListRoot, screen == Screen.Running);
+            // The task list is only meaningful while the sequence is running. When an
+            // AdaptivePanelController owns the zones it is the single owner of that root.
+            if (FindAnyObjectByType<AdaptivePanelController>(FindObjectsInactive.Include) == null)
+                SetActive(taskListRoot, screen == Screen.Running);
 
             if (screen == Screen.Home && stepLabel != null)
                 stepLabel.text = "";

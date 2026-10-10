@@ -4761,9 +4761,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   placementMode: 0
-  size: 0.32
-  heightAboveDesk: 0.1
-  gapFromEngine: 0.06
+  matSize: 0.28
+  matHeightAboveDesk: 0.004
+  matGapFromEngine: 0.02
   kitClearance: 0.01
   gridColor: {r: 0.25, g: 0.82, b: 0.85, a: 0.55}
   fillColor: {r: 0.25, g: 0.82, b: 0.85, a: 0.08}
@@ -4996,6 +4996,8 @@ MonoBehaviour:
   clearRegistryBeforePresent: 1
   parentSpawnedGhostsToAnchor: 0
   makeGhostsInert: 1
+  audioAbTest: 1
+  abTestClip: {fileID: 8300000, guid: 4dd65a74c74eac033acdbb0dc125d50b, type: 3}
   logPresentation: 1
 --- !u!114 &205522880
 MonoBehaviour:
@@ -5360,6 +5362,7 @@ MonoBehaviour:
   wrongPartClip: {fileID: 8300000, guid: 18939344c83d0f6d5da1a60fe11847da, type: 3}
   invalidAttemptClip: {fileID: 8300000, guid: 471320f6181b2c792fab053699e27e83, type: 3}
   spatialPulses: 1
+  registry: {fileID: 0}
   logToConsole: 1
 --- !u!114 &205522884
 MonoBehaviour:
@@ -18788,6 +18791,7 @@ MonoBehaviour:
   head: {fileID: 0}
   heightAboveMarker: 0.2
   depthBeyondMarker: 0.5
+  extraMainPanelLift: 0.035
   mainPanel: {fileID: 1673987214}
   prePlacementDistance: 0.75
   prePlacementHeightOffset: 0.3
@@ -22436,7 +22440,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1185640155}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.00000026822082, y: 0.00000031301045, z: 0.7717001, w: -0.6359867}
+  m_LocalRotation: {x: 0.00000024915147, y: 0.0000003996735, z: 0.8361007, w: -0.54857606}
   m_LocalPosition: {x: 1.79, y: -35, z: 52.26}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -22450,7 +22454,7 @@ Transform:
   - {fileID: 1280774861}
   - {fileID: 509419098}
   m_Father: {fileID: 230140798}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -101.014}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: -113.461}
 --- !u!1 &1190412478
 GameObject:
   m_ObjectHideFlags: 0
@@ -33789,7 +33793,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1704711502
 Transform:
   m_ObjectHideFlags: 0
@@ -36000,6 +36004,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   session: {fileID: 205522883}
   stepRunner: {fileID: 205522880}
+  workflow: {fileID: 0}
+  stepManager: {fileID: 0}
   rowTexts:
   - {fileID: 324417702}
   - {fileID: 1920136871}
@@ -36013,6 +36019,13 @@ MonoBehaviour:
   currentPrefix: "\u25B8  "
   pendingPrefix: "\xB7  "
   fallBackToFullTitle: 1
+  stageLabels:
+  - Crankshaft installed
+  - Assemble piston 1
+  - Assemble piston 2
+  - Complete remaining pistons
+  - 
+  - Install camshaft
 --- !u!1 &1810677274
 GameObject:
   m_ObjectHideFlags: 0

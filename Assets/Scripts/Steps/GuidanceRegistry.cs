@@ -264,7 +264,7 @@ namespace AdaptiveAR.Steps
 
         private static bool IsConventionKey(string key)
         {
-            return KitChildKey.IsMatch(key) || KitHandleKey.IsMatch(key) || ChildKey.IsMatch(key);
+            return KitChildKey.IsMatch(key) || KitHandleKey.IsMatch(key) || ChildKey.IsMatch(key) || key.StartsWith("part.");
         }
 
         private bool TryBindByConvention(string key, out GameObject target)
@@ -293,6 +293,17 @@ namespace AdaptiveAR.Steps
                     string rootKey = "part.piston" + m.Groups[1].Value;
                     if (_lookup.TryGetValue(rootKey, out GameObject root) && root != null)
                         found = FindChildByName(root.transform, kitHandleChildName);
+                }
+            }
+
+            // part.<name> with no entry -> the object named <name> beside the crankshaft
+            // (Components/<name>), e.g. part.engineBlockSep001.
+            if (found == null && key.StartsWith("part.") && !KitChildKey.IsMatch(key) && !KitHandleKey.IsMatch(key) && !ChildKey.IsMatch(key))
+            {
+                if (_lookup.TryGetValue("part.crankshaft", out GameObject crank) && crank != null && crank.transform.parent != null)
+                {
+                    Transform hit = crank.transform.parent.Find(key.Substring(5));
+                    if (hit != null) found = hit.gameObject;
                 }
             }
 

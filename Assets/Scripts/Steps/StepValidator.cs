@@ -169,6 +169,12 @@ namespace AdaptiveAR.Steps
         /// <summary>True when the last failed attempt never came close (clearly wrong pose, red cue).</summary>
         public bool LastAttemptFar { get; private set; }
 
+        /// <summary>Why the last BeginAction could not arm, for the action log and the self-check.</summary>
+        public string ArmFailureReason { get; private set; }
+
+        /// <summary>Number of other selectable parts watched for wrong-component feedback.</summary>
+        public int WatchedOtherCount { get { return _others.Count; } }
+
         /// <summary>Legacy reject reason, derived from LastErrorType.</summary>
         public RejectReason LastRejectReason { get; private set; }
 
@@ -327,8 +333,12 @@ namespace AdaptiveAR.Steps
             Clear();
             _action = action;
 
+            ArmFailureReason = null;
             if (action == null || !action.RequiresPhysicalValidation)
+            {
+                ArmFailureReason = "not a physical action";
                 return false;
+            }
 
             PartKey = action.partKey;
             TargetKey = action.targetKey;
@@ -342,15 +352,17 @@ namespace AdaptiveAR.Steps
 
             if (guidanceRegistry == null)
             {
-                Debug.LogWarning("[StepValidator] No GuidanceRegistry assigned; validation disabled.", this);
+                ArmFailureReason = "no GuidanceRegistry";
+                Debug.LogError("[StepValidator] No GuidanceRegistry assigned; validation disabled.", this);
                 return false;
             }
 
             if (string.IsNullOrEmpty(TargetKey) ||
                 !guidanceRegistry.TryResolve(TargetKey, out GameObject targetGo))
             {
-                Debug.LogWarning($"[StepValidator] Action '{action.Id}': target '{TargetKey}' " +
-                                 "could not be resolved; this action cannot be validated.", this);
+                ArmFailureReason = $"target '{TargetKey}' unresolved";
+                Debug.LogError($"[StepValidator] Action '{action.Id}': target '{TargetKey}' " +
+                               "could not be resolved; this action cannot be validated.", this);
                 return false;
             }
 
@@ -390,8 +402,9 @@ namespace AdaptiveAR.Steps
 
             if (_candidates.Count == 0)
             {
-                Debug.LogWarning($"[StepValidator] Action '{action.Id}': no accepted part could be " +
-                                 "resolved; this action cannot be validated.", this);
+                ArmFailureReason = $"no accepted instance for '{PartKey}' (expanded: {string.Join(", ", accepted)})";
+                Debug.LogError($"[StepValidator] Action '{action.Id}': no accepted part could be " +
+                               $"resolved for '{PartKey}'; this action cannot be validated.", this);
                 return false;
             }
 
@@ -648,8 +661,10 @@ namespace AdaptiveAR.Steps
             foreach (Candidate k in _candidates) cands.Add(k.key);
             string kit = GuidanceRegistry.KitOf(PartKey);
             string bound = kit != null && guidanceRegistry != null && guidanceRegistry.TryGetKitHandle(kit, out Transform h) && h != null ? h.name : "-";
-            return $"[Eligibility] grabbed '{c.tf.name}'#{c.tf.GetInstanceID()} key={c.key} requested={PartKey} " +
-                   $"candidates=[{string.Join(", ", cands)}] boundKitInstance={bound} eligible={eligible}";
+            string reason = eligible ? "instance is an accepted candidate for the requested role"
+                                     : "instance is a selectable part but not an accepted instance of the requested role";
+            return $"[Eligibility] grabbed='{c.tf.name}'#{c.tf.GetInstanceID()} key={c.key} requestedRole={PartKey} " +
+                   $"candidates=[{string.Join(", ", cands)}] boundKitInstance={bound} eligible={eligible} reason={reason}";
         }
 
         private void MonitorWrongParts()

@@ -118,6 +118,68 @@ namespace AdaptiveAR.Steps
         private int _currentIndex = -1;
         private bool _placementSubscribed;
         private bool _currentActionArmed;
+        private bool _selfCheckDone;
+
+        // =====================================================================
+        // Regression self-check at task start
+        // =====================================================================
+
+        private void Check(bool ok, string what)
+        {
+            if (ok) Debug.Log("[SelfCheck] OK   " + what);
+            else Debug.LogError("[SelfCheck] FAIL " + what);
+        }
+
+        private void RunSelfCheck()
+        {
+            try
+            {
+                int actions = 0, physical = 0, physicalWithTarget = 0;
+                for (int i = 0; stepRunner != null && i < stepRunner.StepCount; i++)
+                {
+                    StepData s = stepRunner.GetStepAt(i);
+                    if (s == null || s.actions == null) continue;
+                    foreach (AssemblyAction a in s.actions)
+                    {
+                        if (a == null || !a.enabled) continue;
+                        actions++;
+                        if (!a.RequiresPhysicalValidation) continue;
+                        physical++;
+                        bool t = registry != null && !string.IsNullOrEmpty(a.targetKey) && registry.TryResolveQuiet(a.targetKey, out GameObject tg) && tg != null;
+                        bool p = registry != null && !string.IsNullOrEmpty(a.partKey) && registry.RoleCandidates(a.partKey).Count > 0;
+                        if (t && p) physicalWithTarget++;
+                        else Debug.LogError($"[SelfCheck] FAIL physical action '{a.Id}': target={(t ? "ok" : a.targetKey + " unresolved")} part={(p ? "ok" : a.partKey + " no candidates")}");
+                    }
+                }
+                Check(actions > 0, $"StepRunner has {actions} enabled action(s)");
+                Check(physical > 0 && physicalWithTarget == physical, $"{physicalWithTarget}/{physical} physical actions resolve a target and a part");
+                Check(validator != null, "StepValidator present");
+                Check(registry != null && registry.TryResolveQuiet("ghost.crankshaft", out GameObject cg) && cg != null, "crankshaft ghost resolves");
+                Check(registry != null && registry.TryResolveQuiet("part.camshaft", out GameObject cam) && cam != null, "camshaft resolves");
+                int seps = 0;
+                for (int n = 1; n <= 4; n++)
+                    if (registry != null && registry.TryResolveQuiet($"part.engineBlockSep00{n}", out GameObject sep) && sep != null
+                        && registry.TryResolveQuiet($"ghost.engineBlockSep00{n}", out GameObject sg) && sg != null) seps++;
+                Check(seps == 4, $"{seps}/4 EngineBlockSep holders and targets resolve");
+                int pistonParts = 0;
+                foreach (string role in new[] { "PistonHead", "ConnectingRod", "ConnectingPin", "PistonEnd", "pistonBolt", "pistonBoltOther", "PistonNut", "PistonNutOther" })
+                    if (registry != null && registry.RoleCandidates("part.PistonKit001." + role).Count > 0) pistonParts++;
+                Check(pistonParts == 8, $"{pistonParts}/8 piston roles resolve instances");
+                var overview = FindAnyObjectByType<AdaptiveAR.UI.TaskListHud>(FindObjectsInactive.Include);
+                Check(overview != null, "overview panel (TaskListHud) resolves" + (overview != null ? $" activeInHierarchy={overview.gameObject.activeInHierarchy}" : ""));
+                var mat = FindAnyObjectByType<AdaptiveAR.MR.AssemblyWorkSurface>(FindObjectsInactive.Include);
+                Check(mat != null || (stepManager != null && stepManager.createWorkSurface), "piston work surface resolves or will be created");
+                int selectable = 0;
+                if (registry != null)
+                    foreach (string k in registry.PartKeys())
+                        if (!GuidanceRegistry.IsKitHandleKey(k) && registry.TryResolveQuiet(k, out GameObject go) && go != null && go.GetComponent<Oculus.Interaction.PointableElement>() != null && go.GetComponent<Collider>() != null) selectable++;
+                Check(selectable > 0, $"{selectable} selectable part(s) available to the wrong-component watcher");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[SelfCheck] threw: " + e);
+            }
+        }
 
         /// <summary>
         /// Latest physiological reading, or null when nothing is attached.
@@ -259,7 +321,7 @@ namespace AdaptiveAR.Steps
             if (!IsReadState) return;
             if (logger != null) logger.LogNote("instruction_acknowledged_by_pickup:" + partKey);
             if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.Grab, part.position);
-            CompleteActionAndAdvance("picked_up");
+            RequestAdvance("pick-up acknowledgement", "picked_up");
         }
 
         /// <summary>True while the current action is the "Complete Remaining Pistons" shortcut.</summary>
@@ -340,7 +402,12 @@ namespace AdaptiveAR.Steps
         // Step tracking
         // =====================================================================
 
-        /// <summary>True when the participant is allowed to move on. Gates the Next control.</summary>
+        /// <summary>
+        /// THE ONE PROGRESSION GATE. READ actions may advance by Continue (or a pick-up
+        /// acknowledgement); the auto-complete action by its own button; a PHYSICAL action
+        /// ONLY by validator success - never by Continue, never because validation could not
+        /// be armed. Every caller that advances goes through RequestAdvance().
+        /// </summary>
         public bool CanAdvance
         {
             get
@@ -351,11 +418,50 @@ namespace AdaptiveAR.Steps
                 AssemblyAction action = workflow.CurrentAction;
                 if (action == null) return true;                       // stage without actions
                 if (!action.enabled) return true;                      // designed, not performable
-                if (!action.RequiresPhysicalValidation) return true;    // read and acknowledge
-                if (!_currentActionArmed) return true;                  // cannot be validated: confirm by hand
+                if (!action.RequiresPhysicalValidation) return true;    // READ / AUTO: a button may advance
 
-                return workflow.CurrentActionComplete;
+                return workflow.CurrentActionComplete;                  // PHYSICAL: validation only
             }
+        }
+
+        public enum ActionType { READ, PHYSICAL, AUTO, NONE }
+
+        public ActionType CurrentActionType
+        {
+            get
+            {
+                AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
+                if (a == null || !a.enabled) return ActionType.NONE;
+                if (a.autoCompleteRemaining) return ActionType.AUTO;
+                return a.RequiresPhysicalValidation ? ActionType.PHYSICAL : ActionType.READ;
+            }
+        }
+
+        /// <summary>
+        /// Single entry point for every manual advance request (Continue, Back/Continue,
+        /// pick-up acknowledgement, researcher skip). Logs the decision; refuses PHYSICAL.
+        /// </summary>
+        private bool RequestAdvance(string requestedBy, string reason)
+        {
+            AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
+            ActionType type = CurrentActionType;
+            string id = a != null ? a.Id : "<none>";
+
+            bool allowed = CanAdvance && type != ActionType.PHYSICAL;
+            if (type == ActionType.PHYSICAL)
+                allowed = workflow != null && workflow.CurrentActionComplete;   // only ever true via validation
+
+            Debug.Log($"[Progression] action={id} type={type} advance requested by={requestedBy} allowed={allowed}");
+            if (!allowed)
+            {
+                if (logger != null) logger.LogNote("advance_blocked:" + requestedBy);
+                RaiseStateChanged();
+                return false;
+            }
+
+            if (workflow != null) CompleteActionAndAdvance(reason);
+            else AdvanceStep(reason);
+            return true;
         }
 
         /// <summary>
@@ -455,29 +561,68 @@ namespace AdaptiveAR.Steps
             workflow.EnterAction(resolved);
             AssemblyAction action = workflow.CurrentAction;
 
+            // Each step is isolated: a failure in one subsystem is logged loudly and must not
+            // prevent the others (guidance, mat, logging) from running.
             _currentActionArmed = false;
             if (validator != null)
             {
-                _currentActionArmed = validator.BeginAction(action);
-
-                if (!_currentActionArmed && action != null && action.RequiresPhysicalValidation && logToConsole)
-                    Debug.LogWarning("[Session] Action '" + action.Id + "' wants validation but could " +
-                                     "not be armed; it must be confirmed manually.");
-
-                // An instruction that names a part completes when that part is picked up.
-                if (action != null && action.enabled && !action.RequiresPhysicalValidation)
-                    validator.BeginAcknowledge(action);
+                try
+                {
+                    _currentActionArmed = validator.BeginAction(action);
+                    if (action != null && action.enabled && !action.RequiresPhysicalValidation)
+                        validator.BeginAcknowledge(action);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[Session] validator.BeginAction threw for '{(action != null ? action.Id : "?")}': {e}");
+                }
             }
 
-            // Guidance for THIS action replaces whatever the previous action showed.
-            if (presenter != null)
-                presenter.PresentAction(action);
+            // The mat exists while the partial piston is being built on it.
+            if (stepManager != null && action != null && action.enabled)
+            {
+                string role = GuidanceRegistry.RoleOf(action.partKey);
+                bool onMat = role == "PistonHead" || role == "ConnectingRod" || role == "ConnectingPin";
+                if (onMat)
+                {
+                    try { stepManager.SetMatVisible(true, "piston_action:" + action.Id, KitNumber(action.partKey)); }
+                    catch (Exception e) { Debug.LogError("[Session] mat show threw: " + e); }
+                }
+            }
+
+            try
+            {
+                if (presenter != null) presenter.PresentAction(action);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Session] presenter.PresentAction threw for '{(action != null ? action.Id : "?")}': {e}");
+            }
 
             if (logger != null && action != null)
                 logger.LogActionEnter(resolved, action.Id, action.kind.ToString(),
                                       action.enabled, action.disabledReason);
 
+            LogActionLine(action);
             RaiseStateChanged();
+        }
+
+        /// <summary>One concise line per action entered; loud error on an inconsistent PHYSICAL action.</summary>
+        private void LogActionLine(AssemblyAction action)
+        {
+            ActionType type = CurrentActionType;
+            string level = supportLevel != null ? supportLevel.CurrentLevel.ToString().Substring(0, 2) : "L?";
+            bool continueShown = CanAdvance;
+            bool hasValidator = validator != null && validator.IsActive;
+            string ghost = presenter != null ? presenter.DescribeActiveGhosts() : "-";
+
+            Debug.Log($"[Action] id={(action != null ? action.Id : "<none>")} type={type} support={level} " +
+                      $"continue={continueShown} validator={hasValidator} ghost={ghost}" +
+                      (type == ActionType.PHYSICAL && !hasValidator ? $" armFailure=\"{validator?.ArmFailureReason}\"" : ""));
+
+            if (type == ActionType.PHYSICAL && (continueShown || !hasValidator))
+                Debug.LogError($"[Action] PHYSICAL action '{(action != null ? action.Id : "?")}' is inconsistent " +
+                               $"(continue={continueShown}, validator={hasValidator}). Progression is refused until it validates.");
         }
 
         /// <summary>Marks the active action done and moves on, or finishes the stage.</summary>
@@ -533,6 +678,8 @@ namespace AdaptiveAR.Steps
                 logger.LogStepEnter(index, step.StepIdentifier, stepRunner != null ? stepRunner.StepCount : 0,
                                     step.taskComplexity, ExpectedMsOrNull(step));
             }
+
+            if (!_selfCheckDone) { _selfCheckDone = true; RunSelfCheck(); }
 
             // Enter the stage in the authoritative model, then its first real action.
             if (workflow != null)
@@ -636,10 +783,25 @@ namespace AdaptiveAR.Steps
 
         private void HandleStepValidated()
         {
-            // A validated placement completes the current ACTION. The stage advances only
-            // when it runs out of actions.
+            // The ONLY way a PHYSICAL action advances.
+            AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
+            Debug.Log($"[Progression] action={(a != null ? a.Id : "<none>")} validation success -> allowed=true");
+
+            // Installing the partial piston ends the mat's job for this piston.
+            if (a != null && GuidanceRegistry.IsKitHandleKey(a.partKey) && stepManager != null)
+                stepManager.SetMatVisible(false, "partial_piston_installed", KitNumber(a.partKey));
+
             if (workflow != null) CompleteActionAndAdvance("validation_passed");
             else AdvanceStep("validation_passed");
+        }
+
+        private static int KitNumber(string key)
+        {
+            string kit = GuidanceRegistry.KitOf(key);
+            if (kit == null && GuidanceRegistry.IsKitHandleKey(key)) kit = key.Substring(5);
+            if (kit == null) return 0;
+            int.TryParse(kit.Substring(kit.Length - 1), out int n);
+            return n;
         }
 
         /// <summary>
@@ -681,31 +843,35 @@ namespace AdaptiveAR.Steps
         /// </summary>
         public void AdvanceStepManually()
         {
-            if (!CanAdvance)
+            // The deliberate prototype shortcut runs BEFORE the advance it unlocks.
+            if (IsAutoCompleteAction && !_autoCompleted)
             {
-                if (logger != null) logger.LogNote("advance_blocked");
-                if (logToConsole) Debug.Log("[Session] Advance blocked: " + BlockedReason);
-                RaiseStateChanged();
-                return;
+                int manual = CountBoundKits();
+                int made = PistonAutoCompleter.CompleteRemaining(registry, manual);
+                _autoCompleted = made > 0;
+                if (logger != null) logger.LogRemainingPistonsAutoCompleted(made);
+                if (made != PistonAutoCompleter.ExpectedCount)
+                    Debug.LogError($"[Session] Auto-complete made {made} visual piston(s), expected {PistonAutoCompleter.ExpectedCount}.");
             }
 
-            // The deliberate prototype shortcut: fit the remaining pistons, log it once, move on.
-            if (IsAutoCompleteAction)
-            {
-                int filled = PistonAutoCompleter.CompleteRemaining(registry, validator);
-                if (logger != null) logger.LogRemainingPistonsAutoCompleted(filled);
-                if (logToConsole) Debug.Log($"[Session] Remaining pistons auto-completed: {filled} bore(s).");
-            }
-
-            if (workflow != null) CompleteActionAndAdvance("manual_confirm");
-            else AdvanceStep("manual_confirm");
+            RequestAdvance("Continue button", IsAutoCompleteAction ? "auto_complete_confirm" : "manual_confirm");
         }
 
-        /// <summary>Skips the current step without marking it validated. Researcher control.</summary>
+        private bool _autoCompleted;
+
+        private int CountBoundKits()
+        {
+            int n = 0;
+            if (registry == null) return 0;
+            for (int k = 1; k <= 4; k++)
+                if (registry.TryGetKitHandle($"PistonKit00{k}", out Transform h) && h != null) n++;
+            return n;
+        }
+
+        /// <summary>Researcher control. Logged like any other request; still refused for PHYSICAL.</summary>
         public void SkipStep()
         {
-            if (workflow != null) CompleteActionAndAdvance("researcher_skip");
-            else AdvanceStep("researcher_skip");
+            RequestAdvance("researcher skip", "researcher_skip");
         }
 
         private void HandleSequenceComplete()
