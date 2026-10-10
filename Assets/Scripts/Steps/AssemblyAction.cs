@@ -103,6 +103,11 @@ namespace AdaptiveAR.Steps
         [Tooltip("Why this action is disabled. Surfaced in the researcher HUD and the log.")]
         public string disabledReason;
 
+        [Header("Prototype shortcut")]
+        [Tooltip("Pressing Continue on this acknowledgement fits the remaining pistons automatically. " +
+                 "Not participant performance: no attempts, errors or times are recorded for them.")]
+        public bool autoCompleteRemaining;
+
         /// <summary>Identifier used in logs.</summary>
         public string Id
         {

@@ -54,7 +54,7 @@ namespace AdaptiveAR.MR
         [Header("Placement, metres")]
         [Tooltip("Extra lift above the detected surface, so no part spawns inside the desk. " +
                  "The model is already grounded by CalibrationOffset; this is a safety margin.")]
-        [SerializeField] private float surfaceUpOffset = 0.07f;
+        [SerializeField] private float surfaceUpOffset = 0.01f;
 
         [Tooltip("Rotation of the workspace about the surface normal, in degrees. Tune on the " +
                  "bench if the engine should face a different way relative to the participant.")]

@@ -18,7 +18,7 @@ MonoBehaviour:
   instructionAudio: {fileID: 0}
   arrowPrefab: {fileID: 0}
   stepId: step_05_piston004
-  displayName: Piston 4
+  displayName: Piston 4 (superseded)
   defaultGhostSpawnOffset: {x: 0, y: 0, z: 0}
   taskComplexity: 1
   requiresValidation: 1
@@ -46,8 +46,8 @@ MonoBehaviour:
     ghostKeys: []
     showArrow: 0
     audioCue: {fileID: 8300000, guid: c355187d5079dc26ce7c92d9b0bb5cbc, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.PistonHead
     kind: 1
     instruction: Place one piston head flat on the marked assembly area.
@@ -62,8 +62,8 @@ MonoBehaviour:
     - ghost.PistonKit004.PistonHead
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 4dd65a74c74eac033acdbb0dc125d50b, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.ConnectingRod
     kind: 1
     instruction: Attach a connecting rod to the piston head from above.
@@ -78,8 +78,8 @@ MonoBehaviour:
     - ghost.PistonKit004.ConnectingRod
     showArrow: 1
     audioCue: {fileID: 8300000, guid: aa7ff5b68cc5b40e6eee3770b852c05b, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.ConnectingPin
     kind: 1
     instruction: Insert a connecting pin from the side, through the head and the rod.
@@ -94,8 +94,8 @@ MonoBehaviour:
     - ghost.PistonKit004.ConnectingPin
     showArrow: 1
     audioCue: {fileID: 8300000, guid: cac3838b35e861ec7c0bf2e9ec31e29a, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.install
     kind: 1
     instruction: Fit the piston assembly into its cylinder bore, with the rod on the crankshaft.
@@ -110,8 +110,8 @@ MonoBehaviour:
     - ghost.piston004
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 2d4f439367c439c256ce81e4de0f98e9, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.PistonEnd
     kind: 1
     instruction: Attach the rod end cap at the crankshaft.
@@ -126,8 +126,8 @@ MonoBehaviour:
     - ghost.piston004.PistonEnd
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 27dfe637aeb3e71a7140188114ad5cb5, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.pistonBolt
     kind: 2
     instruction: Fit the first retaining bolt.
@@ -142,8 +142,8 @@ MonoBehaviour:
     - ghost.piston004.pistonBolt
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 0cae5c624929fa93ebe7293f3ec17c2f, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.pistonBoltOther
     kind: 2
     instruction: Fit the second retaining bolt.
@@ -158,8 +158,8 @@ MonoBehaviour:
     - ghost.piston004.pistonBoltOther
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 12e1bdf4ace194e9b6be520dd148eed1, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.PistonNut
     kind: 2
     instruction: Fit the first retaining nut.
@@ -174,8 +174,8 @@ MonoBehaviour:
     - ghost.piston004.PistonNut
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 476355c8f71d667cfcf64268398d760e, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   - actionId: step_05_piston004.PistonNutOther
     kind: 2
     instruction: Fit the second retaining nut.
@@ -190,8 +190,8 @@ MonoBehaviour:
     - ghost.piston004.PistonNutOther
     showArrow: 1
     audioCue: {fileID: 8300000, guid: 9d34054f2b1fcd06b3d4948dc73eec6a, type: 3}
-    enabled: 1
-    disabledReason: 
+    enabled: 0
+    disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   expectedDurationSeconds: 90
   defaultSupportLevel: 2
   l1Minimal:
@@ -232,8 +232,7 @@ MonoBehaviour:
 
       3.  Slide the piston into the bore and seat the rod on its
       journal.'
-    ghostKeys:
-    - ghost.piston004
+    ghostKeys: []
     ghostPrefabs: []
     ghostSpawnOffset: {x: 0, y: 0, z: 0}
     arrowKeys: []

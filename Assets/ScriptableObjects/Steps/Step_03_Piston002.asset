@@ -35,9 +35,9 @@ MonoBehaviour:
   actions:
   - actionId: step_03_piston002.locate
     kind: 0
-    instruction: Find the piston components in the parts tray.
+    instruction: Find the piston components in the tray and pick up a piston head.
     detail: You will build the piston on the assembly mat, then install it.
-    partKey: 
+    partKey: part.PistonKit002.PistonHead
     interchangeablePartKeys: []
     targetKey: 
     positionToleranceMeters: 0.03
@@ -45,7 +45,7 @@ MonoBehaviour:
     settleSeconds: 0.4
     ghostKeys: []
     showArrow: 0
-    audioCue: {fileID: 8300000, guid: c355187d5079dc26ce7c92d9b0bb5cbc, type: 3}
+    audioCue: {fileID: 8300000, guid: 9f126e4e0f833e58068f9df782522345, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_03_piston002.PistonHead
@@ -195,7 +195,7 @@ MonoBehaviour:
   expectedDurationSeconds: 90
   defaultSupportLevel: 2
   l1Minimal:
-    instructionText: Repeat the piston assembly procedure for the remaining pistons.
+    instructionText: Repeat the piston assembly procedure for the second piston.
     instructionDetail: 
     ghostKeys: []
     ghostPrefabs: []
@@ -203,7 +203,7 @@ MonoBehaviour:
     arrowKeys: []
     arrowPrefabs: []
     arrowSpawnOffset: {x: 0, y: 0, z: 0}
-    instructionAudio: {fileID: 8300000, guid: afda7c749c5d47179e67e027aa32ed5a, type: 3}
+    instructionAudio: {fileID: 8300000, guid: dcdf2161c8a513e8d425cdb6754d3876, type: 3}
     instructionVideo: {fileID: 0}
     demonstrationAnimation: {fileID: 0}
     animatorTrigger: 

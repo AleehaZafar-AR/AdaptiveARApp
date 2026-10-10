@@ -24,6 +24,17 @@ namespace AdaptiveAR.UI
         [Tooltip("Longest extent of the preview, metres.")]
         [SerializeField] private float size = 0.10f;
 
+        [Tooltip("Roles shown larger and embedded halfway through the panel plane.")]
+        [SerializeField] private string[] largeRoles = { "crankshaft", "camshaft" };
+        [SerializeField] private float largeSize = 0.14f;
+
+        [Tooltip("Depth of the preview centre relative to the panel plane, canvas units (negative = towards the viewer).")]
+        [SerializeField] private float defaultDepth = -20f;
+        [SerializeField] private float largeDepth = 0f;
+
+        private float _sizeInUse;
+        private float _depthInUse;
+
         [Header("Motion")]
         [SerializeField] private float degreesPerSecond = 28f;
         [SerializeField] private float tiltDegrees = 18f;
@@ -42,7 +53,16 @@ namespace AdaptiveAR.UI
         /// <summary>Shows a copy of the given part, or hides the preview when null.</summary>
         public void Show(GameObject source)
         {
+            Show(source, null);
+        }
+
+        public void Show(GameObject source, string role)
+        {
             if (source == _source && (_preview != null || source == null)) return;
+
+            bool large = role != null && System.Array.IndexOf(largeRoles, role) >= 0;
+            _sizeInUse = large ? largeSize : size;
+            _depthInUse = large ? largeDepth : defaultDepth;
 
             Clear();
             _source = source;
@@ -65,7 +85,7 @@ namespace AdaptiveAR.UI
             Vector3 meshScale = mf.transform.lossyScale;
             Vector3 ext = Vector3.Scale(mf.sharedMesh.bounds.size, meshScale);
             float longest = Mathf.Max(Mathf.Abs(ext.x), Mathf.Abs(ext.y), Mathf.Abs(ext.z));
-            float k = longest > 1e-5f ? size / longest : 1f;
+            float k = longest > 1e-5f ? _sizeInUse / longest : 1f;
             _preview.transform.localScale = new Vector3(Mathf.Abs(meshScale.x), Mathf.Abs(meshScale.y), Mathf.Abs(meshScale.z)) * k;
 
             _spin = 0f;
@@ -89,7 +109,7 @@ namespace AdaptiveAR.UI
         private void Place()
         {
             // Panel-relative so the preview follows the card wherever the rig parks it.
-            Vector3 world = _panel.TransformPoint(localOffset);
+            Vector3 world = _panel.TransformPoint(new Vector3(localOffset.x, localOffset.y, _depthInUse));
             Quaternion facing = _panel.rotation;
             Quaternion spin = Quaternion.AngleAxis(_spin, Vector3.up) * Quaternion.AngleAxis(tiltDegrees, Vector3.right);
 

@@ -95,7 +95,7 @@ namespace AdaptiveAR.Steps
         [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
                  "the values serialized in the scene, the table is reset to the defaults at start.")]
         [SerializeField] private int roleToleranceRevision = 0;
-        private const int CurrentRoleToleranceRevision = 2;
+        private const int CurrentRoleToleranceRevision = 3;
 
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
@@ -139,6 +139,9 @@ namespace AdaptiveAR.Steps
         public event Action<string, Transform> OnWrongPartGrabbed;
         public event Action<string, Transform> OnWrongPartReleased;
 
+        /// <summary>During an instruction (READ) the named part was picked up: the instruction is done.</summary>
+        public event Action<string, Transform> OnAcknowledgedByGrab;
+
         // ---------------- state ----------------
 
         public bool IsActive { get; private set; }
@@ -162,6 +165,9 @@ namespace AdaptiveAR.Steps
         /// <summary>Per-dimension validity of the last judged attempt.</summary>
         public bool LastAttemptPositionOk { get; private set; }
         public bool LastAttemptOrientationOk { get; private set; }
+
+        /// <summary>True when the last failed attempt never came close (clearly wrong pose, red cue).</summary>
+        public bool LastAttemptFar { get; private set; }
 
         /// <summary>Legacy reject reason, derived from LastErrorType.</summary>
         public RejectReason LastRejectReason { get; private set; }
@@ -191,6 +197,10 @@ namespace AdaptiveAR.Steps
         private readonly List<Candidate> _candidates = new List<Candidate>();
         private readonly List<Candidate> _others = new List<Candidate>();
         private readonly HashSet<string> _consumed = new HashSet<string>();
+
+        // READ-state pick-up monitor (instruction completes when the named part is grabbed)
+        private readonly List<Candidate> _ackCandidates = new List<Candidate>();
+        private bool _ackArmed;
 
         private Candidate _active;
         private Candidate _wrongHeld;
@@ -229,8 +239,9 @@ namespace AdaptiveAR.Steps
                 new RoleTolerance { role = "PistonEnd",       positionMeters = 0.025f, rotationDegrees = 25f, symmetry = AxisSymmetry.AxialHalfTurn },
                 new RoleTolerance { role = "pistonBolt",      positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
                 new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonNut",       positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
+                // Revision 3: nuts loosened specifically (tiny objects); everything else as rev 2.
+                new RoleTolerance { role = "PistonNut",       positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip },
                 new RoleTolerance { role = "crankshaft",      positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
                 new RoleTolerance { role = "camshaft",        positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
             };
@@ -262,6 +273,43 @@ namespace AdaptiveAR.Steps
         public void ResetConsumedParts()
         {
             _consumed.Clear();
+        }
+
+        /// <summary>Marks an instance as used (the auto-complete shortcut uses this).</summary>
+        public void MarkConsumed(string instanceKey)
+        {
+            if (!string.IsNullOrEmpty(instanceKey)) _consumed.Add(instanceKey);
+        }
+
+        public bool IsConsumed(string instanceKey)
+        {
+            return !string.IsNullOrEmpty(instanceKey) && _consumed.Contains(instanceKey);
+        }
+
+        /// <summary>
+        /// Arms a light pick-up monitor for an instruction: when any unconsumed instance of
+        /// the named role is grabbed, OnAcknowledgedByGrab fires once. No validation, no
+        /// wrong-part feedback, no error.
+        /// </summary>
+        public bool BeginAcknowledge(AssemblyAction action)
+        {
+            _ackCandidates.Clear();
+            _ackArmed = false;
+            if (action == null || string.IsNullOrEmpty(action.partKey) || guidanceRegistry == null) return false;
+
+            foreach (string key in guidanceRegistry.RoleCandidates(action.partKey))
+            {
+                if (_consumed.Contains(key)) continue;
+                if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null) continue;
+                var padlock = go.GetComponent<PlacementLock>();
+                if (padlock != null && padlock.IsLocked) continue;
+                _ackCandidates.Add(MakeCandidate(key, go));
+            }
+
+            _ackArmed = _ackCandidates.Count > 0;
+            if (logEvaluations)
+                Debug.Log($"[StepValidator] '{action.Id}': pick-up monitor armed for '{action.partKey}' ({_ackCandidates.Count} instance(s)).");
+            return _ackArmed;
         }
 
         private void Awake()
@@ -349,11 +397,22 @@ namespace AdaptiveAR.Steps
 
             if (monitorWrongParts)
             {
+                // The SAME object can be reachable under several keys (part.PistonKit001 is an
+                // alias of a head; roles resolve across kits). Anything that is an accepted
+                // instance must never also be watched as a wrong part - that was the false
+                // "not the required component" while holding the right head.
+                var acceptedObjects = new HashSet<GameObject>();
+                foreach (Candidate c in _candidates) if (c.tf != null) acceptedObjects.Add(c.tf.gameObject);
+                var watched = new HashSet<GameObject>();
+
                 foreach (string key in guidanceRegistry.PartKeys())
                 {
                     if (acceptedSet.Contains(key)) continue;
+                    if (GuidanceRegistry.IsKitHandleKey(key)) continue;              // alias, never a part of its own
                     if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null) continue;
+                    if (acceptedObjects.Contains(go) || !watched.Add(go)) continue;
                     if (go.GetComponent<Oculus.Interaction.PointableElement>() == null) continue;
+                    if (go.GetComponent<Collider>() == null) continue;              // kit roots: not grabbable parts
 
                     var padlock = go.GetComponent<PlacementLock>();
                     if (padlock != null && padlock.IsLocked) continue;
@@ -429,6 +488,8 @@ namespace AdaptiveAR.Steps
 
         public void Clear()
         {
+            _ackCandidates.Clear();
+            _ackArmed = false;
             DisengageAssist();
 
             if (_wrongHeld != null)
@@ -462,6 +523,8 @@ namespace AdaptiveAR.Steps
 
         private void Update()
         {
+            if (_ackArmed) MonitorAcknowledge();
+
             if (!IsActive || _completed || CurrentTarget == null) return;
 
             bool anyHeld = false;
@@ -498,6 +561,7 @@ namespace AdaptiveAR.Steps
             if (grabbedNow != null)
             {
                 _stickyAlmostThere = false;
+                Debug.Log(DescribeEligibility(grabbedNow, true));
                 OnPartGrabbed?.Invoke(grabbedNow.key, grabbedNow.tf);
                 // Picking the part up again inside the zone starts a fresh attempt.
                 if (grabbedNow == _active) _inAttempt = false;
@@ -561,6 +625,33 @@ namespace AdaptiveAR.Steps
             else CurrentCue = Cue.TurnToMatch;
         }
 
+        private void MonitorAcknowledge()
+        {
+            foreach (Candidate c in _ackCandidates)
+            {
+                if (c.tf == null) continue;
+                bool held = IsHeld(c);
+                if (held && !c.wasHeld)
+                {
+                    _ackArmed = false;
+                    if (logEvaluations) Debug.Log($"[StepValidator] instruction acknowledged by picking up '{c.key}' ({c.tf.name}).");
+                    OnAcknowledgedByGrab?.Invoke(c.key, c.tf);
+                    return;
+                }
+                c.wasHeld = held;
+            }
+        }
+
+        private string DescribeEligibility(Candidate c, bool eligible)
+        {
+            var cands = new List<string>();
+            foreach (Candidate k in _candidates) cands.Add(k.key);
+            string kit = GuidanceRegistry.KitOf(PartKey);
+            string bound = kit != null && guidanceRegistry != null && guidanceRegistry.TryGetKitHandle(kit, out Transform h) && h != null ? h.name : "-";
+            return $"[Eligibility] grabbed '{c.tf.name}'#{c.tf.GetInstanceID()} key={c.key} requested={PartKey} " +
+                   $"candidates=[{string.Join(", ", cands)}] boundKitInstance={bound} eligible={eligible}";
+        }
+
         private void MonitorWrongParts()
         {
             if (_others.Count == 0) return;
@@ -573,6 +664,7 @@ namespace AdaptiveAR.Steps
                 if (held && !c.wasHeld)
                 {
                     _wrongHeld = c;
+                    Debug.Log(DescribeEligibility(c, false));
                     OnWrongPartGrabbed?.Invoke(c.key, c.tf);
                 }
                 else if (!held && c.wasHeld && _wrongHeld == c)
@@ -675,6 +767,7 @@ namespace AdaptiveAR.Steps
             // Both dimensions, judged at the closest approach.
             LastAttemptPositionOk = _attemptReachedPosition;
             LastAttemptOrientationOk = rot <= _rotTol;
+            LastAttemptFar = pos > _posTol * 2.5f;
             if (!LastAttemptPositionOk && !LastAttemptOrientationOk) LastErrorType = "incorrect_position_and_orientation";
             else if (!LastAttemptPositionOk) LastErrorType = "incorrect_position";
             else LastErrorType = "incorrect_orientation";
@@ -707,15 +800,18 @@ namespace AdaptiveAR.Steps
                           $"off by {posErr * 100f:F1} cm / {rotErr:F0} deg.");
 
             // 1. exact pose, 2. grab ended + locked (PlacementLock disables the SDK components
-            //    and re-asserts the pose for a few frames), 3. joined to its assembly.
+            //    and enforces pose + kinematic state continuously), 3. joined to its assembly.
+            PartWatch.Log("Succeed(before snap)", _active.tf);
             SnapToTarget(_active);
 
             var padlock = _active.tf.GetComponent<PlacementLock>();
             if (padlock == null) padlock = _active.tf.gameObject.AddComponent<PlacementLock>();
             padlock.LockAt(CurrentTarget);
+            PartWatch.Log("Succeed(after lock)", _active.tf);
 
             BindAndJoin(_active);
             padlock.RefreshLockedPose();
+            PartWatch.Log("Succeed(after join)", _active.tf);
 
             // Collisions with the assembly stay ignored for this part: it lives inside it now.
             _assistFor = null;

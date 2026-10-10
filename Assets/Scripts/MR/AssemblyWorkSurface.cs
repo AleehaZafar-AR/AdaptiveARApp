@@ -32,14 +32,16 @@ namespace AdaptiveAR.MR
         [Header("Placement")]
         [SerializeField] private PlacementMode placementMode = PlacementMode.InFrontOfEngine;
 
+        // Field names carry a "mat" prefix on purpose: the scene object you authored still
+        // serialises the earlier names (heightAboveDesk 0.1 etc.), and those must not win.
         [Tooltip("Side length of the square mat, metres.")]
-        [SerializeField] private float size = 0.30f;
+        [SerializeField] private float matSize = 0.28f;
 
-        [Tooltip("Height of the mat above the detected desk, metres.")]
-        [SerializeField] private float heightAboveDesk = 0.02f;
+        [Tooltip("Height of the mat above the detected desk plane, metres. Millimetres: it only avoids z-fighting.")]
+        [SerializeField] private float matHeightAboveDesk = 0.004f;
 
         [Tooltip("Gap between the engine block's footprint and the near edge of the mat, metres.")]
-        [SerializeField] private float gapFromEngine = 0.06f;
+        [SerializeField] private float matGapFromEngine = 0.02f;
 
         [Tooltip("Clearance between the mat and the lowest point of the posed kit ghost (the head's crown).")]
         [SerializeField] private float kitClearance = 0.005f;
@@ -94,8 +96,8 @@ namespace AdaptiveAR.MR
                     ? Mathf.Abs(engine.extents.x * toUser.x) + Mathf.Abs(engine.extents.z * toUser.z)
                     : 0.3f;
 
-                Vector3 pos = new Vector3(centre.x, deskY + heightAboveDesk, centre.z)
-                              + toUser * (along + gapFromEngine + size * 0.5f);
+                Vector3 pos = new Vector3(centre.x, deskY + matHeightAboveDesk, centre.z)
+                              + toUser * (along + matGapFromEngine + matSize * 0.5f);
 
                 transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toUser, Vector3.up));
             }
@@ -224,21 +226,22 @@ namespace AdaptiveAR.MR
             kitRoot.rotation = r0;
             kitRoot.position = SurfaceCenter;
 
-            // Lift so the lowest point (the head's crown) rests just above the mat, and
-            // centre the head over the mat.
+            // Lift so the HEAD's lowest point (its crown) rests on the mat - the head is what
+            // must seat flat; everything else attaches above it - and centre it over the mat.
             float minY = float.MaxValue;
-            foreach (Transform child in kitRoot)
             {
-                var mf = child.GetComponent<MeshFilter>();
-                if (mf == null || mf.sharedMesh == null) continue;
-                Bounds mb = mf.sharedMesh.bounds;
-                Matrix4x4 m = child.localToWorldMatrix;
-                for (int i = 0; i < 8; i++)
+                var mf = headChild.GetComponent<MeshFilter>();
+                if (mf != null && mf.sharedMesh != null)
                 {
-                    Vector3 c = new Vector3((i & 1) == 0 ? mb.min.x : mb.max.x,
-                                            (i & 2) == 0 ? mb.min.y : mb.max.y,
-                                            (i & 4) == 0 ? mb.min.z : mb.max.z);
-                    minY = Mathf.Min(minY, m.MultiplyPoint3x4(c).y);
+                    Bounds mb = mf.sharedMesh.bounds;
+                    Matrix4x4 m = headChild.localToWorldMatrix;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        Vector3 c = new Vector3((i & 1) == 0 ? mb.min.x : mb.max.x,
+                                                (i & 2) == 0 ? mb.min.y : mb.max.y,
+                                                (i & 4) == 0 ? mb.min.z : mb.max.z);
+                        minY = Mathf.Min(minY, m.MultiplyPoint3x4(c).y);
+                    }
                 }
             }
             if (minY == float.MaxValue) minY = kitRoot.position.y;
@@ -248,6 +251,9 @@ namespace AdaptiveAR.MR
                                         SurfaceCenter.y + kitClearance - minY,
                                         SurfaceCenter.z - headWorld.z);
             kitRoot.position += shift;
+
+            if (logChanges)
+                Debug.Log($"[WorkSurface] kit '{kitRoot.name}' posed: head target {headChild.position}, mat centre {SurfaceCenter}, head crown {minY + shift.y:F3} vs mat {SurfaceCenter.y:F3}.");
 
             // Marked head area on the mat, sized to the head.
             float headRadius = 0.04f;
@@ -273,7 +279,7 @@ namespace AdaptiveAR.MR
             _visual.name = "WorkSurfaceVisual";
             _visual.transform.SetParent(transform, false);
             _visual.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            _visual.transform.localScale = new Vector3(size, size, 1f);
+            _visual.transform.localScale = new Vector3(matSize, matSize, 1f);
             Collider quadCol = _visual.GetComponent<Collider>();
             if (quadCol != null) Destroy(quadCol);
 
@@ -305,7 +311,7 @@ namespace AdaptiveAR.MR
 
             _collider = gameObject.GetComponent<BoxCollider>();
             if (_collider == null) _collider = gameObject.AddComponent<BoxCollider>();
-            _collider.size = new Vector3(size, slabThickness, size);
+            _collider.size = new Vector3(matSize, slabThickness, matSize);
             _collider.center = new Vector3(0f, -slabThickness * 0.5f, 0f);
 
             if (!gameObject.name.StartsWith("WorkSurface")) gameObject.name = "WorkSurface";

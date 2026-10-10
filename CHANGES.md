@@ -1932,3 +1932,143 @@ mod   Assets/1 - ArUcoMarkerTracking.unity         three lines (feedback clips)
 10. JSONL: every counted error has `error_type`; drops are `component_dropped`.
 
 Nothing in this pass has run on a headset.
+
+---
+
+## Claude → Reviewer — 2026-10-10 (b) — Corrective stability pass: disappearing rod, false wrong-component, audio gating, mat/head geometry, two pistons + auto-complete, startup panel, loose hardware
+
+Base: `5cac401`. No scene edit by me (the scene diff is Unity's re-serialisation of
+renamed/new fields). Side-panel offsets, materials, placement architecture untouched.
+No Editor command.
+
+### 1. Disappearing rod / assembly — root cause (traced, not patched over)
+
+Two mechanisms combined, both on the success path of a part that snaps **while held**:
+
+1. `StepValidator.Succeed` → snap → `PlacementLock.Lock` (kinematic, SDK components
+   disabled) → `SetParent(head)`. The SDK's `RigidbodyKinematicLocker.UnlockKinematic`
+   then runs when the interactor lets go — **after the lock** — and restores the
+   Rigidbody's *pre-grab* state: dynamic, with a throw velocity. The old lock only
+   re-asserted for 6 frames; anything later left the part dynamic.
+2. `DropIntoTray.FixedUpdate` then saw a dynamic body and ran its "lost part" test:
+   `parent.TransformPoint(authoredLocalPosition)`. The authored pose is tray-local
+   under `piston00N`; evaluated under the **new parent (the head, scale ≈ 0.29 m per
+   unit)** it is a point metres away → "wayOff" → `RecoverToAuthoredPose` set
+   `localPosition = (−26.6, 54.6, −28)` in the head's frame → the rod teleported ~20 m
+   away. When the head itself went dynamic for a frame (install while held), the same
+   recovery (or the throw) moved the whole assembly: "entire piston disappears".
+
+Fixes: `PlacementLock` now **enforces continuously** while locked (LateUpdate and
+FixedUpdate: re-freeze if the body became dynamic, restore the local pose if it
+moved, adopt a legitimate re-parent), logging each correction; `DropIntoTray` never
+recovers a part whose parent changed or that carries a locked `PlacementLock`.
+`PartWatch` logs name/instance id/activeSelf/activeInHierarchy/renderer/parent/pose/
+kinematic at: before snap, after lock, after join, lock/unlock, any recovery. A ghost
+key resolving to a grabbable (real) part is refused with an error instead of toggled.
+**[QV]** — the mechanism is traced and closed; it has not run on the headset.
+
+### 2. False "not the required component" — root cause
+
+The validator watched every registry part key not in the accepted set. The **same
+GameObject is reachable under several keys**: `part.PistonKit001` (the kit *handle*)
+resolves by convention to `piston001/PistonHead` — the very head accepted under
+`part.PistonKit001.PistonHead`; with interchangeable roles the heads of kits 2–4 are
+accepted under their role keys while `part.PistonKit002…` aliases also resolve to
+them. Grabbing an eligible head therefore also tripped the "other part" monitor.
+Now: handle keys are never watched, watched objects are deduplicated, anything that
+is an accepted instance is excluded by object, and kit roots (no collider) are
+skipped. Every grab logs `[Eligibility] grabbed … key= requested= candidates=[…]
+boundKitInstance= eligible=true/false`.
+
+### 3. Audio gating — state machine
+
+- Instruction enters → its serialized `audioCue` once (repeat guard 1 s).
+- Wrong component → one spoken warning per **grab episode** (validator raises on the
+  grab transition only) + 1.5 s cooldown in `InstructionSpeech` on top.
+- Failed attempt → **no speech**; one `Invalid` tone on the attempt transition
+  (`FailAttempt` fires once per zone entry / in-zone release), then
+  `PlayCue` suppresses the same kind for 1.2 s and any cue for 0.5 s.
+- Near but not valid → amber visual only.
+- Success → `Success` chime + haptic + green pulse; **no spoken "Correct."**
+  (`successClip`/`invalidAttemptClip` stay referenced but unused.)
+Nothing can fire per frame: attempts are discrete, cues are cooled down.
+
+### 4. Mat and head target geometry
+
+Mat: `matHeightAboveDesk` **4 mm** above the placement plane (the fields were renamed so
+your scene object's old `heightAboveDesk: 0.1` no longer wins), `matGapFromEngine`
+2 cm from the block footprint toward you, 28 cm square. Kit ghost: head crown-down,
+lifted so the **head's own** lowest point is 5 mm above the mat (previously the lift
+used the whole kit, which left the head floating), rod target above, pin across the
+view, ring under the head. The same spot is re-posed for every piston stage; the log
+prints each kit's head target and crown height vs mat. Station offset back to
+**0.01 m**; the main panel gets `extraMainPanelLift` 3.5 cm instead.
+
+### 5. Two pistons, then auto-complete
+Stages: piston 1 (scaffolded) → piston 2 (L1 "Repeat the piston assembly procedure
+for the second piston."; L2 arrow; L3 ghost) → **Remaining pistons**: one
+acknowledgement whose button reads **Complete Remaining Pistons →**
+(`AssemblyAction.autoCompleteRemaining`). `PistonAutoCompleter` fits the two unused
+real kits into their bores (locked, consumed, joined) and shows the four spare bore
+ghost groups solid with the real parts' materials — six bores — then logs
+`remaining_pistons_auto_completed count=6`. No attempts, errors or times for them.
+Stage 5 has nothing performable and is skipped and hidden from the overview.
+
+### 6. Startup panel
+`PanelRig` parked from `Camera.main` on the first frame, when the head is still at
+the origin — the floor. Now it parks only once `head.position.y > 0.4 m`, re-parks
+for 0.75 s while tracking settles, then world-locks: 0.75 m ahead, 8 cm below eye
+level, facing you. Never derived from the anchor or the serialized position.
+
+### 7. Loose hardware
+`DropIntoTray.ReleaseLoose()` runs for every selectable part at placement: dynamic
+again, recovery counter reset, so everything settles into the trays (kit roots with
+no collider and locked parts are left alone). READ dimming excludes pins, bolts and
+nuts entirely and no longer disables any interaction. Instructions now agree with
+behaviour: "Locate the crankshaft in the parts tray and pick it up" — picking it up
+completes the instruction (`OnAcknowledgedByGrab`, logged as
+`instruction_acknowledged_by_pickup`), Continue still works.
+
+### Also
+Nuts loosened to 2.8 cm / 32° (rev 3; others unchanged). Red pulse for a far-off
+failed attempt, amber for close. Crank/cam preview 14 cm, embedded at the panel
+plane; others 10 cm, 2 cm in front. Overview rows: ✓/●/○ workspace, crankshaft,
+piston 1, piston 2, remaining pistons, camshaft (transform untouched).
+
+### Files
+```
+new   Assets/Scripts/Steps/PistonAutoCompleter.cs
+mod   Assets/Scripts/Steps/PlacementLock.cs           continuous enforcement + PartWatch
+mod   Assets/Scripts/DropIntoTray.cs                  joined/locked guard, ReleaseLoose
+mod   Assets/Scripts/Steps/StepValidator.cs           others dedupe, eligibility log, pick-up ack, rev 3, far flag
+mod   Assets/Scripts/Steps/AttentionFader.cs          no interaction disable, small hardware excluded
+mod   Assets/Scripts/Steps/AssemblySessionController.cs  feedback hierarchy, ack-by-grab, auto-complete
+mod   Assets/Scripts/Steps/AssemblyAction.cs          autoCompleteRemaining
+mod   Assets/Scripts/Steps/StepManager.cs             release loose parts at placement
+mod   Assets/Scripts/Steps/StepPresenter.cs           refuse real parts as ghosts
+mod   Assets/Scripts/Audio/SpeechLibrary.cs           PlayCue cooldowns, gated feedback
+mod   Assets/Scripts/UI/PanelRig.cs                   valid-head park, extra lift
+mod   Assets/Scripts/UI/TaskListHud.cs                progress rows
+mod   Assets/Scripts/UI/ParticipantCard.cs            shortcut label, preview role
+mod   Assets/Scripts/UI/ComponentPreview.cs           per-role size/depth
+mod   Assets/Scripts/MR/AssemblyWorkSurface.cs        mat on desk plane, head-only lift
+mod   Assets/Scripts/MR/WorkspacePlacement.cs         0.01 m
+mod   Assets/Scripts/Logging/SessionLogger.cs         remaining_pistons_auto_completed
+mod   Assets/ScriptableObjects/Steps/Step_01..06      locate wording, stage 4 shortcut, stage 5 off
+mod   Assets/Resources/AdaptiveAR/Speech/             5 new clips, 4 removed (19)
+```
+
+### [QV]
+1. Rod snaps into the head and **stays**; logcat shows `[PartWatch] Succeed(after join)` with
+   activeInHierarchy=true and at most a handful of `[PlacementLock] corrected` lines.
+2. Holding the right head/rod/pin/bolt/nut never says "not the required component";
+   `[Eligibility] … eligible=true` on those grabs.
+3. One tone per failed attempt, no "Not quite" speech; chime on success.
+4. Mat flat on the desk right in front of the oil pan; head sits in the ring; rod from
+   above; pin from the side; piston 2 uses the same spot.
+5. After piston 2: the button fits six pistons; log line with count 6.
+6. Startup panel right in front of you, not on the floor.
+7. Pins/bolts/nuts in the trays at start, authored colours, grabbable during instructions.
+8. Picking up the crankshaft on the first screen advances the instruction.
+
+Nothing in this pass has run on a headset.

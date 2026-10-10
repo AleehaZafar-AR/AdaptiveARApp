@@ -1,14 +1,14 @@
 // File: AttentionFader.cs
 // Presentation-only focus control for the READ state.
 //
-// While an instruction is being read the loose parts are darkened hard (property
-// block, no material edited) and cannot be grabbed: their Interaction SDK components
-// are disabled AND their interaction child objects (ISDK_*) are switched off, so no
-// hand-grab or ray-grab path remains. Locked parts are never touched. Everything is
-// restored exactly on leaving the state.
+// While an instruction is being read the larger loose parts are dimmed (property
+// block; no material is edited) so attention goes to the panel and the component
+// preview. Nothing is made un-grabbable: the instruction may say "pick it up", and
+// picking it up is accepted. Small loose hardware - pins, bolts, nuts - is never
+// dimmed: its authored colour is how a participant tells a bolt from a nut.
 //
 // Nothing here is research state: no identity, registry, validation, physics or
-// progress change; nothing is logged except by the caller.
+// progress change.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -17,12 +17,12 @@ namespace AdaptiveAR.Steps
 {
     public class AttentionFader : MonoBehaviour
     {
-        [Tooltip("Multiplier applied to each part's colour while reading. 1 = untouched.")]
-        [Range(0.05f, 1f)]
-        [SerializeField] private float readDim = 0.28f;
+        [Tooltip("Multiplier applied to a dimmed part's colour while reading. 1 = untouched.")]
+        [Range(0.1f, 1f)]
+        [SerializeField] private float readDim = 0.45f;
 
-        [Tooltip("Suspend grabbing of the loose parts while reading.")]
-        [SerializeField] private bool suspendGrabWhileReading = true;
+        [Tooltip("Roles never dimmed: small loose hardware the participant must be able to identify.")]
+        [SerializeField] private string[] neverDimRoles = { "ConnectingPin", "pistonBolt", "pistonBoltOther", "PistonNut", "PistonNutOther" };
 
         [SerializeField] private bool logChanges = true;
 
@@ -31,11 +31,8 @@ namespace AdaptiveAR.Steps
         private GuidanceRegistry _registry;
         private readonly List<Renderer> _dimmed = new List<Renderer>();
         private readonly List<MaterialPropertyBlock> _dimmedOriginal = new List<MaterialPropertyBlock>();
-        private readonly List<MonoBehaviour> _suspended = new List<MonoBehaviour>();
-        private readonly List<GameObject> _suspendedObjects = new List<GameObject>();
         private static readonly int ColorId = Shader.PropertyToID("_Color");
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-        private static readonly int EmissionId = Shader.PropertyToID("_EmissionColor");
 
         public void Configure(GuidanceRegistry registry)
         {
@@ -51,79 +48,61 @@ namespace AdaptiveAR.Steps
             else Restore();
         }
 
+        private bool IsSmallHardware(string key)
+        {
+            string role = StepValidator.RoleNameOf(key);
+            if (role == null || neverDimRoles == null) return false;
+            foreach (string r in neverDimRoles) if (r == role) return true;
+            return false;
+        }
+
         private void Apply()
         {
             Restore();
-            if (_registry == null)
-            {
-                Debug.LogWarning("[Attention] READ requested but no registry is configured; nothing faded.");
-                return;
-            }
+            if (_registry == null) return;
 
-            int parts = 0;
+            int parts = 0, skipped = 0;
+            var seen = new HashSet<GameObject>();
             foreach (string key in _registry.PartKeys())
             {
+                if (GuidanceRegistry.IsKitHandleKey(key)) continue;            // alias of a head
                 if (!_registry.TryResolveQuiet(key, out GameObject go) || go == null) continue;
+                if (!seen.Add(go)) continue;
+                if (IsSmallHardware(key)) { skipped++; continue; }
 
                 var padlock = go.GetComponent<PlacementLock>();
-                bool locked = padlock != null && padlock.IsLocked;
+                if (padlock != null && padlock.IsLocked) continue;             // installed: leave it
                 parts++;
 
-                foreach (Renderer r in go.GetComponentsInChildren<Renderer>(false))
+                // Only this part's own renderer: a joined child keeps its own rule.
+                var r = go.GetComponent<Renderer>();
+                if (r == null || r.sharedMaterial == null) continue;
+
+                var original = new MaterialPropertyBlock();
+                r.GetPropertyBlock(original);
+                var block = new MaterialPropertyBlock();
+                r.GetPropertyBlock(block);
+
+                Material m = r.sharedMaterial;
+                if (m.HasProperty(ColorId))
                 {
-                    if (r == null || r.sharedMaterial == null) continue;
-
-                    var original = new MaterialPropertyBlock();
-                    r.GetPropertyBlock(original);
-
-                    var block = new MaterialPropertyBlock();
-                    r.GetPropertyBlock(block);
-                    Material m = r.sharedMaterial;
-                    bool any = false;
-                    if (m.HasProperty(ColorId))
-                    {
-                        Color c = m.GetColor(ColorId);
-                        block.SetColor(ColorId, new Color(c.r * readDim, c.g * readDim, c.b * readDim, c.a));
-                        any = true;
-                    }
-                    else if (m.HasProperty(BaseColorId))
-                    {
-                        Color c = m.GetColor(BaseColorId);
-                        block.SetColor(BaseColorId, new Color(c.r * readDim, c.g * readDim, c.b * readDim, c.a));
-                        any = true;
-                    }
-                    if (m.HasProperty(EmissionId)) { block.SetColor(EmissionId, Color.black); any = true; }
-                    if (!any) continue;
-
-                    r.SetPropertyBlock(block);
-                    _dimmed.Add(r);
-                    _dimmedOriginal.Add(original);
+                    Color c = m.GetColor(ColorId);
+                    block.SetColor(ColorId, new Color(c.r * readDim, c.g * readDim, c.b * readDim, c.a));
                 }
-
-                if (!suspendGrabWhileReading || locked) continue;
-
-                foreach (MonoBehaviour mb in go.GetComponentsInChildren<MonoBehaviour>(true))
+                else if (m.HasProperty(BaseColorId))
                 {
-                    if (mb == null || !mb.enabled) continue;
-                    string ns = mb.GetType().Namespace;
-                    if (string.IsNullOrEmpty(ns) || !ns.StartsWith("Oculus.Interaction")) continue;
-                    mb.enabled = false;
-                    _suspended.Add(mb);
+                    Color c = m.GetColor(BaseColorId);
+                    block.SetColor(BaseColorId, new Color(c.r * readDim, c.g * readDim, c.b * readDim, c.a));
                 }
+                else continue;
 
-                // The interaction child objects as well, so no interactor can find the part.
-                foreach (Transform child in go.transform)
-                {
-                    if (child == null || !child.gameObject.activeSelf) continue;
-                    if (!child.name.StartsWith("ISDK_")) continue;
-                    child.gameObject.SetActive(false);
-                    _suspendedObjects.Add(child.gameObject);
-                }
+                r.SetPropertyBlock(block);
+                _dimmed.Add(r);
+                _dimmedOriginal.Add(original);
             }
 
             if (logChanges)
-                Debug.Log($"[Attention] READ: {parts} part(s), {_dimmed.Count} renderer(s) dimmed to {readDim:F2}, " +
-                          $"{_suspended.Count} interaction component(s) and {_suspendedObjects.Count} ISDK object(s) suspended.");
+                Debug.Log($"[Attention] READ: {_dimmed.Count} part(s) dimmed to {readDim:F2}, {skipped} small hardware part(s) left as authored, grabbing untouched.");
         }
 
         private void Restore()
@@ -134,26 +113,8 @@ namespace AdaptiveAR.Steps
             _dimmed.Clear();
             _dimmedOriginal.Clear();
 
-            foreach (MonoBehaviour mb in _suspended)
-            {
-                if (mb == null) continue;
-                var padlock = mb.GetComponentInParent<PlacementLock>();
-                if (padlock != null && padlock.IsLocked) continue;   // locked meanwhile: stays locked
-                mb.enabled = true;
-            }
-            _suspended.Clear();
-
-            foreach (GameObject go in _suspendedObjects)
-            {
-                if (go == null) continue;
-                var padlock = go.GetComponentInParent<PlacementLock>();
-                if (padlock != null && padlock.IsLocked) continue;
-                go.SetActive(true);
-            }
-            _suspendedObjects.Clear();
-
             if (logChanges && n > 0)
-                Debug.Log("[Attention] INTERACT: parts restored, interaction re-enabled.");
+                Debug.Log("[Attention] INTERACT: part colours restored.");
         }
 
         private void OnDisable()

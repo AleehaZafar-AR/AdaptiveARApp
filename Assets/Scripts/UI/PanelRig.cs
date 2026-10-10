@@ -34,6 +34,9 @@ namespace AdaptiveAR.UI
         [Tooltip("How far beyond the engine, away from the viewer, the main panel's centre sits.")]
         [SerializeField] private float depthBeyondMarker = 0.14f;
 
+        [Tooltip("Added to the main panel's height after placement (the station itself is not lifted).")]
+        [SerializeField] private float extraMainPanelLift = 0.035f;
+
         [Header("Main panel")]
         [Tooltip("The main panel. Centred on the viewing axis after placement; parked in front " +
                  "of the head before it. Found as the first child Canvas when empty.")]
@@ -130,11 +133,24 @@ namespace AdaptiveAR.UI
             }
         }
 
+        private bool _parked;
+        private float _parkedAt;
+
+        /// <summary>Tracking is live once the head is clearly above the floor (floor-level origin).</summary>
+        private bool HeadPoseValid()
+        {
+            return head != null && head.position.y > 0.4f && head.position.sqrMagnitude > 1e-4f;
+        }
+
         private void EnterPrePlacement()
         {
             IsPrePlacement = true;
             Detach(freezeMarker: false);
-            ParkInFrontOfHead();
+            _parked = false;
+
+            // Never park from a dead head pose: on the first frames the camera sits at the
+            // origin, which is the floor. Park as soon as tracking reports a real pose.
+            if (HeadPoseValid()) { ParkInFrontOfHead(); _parked = true; _parkedAt = Time.time; }
         }
 
         /// <summary>Offset of the main panel inside the rig (the rig has unit scale).</summary>
@@ -177,6 +193,14 @@ namespace AdaptiveAR.UI
 
             if (IsPrePlacement)
             {
+                // Park once tracking is live, and re-park briefly while it settles; then stay.
+                if (!_parked)
+                {
+                    if (HeadPoseValid()) { ParkInFrontOfHead(); _parked = true; _parkedAt = Time.time; }
+                    return;
+                }
+                if (Time.time - _parkedAt < 0.75f) ParkInFrontOfHead();
+
                 if (stepManager != null && stepManager.AnchorLocked)
                 {
                     IsPrePlacement = false;
@@ -381,7 +405,7 @@ namespace AdaptiveAR.UI
                 }
             }
 
-            Vector3 panelCentre = reference + Vector3.up * heightAboveMarker + away * depthBeyondMarker;
+            Vector3 panelCentre = reference + Vector3.up * (heightAboveMarker + extraMainPanelLift) + away * depthBeyondMarker;
 
             // Face back along the viewing axis. Canvas forward points away from its readable
             // side, so the rotation looks along "away".

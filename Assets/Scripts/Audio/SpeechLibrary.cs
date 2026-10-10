@@ -280,6 +280,52 @@ namespace AdaptiveAR.Audio
             Debug.Log($"[Speech] tone {kind} played on feedback source.");
         }
 
+        // ---------------- gating: no cue can ever fire frame by frame ----------------
+
+        private readonly Dictionary<ProceduralTones.Kind, float> _lastCueAt = new Dictionary<ProceduralTones.Kind, float>();
+        private float _lastAnyCueAt = -999f;
+        private float _lastGatedFeedbackAt = -999f;
+        private string _lastGatedFeedback;
+
+        [Tooltip("Shortest interval between any two feedback cues, seconds.")]
+        [SerializeField] private float cueMinInterval = 0.5f;
+
+        [Tooltip("Shortest interval between two cues of the same kind, seconds.")]
+        [SerializeField] private float sameCueMinInterval = 1.2f;
+
+        /// <summary>Plays a tone unless the same kind played within sameCueMinInterval or any cue within cueMinInterval.</summary>
+        public void PlayCue(ProceduralTones.Kind kind)
+        {
+            float now = Time.time;
+            if (now - _lastAnyCueAt < cueMinInterval) { Debug.Log($"[Speech] cue {kind} suppressed (global cooldown)."); return; }
+            if (_lastCueAt.TryGetValue(kind, out float last) && now - last < sameCueMinInterval) { Debug.Log($"[Speech] cue {kind} suppressed (same-kind cooldown)."); return; }
+            _lastCueAt[kind] = now;
+            _lastAnyCueAt = now;
+            PlayTone(kind);
+        }
+
+        /// <summary>Serialized feedback clip with a cooldown; returns false if suppressed or no clip.</summary>
+        public bool PlayFeedbackClipGated(AudioClip clip, string label, float cooldownSeconds)
+        {
+            if (clip == null) return false;
+            if (Time.time - _lastGatedFeedbackAt < cooldownSeconds && _lastGatedFeedback == label)
+            {
+                Debug.Log($"[Speech] feedback '{label}' suppressed (cooldown).");
+                return true;   // handled: do not fall through to another cue
+            }
+            _lastGatedFeedbackAt = Time.time;
+            _lastGatedFeedback = label;
+            return PlayFeedbackClip(clip, label);
+        }
+
+        public bool SpeakFeedbackGated(string text, float cooldownSeconds)
+        {
+            if (Time.time - _lastGatedFeedbackAt < cooldownSeconds && _lastGatedFeedback == text) return true;
+            _lastGatedFeedbackAt = Time.time;
+            _lastGatedFeedback = text;
+            return SpeakFeedback(text);
+        }
+
         /// <summary>Speaks a short feedback phrase on its own source; never cut by an instruction.</summary>
         public bool SpeakFeedback(string text)
         {

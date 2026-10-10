@@ -64,6 +64,9 @@ namespace AdaptiveAR.Logging
 
             // --- the correct part was released away from its target: interaction, not error ---
             public const string ComponentDropped = "component_dropped";
+
+            // --- prototype shortcut: the remaining pistons were fitted automatically ---
+            public const string RemainingPistonsAutoCompleted = "remaining_pistons_auto_completed";
         }
 
         [Header("Participant")]
@@ -398,6 +401,14 @@ namespace AdaptiveAR.Logging
             w.Str("part_key", partKey);
             w.Str("requested_key", requestedKey);
             w.Str("error_type", "wrong_component");
+            Write(w);
+        }
+
+        /// <summary>Workflow shortcut, not participant performance: no attempts, errors or times for these.</summary>
+        public void LogRemainingPistonsAutoCompleted(int count)
+        {
+            var w = NewLine(Events.RemainingPistonsAutoCompleted);
+            w.Num("count", count);
             Write(w);
         }
 

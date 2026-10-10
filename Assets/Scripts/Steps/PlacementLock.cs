@@ -2,19 +2,20 @@
 // Locks a component once it has been correctly placed.
 //
 // One reusable mechanism rather than a special case per part. Anything that gets
-// placed - crankshaft, piston, camshaft, and later a cap or a bolt - is locked the
-// same way, so a participant working on step 5 cannot pull the crankshaft back out
-// of the block.
+// placed - crankshaft, piston, camshaft, cap, bolt - is locked the same way, so a
+// participant working on step 5 cannot pull the crankshaft back out of the block.
 //
-// Locking while held
-// ------------------
-// A part can now lock the moment it is aligned, while still in the hand. Disabling
-// its Interaction SDK components makes the interactor let go, and the SDK then
-// restores the Rigidbody's pre-grab state (dynamic) and applies a throw velocity -
-// AFTER this lock ran. So the lock re-asserts the pose and the kinematic state for a
-// few frames; by then the SDK has finished and the part stays exactly where it snapped.
+// Why the lock must be enforced continuously
+// -------------------------------------------
+// A part can lock the moment it is aligned, while still in the hand. Disabling its
+// Interaction SDK components makes the interactor let go, and the SDK's
+// RigidbodyKinematicLocker then restores the Rigidbody's PRE-GRAB state (dynamic)
+// and applies a throw velocity - after this lock ran, possibly several frames later.
+// A part that silently became dynamic was what made rods vanish (see DropIntoTray).
+// So while locked, this component re-asserts "kinematic, zero velocity, locked pose"
+// every frame (LateUpdate, before physics) and after every physics step, and logs
+// any correction it had to make. It never disables the GameObject or a renderer.
 
-using System.Collections;
 using UnityEngine;
 
 namespace AdaptiveAR.Steps
@@ -31,27 +32,21 @@ namespace AdaptiveAR.Steps
         [Tooltip("Make the Rigidbody kinematic so physics cannot nudge it out of place.")]
         [SerializeField] private bool freezePhysics = true;
 
-        [Tooltip("Turn colliders into triggers so a hand passing through does not shove it. " +
-                 "Off keeps them solid, which is better if parts must rest on each other.")]
+        [Tooltip("Turn colliders into triggers so a hand passing through does not shove it.")]
         [SerializeField] private bool collidersToTriggers = false;
 
-        [Tooltip("Frames over which the locked pose is re-asserted after locking, so a grab " +
-                 "that is released by the lock cannot move or unfreeze the part.")]
-        [SerializeField] private int reassertFrames = 6;
+        [Tooltip("Log every correction the lock has to make (diagnostic).")]
+        [SerializeField] private bool logCorrections = true;
 
         public bool IsLocked { get { return isLocked; } }
 
         private Rigidbody _body;
         private MonoBehaviour[] _interactionComponents;
-        private Vector3 _lockedPosition;
-        private Quaternion _lockedRotation;
+        private Vector3 _lockedLocalPosition;
+        private Quaternion _lockedLocalRotation;
         private Transform _lockedParent;
-        private Coroutine _reassert;
+        private int _corrections;
 
-        /// <summary>
-        /// Snaps to the authoritative pose and prevents further manipulation.
-        /// Parenting is untouched, so the part keeps moving with the assembly.
-        /// </summary>
         public void LockAt(Transform target)
         {
             if (target != null)
@@ -64,10 +59,9 @@ namespace AdaptiveAR.Steps
         {
             if (isLocked) return;
             isLocked = true;
+            _corrections = 0;
 
-            _lockedPosition = transform.position;
-            _lockedRotation = transform.rotation;
-            _lockedParent = transform.parent;
+            RefreshLockedPose();
 
             _body = GetComponent<Rigidbody>();
             FreezeBody();
@@ -81,17 +75,13 @@ namespace AdaptiveAR.Steps
             if (disableInteraction)
                 SetInteractionEnabled(false);
 
-            if (_reassert != null) StopCoroutine(_reassert);
-            if (isActiveAndEnabled) _reassert = StartCoroutine(Reassert());
+            PartWatch.Log("PlacementLock.Lock", transform);
         }
 
-        /// <summary>Researcher control: lets a locked part be moved again.</summary>
         public void Unlock()
         {
             if (!isLocked) return;
             isLocked = false;
-
-            if (_reassert != null) { StopCoroutine(_reassert); _reassert = null; }
 
             if (collidersToTriggers)
             {
@@ -100,49 +90,75 @@ namespace AdaptiveAR.Steps
             }
 
             SetInteractionEnabled(true);
+            PartWatch.Log("PlacementLock.Unlock", transform);
         }
 
-        /// <summary>Updates the pose the lock holds, e.g. after the part was joined to a moving assembly.</summary>
+        /// <summary>Re-reads the pose the lock holds, in LOCAL space of the current parent.</summary>
         public void RefreshLockedPose()
         {
-            _lockedPosition = transform.position;
-            _lockedRotation = transform.rotation;
             _lockedParent = transform.parent;
+            _lockedLocalPosition = transform.localPosition;
+            _lockedLocalRotation = transform.localRotation;
         }
 
         private void FreezeBody()
         {
             if (!freezePhysics || _body == null) return;
+            if (!_body.isKinematic) _body.isKinematic = true;
             _body.linearVelocity = Vector3.zero;
             _body.angularVelocity = Vector3.zero;
-            _body.isKinematic = true;
         }
 
-        private IEnumerator Reassert()
+        private void LateUpdate()
         {
-            for (int i = 0; i < reassertFrames; i++)
-            {
-                yield return null;
-                if (!isLocked) yield break;
+            if (isLocked) Enforce("LateUpdate");
+        }
 
-                // The pose is held in world space unless the part was re-parented to a
-                // moving assembly meanwhile; then its local pose is what matters.
-                if (transform.parent == _lockedParent)
-                    transform.SetPositionAndRotation(_lockedPosition, _lockedRotation);
-
-                FreezeBody();
-                if (disableInteraction) SetInteractionEnabled(false);
-            }
-            _reassert = null;
+        private void FixedUpdate()
+        {
+            if (isLocked) Enforce("FixedUpdate");
         }
 
         /// <summary>
-        /// Enables or disables the Interaction SDK components on this part.
-        ///
-        /// They are found by namespace rather than by concrete type: referencing the ISDK
-        /// types directly would tie this script to a specific SDK version, and the grab
-        /// components differ between the crankshaft and the pistons anyway.
+        /// Holds the locked pose in the parent's local space, so a part joined to a moving
+        /// assembly rides with it, and keeps the body kinematic whatever the SDK restored.
         /// </summary>
+        private void Enforce(string phase)
+        {
+            if (_body == null) _body = GetComponent<Rigidbody>();
+
+            bool fixedBody = false;
+            if (freezePhysics && _body != null && !_body.isKinematic)
+            {
+                FreezeBody();
+                fixedBody = true;
+            }
+
+            // A re-parent done by the assembly join is legitimate: adopt it.
+            if (transform.parent != _lockedParent)
+            {
+                RefreshLockedPose();
+                return;
+            }
+
+            bool moved = (transform.localPosition - _lockedLocalPosition).sqrMagnitude > 1e-10f
+                         || Quaternion.Angle(transform.localRotation, _lockedLocalRotation) > 0.01f;
+            if (moved)
+            {
+                transform.localPosition = _lockedLocalPosition;
+                transform.localRotation = _lockedLocalRotation;
+            }
+
+            if ((fixedBody || moved) && logCorrections && _corrections < 20)
+            {
+                _corrections++;
+                Debug.Log($"[PlacementLock] '{name}' corrected in {phase}: {(fixedBody ? "body had become dynamic; " : "")}" +
+                          $"{(moved ? "pose had moved; " : "")}restored. (#{_corrections})");
+            }
+
+            if (disableInteraction && (fixedBody || moved)) SetInteractionEnabled(false);
+        }
+
         private void SetInteractionEnabled(bool enabled)
         {
             if (_interactionComponents == null)
@@ -152,7 +168,6 @@ namespace AdaptiveAR.Steps
                 foreach (MonoBehaviour mb in GetComponentsInChildren<MonoBehaviour>(true))
                 {
                     if (mb == null || mb == this) continue;
-
                     string ns = mb.GetType().Namespace;
                     if (!string.IsNullOrEmpty(ns) && ns.StartsWith("Oculus.Interaction"))
                         found.Add(mb);
@@ -163,6 +178,26 @@ namespace AdaptiveAR.Steps
 
             foreach (MonoBehaviour mb in _interactionComponents)
                 if (mb != null && mb.enabled != enabled) mb.enabled = enabled;
+        }
+    }
+
+    /// <summary>
+    /// Diagnostic snapshot of a real part's visibility and hierarchy, written at every
+    /// mutation point on the success path. Remove or silence once the Quest run is clean.
+    /// </summary>
+    public static class PartWatch
+    {
+        public static bool Enabled = true;
+
+        public static void Log(string where, Transform t)
+        {
+            if (!Enabled || t == null) return;
+            var r = t.GetComponentInChildren<Renderer>(true);
+            var rb = t.GetComponent<Rigidbody>();
+            Debug.Log($"[PartWatch] {where}: '{t.name}'#{t.GetInstanceID()} activeSelf={t.gameObject.activeSelf} " +
+                      $"activeInHierarchy={t.gameObject.activeInHierarchy} renderer={(r != null ? r.enabled.ToString() : "none")} " +
+                      $"parent={(t.parent != null ? t.parent.name : "<root>")} pos={t.position} rot={t.rotation.eulerAngles} " +
+                      $"kinematic={(rb != null ? rb.isKinematic.ToString() : "n/a")}");
         }
     }
 }

@@ -31,7 +31,7 @@ MonoBehaviour:
   actions:
   - actionId: step_01_crankshaft.locate
     kind: 0
-    instruction: Find the crankshaft in the parts tray.
+    instruction: Locate the crankshaft in the parts tray and pick it up.
     detail: Take the crankshaft from the tray.
     partKey: part.crankshaft
     interchangeablePartKeys: []
@@ -41,7 +41,7 @@ MonoBehaviour:
     settleSeconds: 0.45
     ghostKeys: []
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: 1e99e6cf6882b040668fb5b870f3d9d1, type: 3}
+    audioCue: {fileID: 8300000, guid: 3dad38d8203277861362689c8e2b1fa5, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_01_crankshaft.place

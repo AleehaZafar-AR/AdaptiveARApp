@@ -35,9 +35,9 @@ MonoBehaviour:
   actions:
   - actionId: step_02_piston001.locate
     kind: 0
-    instruction: Find the piston components in the parts tray.
+    instruction: Find the piston components in the tray and pick up a piston head.
     detail: You will build the piston on the assembly mat, then install it.
-    partKey: 
+    partKey: part.PistonKit001.PistonHead
     interchangeablePartKeys: []
     targetKey: 
     positionToleranceMeters: 0.03
@@ -45,7 +45,7 @@ MonoBehaviour:
     settleSeconds: 0.4
     ghostKeys: []
     showArrow: 0
-    audioCue: {fileID: 8300000, guid: c355187d5079dc26ce7c92d9b0bb5cbc, type: 3}
+    audioCue: {fileID: 8300000, guid: 9f126e4e0f833e58068f9df782522345, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_02_piston001.PistonHead

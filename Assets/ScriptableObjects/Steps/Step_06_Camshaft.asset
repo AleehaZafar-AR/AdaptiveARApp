@@ -31,7 +31,7 @@ MonoBehaviour:
   actions:
   - actionId: step_06_camshaft.locate
     kind: 0
-    instruction: Find the camshaft in the parts tray.
+    instruction: Locate the camshaft in the parts tray and pick it up.
     detail: Take the camshaft from the tray.
     partKey: part.camshaft
     interchangeablePartKeys: []
@@ -41,7 +41,7 @@ MonoBehaviour:
     settleSeconds: 0.45
     ghostKeys: []
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: cd0557643be02810b7f439f3e6dc6a2c, type: 3}
+    audioCue: {fileID: 8300000, guid: 5028de6486862fb6eb13c7b42dc867ac, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_06_camshaft.place

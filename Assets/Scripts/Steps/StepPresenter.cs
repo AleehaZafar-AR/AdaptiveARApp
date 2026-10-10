@@ -520,6 +520,14 @@ namespace AdaptiveAR.Steps
                 if (!guidanceRegistry.TryResolve(key, out GameObject target))
                     continue;
 
+                // Safety: a ghost key that resolves to a grabbable (real) part is a data error.
+                // Hiding it later would make the real part vanish; refuse instead.
+                if (target.GetComponent<Oculus.Interaction.PointableElement>() != null)
+                {
+                    Debug.LogError($"[StepPresenter] Ghost key '{key}' resolves to the REAL part '{target.name}'. Not toggled.");
+                    continue;
+                }
+
                 if (makeGhostsInert) MakeInert(target);
 
                 // A child ghost (ghost.piston001.PistonEnd) lives inside an inactive group:

@@ -78,8 +78,11 @@ namespace AdaptiveAR.Steps
         [SerializeField] private AudioClip wrongPartClip;
         [SerializeField] private AudioClip invalidAttemptClip;
 
-        [Tooltip("Brief colour pulse on the part: green on success, amber on a failed attempt.")]
+        [Tooltip("Brief colour pulse on the part: green on success, amber/red on a failed attempt.")]
         [SerializeField] private bool spatialPulses = true;
+
+        [Tooltip("Resolves parts for the auto-complete shortcut. Found on this object when empty.")]
+        [SerializeField] private GuidanceRegistry registry;
 
         [Header("Debug")]
         [SerializeField] private bool logToConsole = true;
@@ -147,12 +150,14 @@ namespace AdaptiveAR.Steps
                 validator.OnWrongPartGrabbed += HandleWrongPartGrabbed;
                 validator.OnWrongPartReleased += HandleWrongPartReleased;
                 validator.OnComponentDropped += HandleComponentDropped;
+                validator.OnAcknowledgedByGrab += HandleAcknowledgedByGrab;
             }
 
             if (toolInteraction != null)
                 toolInteraction.OnToolActionCompleted += HandleToolActionCompleted;
 
             if (presenter == null) presenter = GetComponent<StepPresenter>();
+            if (registry == null) registry = GetComponent<GuidanceRegistry>();
             if (stepManager == null) stepManager = GetComponent<StepManager>();
 
             if (stepManager != null && stepManager.Placement != null && !_placementSubscribed)
@@ -182,6 +187,7 @@ namespace AdaptiveAR.Steps
                 validator.OnWrongPartGrabbed -= HandleWrongPartGrabbed;
                 validator.OnWrongPartReleased -= HandleWrongPartReleased;
                 validator.OnComponentDropped -= HandleComponentDropped;
+                validator.OnAcknowledgedByGrab -= HandleAcknowledgedByGrab;
             }
 
             if (toolInteraction != null)
@@ -215,7 +221,11 @@ namespace AdaptiveAR.Steps
             if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
             if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.5f);
 
-            Feedback(wrongPartClip, wrongPartPhrase, ProceduralTones.Kind.Wrong, "wrong component");
+            // One spoken warning per distinct wrong-grab episode (the validator raises this on
+            // the grab transition only; the speech layer adds a cooldown on top).
+            var speech = InstructionSpeech.Ensure(null);
+            if (speech != null && !speech.PlayFeedbackClipGated(wrongPartClip, "wrong component", 1.5f))
+                speech.SpeakFeedbackGated(wrongPartPhrase, 1.5f);
         }
 
         /// <summary>
@@ -241,6 +251,25 @@ namespace AdaptiveAR.Steps
         private void HandleComponentDropped(string partKey, Transform part)
         {
             if (logger != null) logger.LogComponentDropped(partKey, validator != null ? validator.PartKey : null);
+        }
+
+        /// <summary>"Locate X and pick it up": picking it up completes the instruction.</summary>
+        private void HandleAcknowledgedByGrab(string partKey, Transform part)
+        {
+            if (!IsReadState) return;
+            if (logger != null) logger.LogNote("instruction_acknowledged_by_pickup:" + partKey);
+            if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.Grab, part.position);
+            CompleteActionAndAdvance("picked_up");
+        }
+
+        /// <summary>True while the current action is the "Complete Remaining Pistons" shortcut.</summary>
+        public bool IsAutoCompleteAction
+        {
+            get
+            {
+                AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
+                return a != null && a.enabled && a.autoCompleteRemaining;
+            }
         }
 
         private void HandleWorkspacePlaced(bool reposition)
@@ -434,6 +463,10 @@ namespace AdaptiveAR.Steps
                 if (!_currentActionArmed && action != null && action.RequiresPhysicalValidation && logToConsole)
                     Debug.LogWarning("[Session] Action '" + action.Id + "' wants validation but could " +
                                      "not be armed; it must be confirmed manually.");
+
+                // An instruction that names a part completes when that part is picked up.
+                if (action != null && action.enabled && !action.RequiresPhysicalValidation)
+                    validator.BeginAcknowledge(action);
             }
 
             // Guidance for THIS action replaces whatever the previous action showed.
@@ -576,19 +609,26 @@ namespace AdaptiveAR.Steps
             }
 
             Transform part = validator != null ? validator.CurrentPart : null;
+            var speech = InstructionSpeech.Ensure(null);
             if (success)
             {
+                // Success: chime + haptic + green pulse. No speech - the chime is clearer.
                 if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.Success, part.position);
                 if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Success(part, 0.8f);
-                Feedback(successClip, successPhrase, ProceduralTones.Kind.Success, "success");
+                if (speech != null) speech.PlayCue(ProceduralTones.Kind.Success);
             }
             else
             {
-                // A genuine near-target attempt that failed: brief amber pulse, warning
-                // haptic, short corrective cue. The part is never recoloured permanently.
+                // One genuine failed attempt (zone left or released inside it): one brief tone,
+                // warning haptic, red (clearly off) or amber (close) pulse. Never speech.
+                bool far = validator != null && validator.LastAttemptFar;
                 if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
-                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.4f);
-                Feedback(invalidAttemptClip, "Not quite. Try again.", ProceduralTones.Kind.Invalid, "invalid attempt");
+                if (spatialPulses && part != null)
+                {
+                    if (far) AdaptiveAR.UI.FeedbackPulse.Pulse(part, new Color(0.93f, 0.3f, 0.26f), 0.45f);
+                    else AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.4f);
+                }
+                if (speech != null) speech.PlayCue(ProceduralTones.Kind.Invalid);
             }
 
             RaiseStateChanged();
@@ -647,6 +687,14 @@ namespace AdaptiveAR.Steps
                 if (logToConsole) Debug.Log("[Session] Advance blocked: " + BlockedReason);
                 RaiseStateChanged();
                 return;
+            }
+
+            // The deliberate prototype shortcut: fit the remaining pistons, log it once, move on.
+            if (IsAutoCompleteAction)
+            {
+                int filled = PistonAutoCompleter.CompleteRemaining(registry, validator);
+                if (logger != null) logger.LogRemainingPistonsAutoCompleted(filled);
+                if (logToConsole) Debug.Log($"[Session] Remaining pistons auto-completed: {filled} bore(s).");
             }
 
             if (workflow != null) CompleteActionAndAdvance("manual_confirm");

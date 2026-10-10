@@ -87,6 +87,7 @@ public class DropIntoTray : MonoBehaviour
 
     private Vector3 authoredLocalPosition;
     private Quaternion authoredLocalRotation;
+    private Transform authoredParent;
     private bool authoredPoseCaptured;
     private int recoveryCount;
 
@@ -133,6 +134,14 @@ public class DropIntoTray : MonoBehaviour
         if (!recoverIfLost || rb == null || rb.isKinematic || !authoredPoseCaptured)
             return;
 
+        // THE DISAPPEARING-ROD GUARD. A part joined to an assembly has a new parent; its
+        // authored tray pose expressed in that parent's frame is a point metres away, so
+        // the old "lost" test fired and teleported it there. A joined or locked part is
+        // never lost.
+        if (transform.parent != authoredParent) return;
+        var padlock = GetComponent<AdaptiveAR.Steps.PlacementLock>();
+        if (padlock != null && padlock.IsLocked) return;
+
         Vector3 start = AuthoredWorldPosition();
 
         // Gravity is world -Y, so "fell away" means it dropped well below where it began.
@@ -171,7 +180,24 @@ public class DropIntoTray : MonoBehaviour
     {
         authoredLocalPosition = transform.localPosition;
         authoredLocalRotation = transform.localRotation;
+        authoredParent = transform.parent;
         authoredPoseCaptured = true;
+    }
+
+    /// <summary>
+    /// Session start: a loose part begins in its tray and settles under gravity, whatever
+    /// its authored flag says. Not for installed or locked parts.
+    /// </summary>
+    public void ReleaseLoose()
+    {
+        if (rb == null) return;
+        var padlock = GetComponent<AdaptiveAR.Steps.PlacementLock>();
+        if (padlock != null && padlock.IsLocked) return;
+        if (transform.parent != authoredParent) return;
+        if (GetComponent<Collider>() == null) return;      // a kit root with no collider must stay still
+
+        recoveryCount = 0;
+        ReleaseToPhysics();
     }
 
     private Vector3 AuthoredWorldPosition()
@@ -204,6 +230,9 @@ public class DropIntoTray : MonoBehaviour
     public void RecoverToAuthoredPose()
     {
         if (rb == null || !authoredPoseCaptured) return;
+        if (transform.parent != authoredParent) return;
+
+        AdaptiveAR.Steps.PartWatch.Log("DropIntoTray.Recover(before)", transform);
 
         rb.linearVelocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;

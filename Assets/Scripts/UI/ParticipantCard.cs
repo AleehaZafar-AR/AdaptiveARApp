@@ -131,6 +131,21 @@ namespace AdaptiveAR.UI
         /// the next action's part during a "find the components" instruction. Any instance
         /// of the role will do - it is a picture of what to look for.
         /// </summary>
+        private string PreviewKeyFor(StepData stage, AssemblyAction action)
+        {
+            if (stage == null || action == null) return null;
+            string key = action.partKey;
+            if (string.IsNullOrEmpty(key) && stage.actions != null)
+            {
+                for (int i = workflow != null ? workflow.ActionIndex + 1 : 0; i < stage.actions.Count; i++)
+                {
+                    AssemblyAction a = stage.actions[i];
+                    if (a != null && a.enabled && !string.IsNullOrEmpty(a.partKey)) { key = a.partKey; break; }
+                }
+            }
+            return key;
+        }
+
         private GameObject PreviewSourceFor(StepData stage, AssemblyAction action)
         {
             if (registry == null || stage == null || action == null) return null;
@@ -474,7 +489,11 @@ namespace AdaptiveAR.UI
                 instructionText.text = l1Override ?? (action != null ? action.instruction : (stage != null ? stage.stepTitle : ""));
 
             if (_preview != null)
-                _preview.Show(PreviewSourceFor(stage, action));
+            {
+                GameObject src = PreviewSourceFor(stage, action);
+                string role = StepValidator.RoleNameOf(PreviewKeyFor(stage, action));
+                _preview.Show(src, role);
+            }
 
             if (detailText != null)
             {
@@ -515,7 +534,9 @@ namespace AdaptiveAR.UI
                 if (nextLabel != null)
                 {
                     nextLabel.color = can ? MrTheme.TextPrimary : MrTheme.TextMuted;
-                    nextLabel.text = continueLabel;
+                    nextLabel.text = session != null && session.IsAutoCompleteAction
+                        ? "Complete Remaining Pistons  \u2192"
+                        : continueLabel;
                 }
             }
 

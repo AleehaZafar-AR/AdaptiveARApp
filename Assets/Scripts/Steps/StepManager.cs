@@ -253,8 +253,33 @@ public class StepManager : MonoBehaviour
         if (oilPan != null)
             oilPan.SetActive(true);
 
+        ReleaseLooseParts();
+
         if (captionText != null)
             captionText.text = "Workspace placed.";
+    }
+
+    /// <summary>
+    /// Every loose, selectable part starts in its tray and settles under gravity, whatever
+    /// its authored DropIntoTray flag says. Installed/locked parts and kit roots are left alone.
+    /// </summary>
+    private void ReleaseLooseParts()
+    {
+        var registry = GetComponent<GuidanceRegistry>();
+        if (registry == null) return;
+
+        int released = 0;
+        var seen = new System.Collections.Generic.HashSet<GameObject>();
+        foreach (string key in registry.PartKeys())
+        {
+            if (GuidanceRegistry.IsKitHandleKey(key)) continue;
+            if (!registry.TryResolveQuiet(key, out GameObject go) || go == null || !seen.Add(go)) continue;
+            var drop = go.GetComponent<DropIntoTray>();
+            if (drop == null) continue;
+            drop.ReleaseLoose();
+            released++;
+        }
+        Debug.Log($"[StepManager] {released} loose part(s) released into the trays at placement.");
     }
 
     /// <summary>

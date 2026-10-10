@@ -4760,12 +4760,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2715207a4922cb041be21d848c3132ca, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  placementMode: 0
   size: 0.32
   heightAboveDesk: 0.1
-  clearanceFromEngine: -0.1
+  gapFromEngine: 0.06
   kitClearance: 0.01
   gridColor: {r: 0.25, g: 0.82, b: 0.85, a: 0.55}
   fillColor: {r: 0.25, g: 0.82, b: 0.85, a: 0.08}
+  markingColor: {r: 0.25, g: 0.82, b: 0.85, a: 0.75}
   gridCells: 8
   slabThickness: 0.02
   logChanges: 1
@@ -5357,6 +5359,7 @@ MonoBehaviour:
   successClip: {fileID: 8300000, guid: 494bedaa8c6e67b7557b3d746bc73618, type: 3}
   wrongPartClip: {fileID: 8300000, guid: 18939344c83d0f6d5da1a60fe11847da, type: 3}
   invalidAttemptClip: {fileID: 8300000, guid: 471320f6181b2c792fab053699e27e83, type: 3}
+  spatialPulses: 1
   logToConsole: 1
 --- !u!114 &205522884
 MonoBehaviour:
@@ -5389,18 +5392,56 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   guidanceRegistry: {fileID: 205522881}
-  settleSeconds: 0.45
-  restSpeed: 0.03
-  restAcceptSeconds: 0.8
-  acceptOnRest: 1
-  requireHandledBeforeRest: 1
-  handledMoveThreshold: 0.05
+  snapImmediately: 1
   interchangeableRoles: 1
   monitorWrongParts: 1
+  handledMoveThreshold: 0.05
+  roleTolerances:
+  - role: PistonHead
+    positionMeters: 0.025
+    rotationDegrees: 22
+    symmetry: 0
+  - role: ConnectingRod
+    positionMeters: 0.025
+    rotationDegrees: 22
+    symmetry: 3
+  - role: ConnectingPin
+    positionMeters: 0.02
+    rotationDegrees: 28
+    symmetry: 2
+  - role: PistonEnd
+    positionMeters: 0.025
+    rotationDegrees: 25
+    symmetry: 3
+  - role: pistonBolt
+    positionMeters: 0.02
+    rotationDegrees: 28
+    symmetry: 2
+  - role: pistonBoltOther
+    positionMeters: 0.02
+    rotationDegrees: 28
+    symmetry: 2
+  - role: PistonNut
+    positionMeters: 0.02
+    rotationDegrees: 28
+    symmetry: 2
+  - role: PistonNutOther
+    positionMeters: 0.02
+    rotationDegrees: 28
+    symmetry: 2
+  - role: crankshaft
+    positionMeters: 0.03
+    rotationDegrees: 20
+    symmetry: 1
+  - role: camshaft
+    positionMeters: 0.03
+    rotationDegrees: 20
+    symmetry: 1
+  roleToleranceRevision: 0
+  attemptZoneMultiplier: 3
+  attemptZoneMinMeters: 0.1
   assistGapMeters: 0.06
   suppressCollisionsNearTarget: 1
-  freezeOnReleaseNearTarget: 1
-  nearReleaseSettleSeconds: 0.12
   alwaysSolidNamePrefixes:
   - tray
   - Plane
@@ -8350,7 +8391,7 @@ RectTransform:
   m_AnchorMin: {x: 1, y: 0}
   m_AnchorMax: {x: 1, y: 0}
   m_AnchoredPosition: {x: -13.299988, y: 3.399994}
-  m_SizeDelta: {x: 226.14, y: 116.1}
+  m_SizeDelta: {x: 315.7, y: 90.7}
   m_Pivot: {x: 1, y: 0}
 --- !u!114 &359943547
 MonoBehaviour:
@@ -32996,6 +33037,8 @@ MonoBehaviour:
   stepRunner: {fileID: 205522880}
   supportLevel: {fileID: 205522882}
   validator: {fileID: 205522885}
+  registry: {fileID: 0}
+  showComponentPreview: 1
   stageText: {fileID: 1079886380}
   counterText: {fileID: 0}
   instructionText: {fileID: 1384187973}
@@ -33003,15 +33046,27 @@ MonoBehaviour:
   feedbackText: {fileID: 1694520015}
   nextButton: {fileID: 2081791657}
   nextLabel: {fileID: 2079927290}
+  backButton: {fileID: 0}
+  continueLabel: "Continue  \u2192"
+  backLabel: "\u2190  Back"
+  continueSize: {x: 236, y: 66}
+  backSize: {x: 128, y: 50}
+  continueFontSize: 22
+  backFontSize: 17
   successHoldSeconds: 1.2
   legacySiblingNames:
   - Eyebrow
   - StepLabel
   - CaptionText
   - StatusLine
+  removeAlignmentChip: 1
   ensureInstructionFits: 1
   instructionMinFontSize: 18
   wrongPartMessage: That is not the required component
+  successMessage: Correct
+  moveCloserMessage: Move closer to the highlighted position
+  turnToMatchMessage: Turn the part to match the ghost
+  almostThereMessage: "Almost there \u2014 align with the ghost"
   refreshInterval: 0.12
 --- !u!1 &1676090046
 GameObject:
