@@ -1758,3 +1758,177 @@ Editor commands: **none**. Unity will generate `AttentionFader.cs.meta`.
 9. Dropping the right part on the desk logs `component_dropped`, no error.
 
 Nothing in this pass has run on a headset.
+
+---
+
+## Claude → Reviewer — 2026-10-10 — Final interaction/content pass: station height, pinned side panels, READ state, tolerances v2, assembly mat sequence, L1/L2/L3 pistons, component preview, audio root cause, spatial feedback, error schema
+
+Base: `02ac59f`. Architecture, placement, green ghosts, haptics, logging and your
+side-panel offsets are untouched. Scene edit by me: **three additive lines** on
+`AssemblySessionController` (feedback clip references). No Editor command needed;
+Unity generates the new `.meta` files.
+
+### 1. Station height
+`WorkspacePlacement.surfaceUpOffset` 0.01 → **0.07 m** (the component is created at
+runtime, so the default applies). It lifts `MarkerAnchor`, the root of the whole
+chain, so engine, trays, ghosts and the tabletop collider move together.
+
+### 2. Side panels — why they moved, and the fix
+The scene serialises the side canvases with **`m_LocalPosition` and
+`m_AnchoredPosition` out of step** (e.g. StatusCanvas local `(0, 0, −0.076)` vs
+anchored `(0.303, 0.2)`; ResearchCanvas local `(0, 0, −0.413)` vs anchored
+`(0.62, 0.2)`). A RectTransform under a plain Transform keeps your Inspector Pos X/Y in
+`anchoredPosition` and Pos Z in `localPosition`, and Unity re-derives one from the
+other whenever the canvas is re-enabled or re-laid-out — which `AdaptivePanelController`
+does on a support change (Hidden ⇄ shown) and the first content rebuild does after
+Step 1. So the panel jumped between the two serialised poses.
+`PanelRig.PinChildren()` now takes the Inspector values as truth
+(`local = (anchored.x, anchored.y, local.z)`), applies them once at lock, and
+`EnforcePins()` restores them every frame, logging a warning naming the panel and
+the frame if anything ever moves it again. The rig itself still moves as one unit.
+No per-panel offsets were added.
+
+### 3. READ state
+`AttentionFader` now dims to **28 %** (plus emission black) and, besides disabling
+the Interaction SDK components, **switches off the `ISDK_*` child objects** of every
+loose part, so neither hand-grab nor ray-grab can reach them; it logs
+`[Attention] READ: N parts, M renderers dimmed, K components and J ISDK objects suspended`
+so logcat proves it ran on the very first crankshaft instruction. Ghosts and arrow
+are off while reading; Continue is the only control. Locked parts are never touched.
+
+### 4. Tolerances, revision 2 (`StepValidator.roleTolerances`, auto-reset from the serialised table)
+
+| Role | Position | Orientation | Symmetry |
+|---|---|---|---|
+| crankshaft / camshaft | 3.0 cm | 20° | axis, roll free |
+| PistonHead | 2.5 cm | 22° | full |
+| ConnectingRod | 2.5 cm | 22° | axis + roll mod 180° |
+| ConnectingPin | 2.0 cm | 28° | axis ±, roll free |
+| PistonEnd | 2.5 cm | 25° | axis + roll mod 180° |
+| bolts / nuts | 2.0 cm | 28° | axis ±, roll free |
+| install (partial piston → bore) | 3.0 cm | 25° | full |
+
+Immediate snap while held is unchanged.
+
+### 5. Assembly mat and the piston sequence
+`AssemblyWorkSurface` mode `InFrontOfEngine`: 30 cm mat **in front of the engine
+block towards the participant** (block footprint + 6 cm gap), **2 cm above the
+detected desk**, facing the participant, with a solid slab and a **ring marking** where
+the head goes (always visible with the mat — it defines the task area, not adaptive
+guidance). Shown when a piston stage begins, **hidden the moment the partial piston
+is installed** (`StepManager.HandleWorkflowChanged`), re-shown for the next piston.
+Your `Worksurface` object under `Offset` hosts the component (set `Authored` to keep
+its own transform).
+
+Kit ghosts are posed **head flat on the mat, crown down**, rod target above it, pin
+across the view. Per piston (assets regenerated, all ten enabled):
+
+```
+locate → PistonHead (mat) → ConnectingRod (from above) → ConnectingPin (from the side)
+→ install: head+rod+pin to ghost.piston00N.PistonHead (mat hides)
+→ PistonEnd, pistonBolt, pistonBoltOther, PistonNut, PistonNutOther at the crankshaft
+   (targets ghost.piston00N.<role>, shown in isolation inside the bore ghost group)
+```
+Each locks and joins the bound head; the completed piston stays on the crankshaft.
+
+### 6. L1 / L2 / L3 for pistons 2–4
+Validation sequence identical at every level. Presentation only:
+- **L1**: the stage's L1 block says *"Repeat the piston assembly procedure for the
+  remaining pistons."*; the card shows that instead of atomic text, spoken once per
+  stage; no arrow (`minimumLevel` L2), no ghosts (L1 block has none); mat + ring remain;
+  the installed piston(s) are the reference.
+- **L2**: atomic action text + arrow; **no ghosts** (L2 ghostKeys cleared for stages 3–5).
+- **L3**: atomic text + ghost + arrow.
+Piston 1 (stage 2) keeps ghosts at L2 and L3 as the scaffolded example. Crank/cam L1
+override text cleared so "Find the crankshaft…" shows at L1.
+
+### 7. Component preview
+`ComponentPreview` (on the main canvas, created by `ParticipantCard`): a renderer-only
+clone of the actual part mesh (shared materials, no collider/Rigidbody/SDK/registry),
+10 cm, slowly spinning, 6 cm in front of the right half of the card. Source = the
+action's part; for a "find the components" instruction, the next action's part; for
+install, the bound head. Cleared when nothing is relevant.
+
+### 8. Audio — what was checked, what was wrong, what changed
+**The generated WAVs are valid**: RIFF/WAVE, PCM tag 1, mono, 22 050 Hz, 16-bit,
+`fmt` 18 bytes, `data` sizes consistent with file sizes (all 18 audited). Unity
+imported them (it accepted the pre-written metas; guids verified deterministic).
+
+Working path (mp3): **serialized AudioClip reference** on the StepData → played via
+`InstructionSpeech.PlayAuthored` → dedicated 2-D source. Failing path: `Resources.Load`
+by key → the same source. Only the *reference mechanism* differed, and two import
+flags: the generated metas had `preloadAudioData: 0` (inherited from the mp3 meta),
+so a Resources-loaded clip had no data until `LoadAudioData()` finished — and the first
+version played before that (now fixed by waiting on `loadState`, but that was never
+proven on device).
+
+Changes, in order of confidence:
+1. **Every instruction is now a serialized reference**: each action's `audioCue` in the
+   step assets points at its WAV (the exact mechanism that works for the mp3). The
+   stage-level L1 sentence uses `l1Minimal.instructionAudio` the same way. Resources
+   lookup remains only as a fallback.
+2. **Feedback clips are serialized too**: `successClip`, `wrongPartClip`,
+   `invalidAttemptClip` on `AssemblySessionController` (the three scene lines).
+3. **`preloadAudioData: 1`** on all clip metas.
+4. **Procedural tones** (`ProceduralTones`, `AudioClip.Create` in memory) as the last
+   fallback for success / invalid / wrong — if a tone plays but a WAV does not, the
+   asset import is the problem; if neither, the output path is.
+5. Logging unchanged: `[Speech] feedback clip 'correct' … loadState=…, length=…s`.
+
+Nine clips re-synthesised for the new wording; nine obsolete ones removed; 18 total.
+**[QV]** This is the first build where generated speech goes through the proven
+reference path; I cannot claim it is audible until it runs.
+
+### 9. Spatial feedback (`FeedbackPulse`, property-block, restored exactly)
+Success: green pulse on the seated part 0.8 s + success haptic + "Correct." (clip →
+sentence → chime). Failed near-target attempt: amber pulse 0.4 s on the part in the
+hand + warning haptic + "Not quite. Try again." (clip → tone). Wrong component:
+amber pulse 0.5 s + warning haptic + the wrong-part phrase.
+
+### 10. Error schema
+`validation_attempt` now carries `error_type` ∈ {`placement_success`,
+`incorrect_position`, `incorrect_orientation`, `incorrect_position_and_orientation`},
+`position_ok`, `orientation_ok`, `action_id`, `requested_key`, `instance_key`,
+`instance_name`, `attempt_index`, errors and tolerances, trigger; support level,
+stage and timestamp are in the envelope. `wrong_component_grabbed` carries
+`error_type: wrong_component`, raised on the grab transition only (one per episode).
+`component_dropped` is recorded, not counted. Counted = wrong_component + failed
+attempts; one per episode; a new attempt needs a zone re-entry or a re-grab.
+
+### Files
+```
+new   Assets/Scripts/UI/ComponentPreview.cs
+new   Assets/Scripts/UI/FeedbackPulse.cs
+mod   Assets/Scripts/Steps/AttentionFader.cs       28 % dim, ISDK objects off, logging
+mod   Assets/Scripts/MR/AssemblyWorkSurface.cs     mat in front, head ring, crown-down kit pose
+mod   Assets/Scripts/MR/WorkspacePlacement.cs      +6 cm
+mod   Assets/Scripts/UI/PanelRig.cs                pinned side panels
+mod   Assets/Scripts/Steps/StepValidator.cs        tolerances rev 2, both-dimension classification
+mod   Assets/Scripts/Steps/StepPresenter.cs        isolated ghost activation, L1 override speech
+mod   Assets/Scripts/Steps/AssemblySessionController.cs  serialized clips, pulses, schema
+mod   Assets/Scripts/Steps/StepManager.cs          mat hides after install, desk height
+mod   Assets/Scripts/UI/ParticipantCard.cs         L1 override, preview
+mod   Assets/Scripts/Audio/SpeechLibrary.cs        PlayFeedbackClip, ProceduralTones
+mod   Assets/Scripts/Logging/SessionLogger.cs      validation_attempt fields
+mod   Assets/ScriptableObjects/Steps/Step_01..06   10-action piston sequence, audio cues, level blocks
+mod   Assets/Resources/AdaptiveAR/Speech/          9 new, 9 removed, preload on
+mod   Assets/1 - ArUcoMarkerTracking.unity         three lines (feedback clips)
+```
+
+### [QV]
+1. Engine base ~6 cm higher than before relative to the desk.
+2. Side panels stay exactly where you put them after Step 1 and after B/Y changes; if
+   not, logcat shows `[PanelRig] '<panel>' moved …` naming the frame.
+3. First crankshaft instruction: parts dark, cannot be grabbed, no ghost/arrow; logcat
+   `[Attention] READ: …`; Continue restores them.
+4. Tolerances feel like "visibly right", not millimetres.
+5. Mat in front of the engine just above the desk; ring; head flat; rod from above; pin
+   from the side; install → mat gone; cap, two bolts, two nuts at the crank.
+6. Pistons 2–4: L1 generic text + no guidance; L2 arrow, no ghost; L3 ghost.
+7. Spinning part on the right of the card, changing per action, during READ too.
+8. Logcat per action: `feedback clip 'correct' … length=0.8s` and an audible "Correct.";
+   a chime instead means the WAV asset is the problem; silence means the path is.
+9. Green flash on seat; amber flash + "Not quite" on a failed attempt.
+10. JSONL: every counted error has `error_type`; drops are `component_dropped`.
+
+Nothing in this pass has run on a headset.

@@ -85,6 +85,14 @@ namespace AdaptiveAR.UI
         public bool IsLocked { get; private set; }
         public bool IsPrePlacement { get; private set; }
 
+        /// <summary>
+        /// Authored local pose of each child canvas, captured once the rig locks and
+        /// enforced afterwards. The side panels' Inspector values (Pos X/Y = anchored
+        /// position, Pos Z = local z) are authoritative; nothing may move them later.
+        /// </summary>
+        private class Pin { public RectTransform rt; public Vector3 pos; public Quaternion rot; public Vector3 scale; public float lastLogAt; }
+        private readonly System.Collections.Generic.List<Pin> _pins = new System.Collections.Generic.List<Pin>();
+
         private Vector3 _frozenMarkerPos;
         private bool _hasFrozenMarkerPos;
         private Vector3 _frozenViewAxis;
@@ -177,6 +185,7 @@ namespace AdaptiveAR.UI
                     Recenter();
                     Detach(freezeMarker: true);
                     IsLocked = true;
+                    PinChildren();
                     return;
                 }
 
@@ -199,6 +208,7 @@ namespace AdaptiveAR.UI
                 Recenter();
                 Detach(freezeMarker: true);
                 IsLocked = true;
+                PinChildren();
                 return;
             }
 
@@ -207,10 +217,11 @@ namespace AdaptiveAR.UI
                 Recenter();
                 Detach(freezeMarker: true);
                 IsLocked = true;
+                PinChildren();
                 return;
             }
 
-            if (IsLocked) return;
+            if (IsLocked) { EnforcePins(); return; }
 
             if (!ComputeTarget(out Vector3 wantPos, out Quaternion wantRot))
                 return;
@@ -227,6 +238,51 @@ namespace AdaptiveAR.UI
             float t = 1f - Mathf.Exp(-smoothing * Time.deltaTime);
             transform.position = Vector3.Lerp(transform.position, _targetPosition, t);
             transform.rotation = Quaternion.Slerp(transform.rotation, _targetRotation, t);
+        }
+
+        /// <summary>
+        /// Records every child canvas's authored local pose. A RectTransform under a plain
+        /// Transform keeps its authored X/Y in anchoredPosition and its Z in localPosition;
+        /// Unity re-derives one from the other on enable/layout, and the scene serialises
+        /// them out of step. The Inspector values are taken as truth here, applied once,
+        /// and then held.
+        /// </summary>
+        private void PinChildren()
+        {
+            _pins.Clear();
+            foreach (Transform child in transform)
+            {
+                var rt = child as RectTransform;
+                if (rt == null) continue;
+
+                Vector3 pos = new Vector3(rt.anchoredPosition.x, rt.anchoredPosition.y, rt.localPosition.z);
+                rt.localPosition = pos;
+                _pins.Add(new Pin { rt = rt, pos = pos, rot = rt.localRotation, scale = rt.localScale, lastLogAt = -999f });
+            }
+            Debug.Log($"[PanelRig] {_pins.Count} panel(s) pinned to their authored local poses.");
+        }
+
+        /// <summary>Restores any pinned canvas that something moved, and says so.</summary>
+        private void EnforcePins()
+        {
+            foreach (Pin p in _pins)
+            {
+                if (p.rt == null) continue;
+                bool moved = (p.rt.localPosition - p.pos).sqrMagnitude > 1e-8f
+                             || Quaternion.Angle(p.rt.localRotation, p.rot) > 0.01f
+                             || (p.rt.localScale - p.scale).sqrMagnitude > 1e-10f;
+                if (!moved) continue;
+
+                if (Time.time - p.lastLogAt > 1f)
+                {
+                    p.lastLogAt = Time.time;
+                    Debug.LogWarning($"[PanelRig] '{p.rt.name}' moved to {p.rt.localPosition} (authored {p.pos}); restored. " +
+                                     "Something re-laid the canvas out this frame.");
+                }
+                p.rt.localPosition = p.pos;
+                p.rt.localRotation = p.rot;
+                p.rt.localScale = p.scale;
+            }
         }
 
         /// <summary>

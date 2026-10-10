@@ -41,7 +41,7 @@ MonoBehaviour:
     settleSeconds: 0.45
     ghostKeys: []
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: cd0557643be02810b7f439f3e6dc6a2c, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_06_camshaft.place
@@ -57,7 +57,7 @@ MonoBehaviour:
     ghostKeys:
     - ghost.camshaft
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 83f46a182b8c7b0f6d7d8eaef3a08ed6, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_06_camshaft.fasten
@@ -96,7 +96,7 @@ MonoBehaviour:
   expectedDurationSeconds: 120
   defaultSupportLevel: 2
   l1Minimal:
-    instructionText: Fit the camshaft.
+    instructionText: 
     instructionDetail: 
     ghostKeys: []
     ghostPrefabs: []

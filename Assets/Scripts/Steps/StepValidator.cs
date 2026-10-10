@@ -92,6 +92,11 @@ namespace AdaptiveAR.Steps
         [Header("Tolerances by role (override the action's values)")]
         [SerializeField] private List<RoleTolerance> roleTolerances = DefaultRoleTolerances();
 
+        [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
+                 "the values serialized in the scene, the table is reset to the defaults at start.")]
+        [SerializeField] private int roleToleranceRevision = 0;
+        private const int CurrentRoleToleranceRevision = 2;
+
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
 
@@ -148,8 +153,15 @@ namespace AdaptiveAR.Steps
         public bool IsAssisting { get; private set; }
         public bool WrongPartHeld { get { return _wrongHeld != null; } }
 
-        /// <summary>Why the last attempt failed: "incorrect_position" or "incorrect_orientation".</summary>
+        /// <summary>
+        /// Why the last attempt failed: "incorrect_position", "incorrect_orientation" or
+        /// "incorrect_position_and_orientation". Null after a success.
+        /// </summary>
         public string LastErrorType { get; private set; }
+
+        /// <summary>Per-dimension validity of the last judged attempt.</summary>
+        public bool LastAttemptPositionOk { get; private set; }
+        public bool LastAttemptOrientationOk { get; private set; }
 
         /// <summary>Legacy reject reason, derived from LastErrorType.</summary>
         public RejectReason LastRejectReason { get; private set; }
@@ -209,16 +221,18 @@ namespace AdaptiveAR.Steps
         {
             return new List<RoleTolerance>
             {
-                new RoleTolerance { role = "PistonHead",      positionMeters = 0.030f, rotationDegrees = 30f, symmetry = AxisSymmetry.None },
-                new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.035f, rotationDegrees = 30f, symmetry = AxisSymmetry.AxialHalfTurn },
-                new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.030f, rotationDegrees = 40f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonEnd",       positionMeters = 0.030f, rotationDegrees = 35f, symmetry = AxisSymmetry.AxialHalfTurn },
-                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.030f, rotationDegrees = 45f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.030f, rotationDegrees = 45f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonNut",       positionMeters = 0.030f, rotationDegrees = 45f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.030f, rotationDegrees = 45f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "crankshaft",      positionMeters = 0.040f, rotationDegrees = 25f, symmetry = AxisSymmetry.AxialFree },
-                new RoleTolerance { role = "camshaft",        positionMeters = 0.040f, rotationDegrees = 25f, symmetry = AxisSymmetry.AxialFree },
+                // Revision 2: middle ground between the first (too strict) and second (too
+                // forgiving) builds. Starting calibration values, tune on the bench.
+                new RoleTolerance { role = "PistonHead",      positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.None },
+                new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.AxialHalfTurn },
+                new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "PistonEnd",       positionMeters = 0.025f, rotationDegrees = 25f, symmetry = AxisSymmetry.AxialHalfTurn },
+                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "PistonNut",       positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "crankshaft",      positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
+                new RoleTolerance { role = "camshaft",        positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
             };
         }
 
@@ -248,6 +262,16 @@ namespace AdaptiveAR.Steps
         public void ResetConsumedParts()
         {
             _consumed.Clear();
+        }
+
+        private void Awake()
+        {
+            if (roleToleranceRevision < CurrentRoleToleranceRevision)
+            {
+                roleTolerances = DefaultRoleTolerances();
+                roleToleranceRevision = CurrentRoleToleranceRevision;
+                Debug.Log($"[StepValidator] Role tolerance table reset to revision {CurrentRoleToleranceRevision} defaults.");
+            }
         }
 
         public bool BeginAction(AssemblyAction action)
@@ -648,8 +672,13 @@ namespace AdaptiveAR.Steps
             float rot = _attemptReachedPosition ? _attemptBestRotWhenPositioned : _attemptRotAtBestPos;
             if (rot == float.MaxValue) rot = 0f;
 
-            LastErrorType = _attemptReachedPosition ? "incorrect_orientation" : "incorrect_position";
-            LastRejectReason = _attemptReachedPosition ? RejectReason.WrongRotation : RejectReason.TooFar;
+            // Both dimensions, judged at the closest approach.
+            LastAttemptPositionOk = _attemptReachedPosition;
+            LastAttemptOrientationOk = rot <= _rotTol;
+            if (!LastAttemptPositionOk && !LastAttemptOrientationOk) LastErrorType = "incorrect_position_and_orientation";
+            else if (!LastAttemptPositionOk) LastErrorType = "incorrect_position";
+            else LastErrorType = "incorrect_orientation";
+            LastRejectReason = LastAttemptPositionOk ? RejectReason.WrongRotation : RejectReason.TooFar;
 
             if (logEvaluations)
                 Debug.Log($"[StepValidator] Attempt {AttemptCount} FAILED ({trigger}) on '{_active.key}': {LastErrorType}; " +
@@ -667,6 +696,8 @@ namespace AdaptiveAR.Steps
             IsActive = false;
             AttemptCount++;
             LastErrorType = null;
+            LastAttemptPositionOk = true;
+            LastAttemptOrientationOk = true;
             LastRejectReason = RejectReason.None;
             CurrentCue = Cue.None;
             _consumed.Add(_active.key);

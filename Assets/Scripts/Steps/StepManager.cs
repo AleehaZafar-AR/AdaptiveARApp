@@ -125,9 +125,34 @@ public class StepManager : MonoBehaviour
         if (fitTrayColliders && oilPan != null)
             TrayColliders.Ensure(oilPan.transform.root);
 
-        // The piston work surface exists only while a piston is being built.
+        // The piston work surface exists only while a piston is being built on it.
         if (stepRunner != null)
             stepRunner.OnStepChanged += HandleStageChanged;
+
+        _workflow = GetComponent<WorkflowState>();
+        if (_workflow != null)
+            _workflow.OnChanged += HandleWorkflowChanged;
+    }
+
+    private WorkflowState _workflow;
+
+    /// <summary>Once the partial piston has been installed, the mat has done its job for this piston.</summary>
+    private void HandleWorkflowChanged()
+    {
+        if (workSurface == null || !workSurface.IsShown || _workflow == null) return;
+
+        StepData stage = _workflow.CurrentStage;
+        if (!StageUsesKits(stage)) return;
+
+        foreach (AssemblyAction a in stage.actions)
+        {
+            if (a == null || !a.enabled || !GuidanceRegistry.IsKitHandleKey(a.partKey)) continue;
+            if (_workflow.IsActionComplete(stage, a))
+            {
+                workSurface.Show(false);
+                return;
+            }
+        }
     }
 
     private void HandleStageChanged(StepData stage, int index, string reason)
@@ -182,6 +207,8 @@ public class StepManager : MonoBehaviour
             placement.OnPlaced -= HandleWorkspacePlaced;
         if (stepRunner != null)
             stepRunner.OnStepChanged -= HandleStageChanged;
+        if (_workflow != null)
+            _workflow.OnChanged -= HandleWorkflowChanged;
     }
 
     /// <summary>
@@ -249,7 +276,8 @@ public class StepManager : MonoBehaviour
         }
 
         Transform head = Camera.main != null ? Camera.main.transform : null;
-        workSurface.Place(oilPan.transform, head);
+        float deskY = placement != null && placement.IsPlaced ? placement.LastPlacedPosition.y : oilPan.transform.root.position.y;
+        workSurface.Place(oilPan.transform, deskY, head);
 
         var registry = GetComponent<GuidanceRegistry>();
         if (registry != null)

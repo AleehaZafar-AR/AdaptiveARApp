@@ -5354,6 +5354,9 @@ MonoBehaviour:
   successPhrase: Correct.
   wrongPartPhrase: That is not the required component.
   haptics: 1
+  successClip: {fileID: 8300000, guid: 494bedaa8c6e67b7557b3d746bc73618, type: 3}
+  wrongPartClip: {fileID: 8300000, guid: 18939344c83d0f6d5da1a60fe11847da, type: 3}
+  invalidAttemptClip: {fileID: 8300000, guid: 471320f6181b2c792fab053699e27e83, type: 3}
   logToConsole: 1
 --- !u!114 &205522884
 MonoBehaviour:

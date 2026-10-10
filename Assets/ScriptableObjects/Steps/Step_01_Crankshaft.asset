@@ -41,7 +41,7 @@ MonoBehaviour:
     settleSeconds: 0.45
     ghostKeys: []
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 1e99e6cf6882b040668fb5b870f3d9d1, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_01_crankshaft.place
@@ -72,7 +72,7 @@ MonoBehaviour:
     settleSeconds: 0.45
     ghostKeys: []
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 4de5853b4a5fd040c39346e2d18be67e, type: 3}
     enabled: 0
     disabledReason: No separately movable fastener exists. crankHolderBolt002-016
       and crankHolder001-004 are baked sub-meshes of the oilPan ghost; pistonBolt/PistonNut
@@ -96,7 +96,7 @@ MonoBehaviour:
   expectedDurationSeconds: 120
   defaultSupportLevel: 2
   l1Minimal:
-    instructionText: Fit the crankshaft.
+    instructionText: 
     instructionDetail: 
     ghostKeys: []
     ghostPrefabs: []

@@ -1,17 +1,17 @@
 // File: AssemblyWorkSurface.cs
-// The virtual work plane the pistons are built on.
+// The assembly mat the pistons are built on.
 //
-// Lifecycle: it does not exist for the participant until the first piston stage
-// begins; StepManager shows it then, poses the ghost kits on it, and hides it again
-// once the last piston is installed. Position: directly above the engine block, a
-// little towards the participant, a hand's height above the block's top - reachable,
-// in the middle of the work, not off to the side. A scene object carrying this
-// component may instead use its own authored transform (placementMode = Authored).
+// Lifecycle: it does not exist for the participant until a piston stage begins;
+// StepManager shows it then, poses the ghost kit on it, and hides it as soon as the
+// partial piston (head + rod + pin) has been installed on the crankshaft. Position:
+// in FRONT of the engine block, towards the participant, just above the desk - a small
+// workbench between them and the engine.
 //
-// The four ghost kits under Ghosties/PistonKits are posed on the surface in a
-// canonical orientation (head up, rod hanging down, pin axis across the view), with
-// their children at the ASSEMBLED relative poses copied from the ghost pistons in
-// the bores. Every kit is posed at the same spot: the surface is reused per piston.
+// The ghost kit is posed with the piston head lying flat on the mat (crown down, skirt
+// up), the rod target above it and the pin target across the view, at the ASSEMBLED
+// relative poses copied from the ghost piston in the bore. A subtle ring on the mat
+// marks where the head goes; it is always there (it defines the task area) so that L1,
+// with no ghost, still knows where the system expects the head.
 
 using System.Collections.Generic;
 using AdaptiveAR.Steps;
@@ -23,34 +23,34 @@ namespace AdaptiveAR.MR
     {
         public enum PlacementMode
         {
-            /// <summary>Above the engine block, towards the participant.</summary>
-            AboveEngine = 0,
+            /// <summary>In front of the engine block, towards the participant, just above the desk.</summary>
+            InFrontOfEngine = 0,
             /// <summary>Use this object's own transform as authored in the scene.</summary>
             Authored = 1
         }
 
         [Header("Placement")]
-        [SerializeField] private PlacementMode placementMode = PlacementMode.AboveEngine;
+        [SerializeField] private PlacementMode placementMode = PlacementMode.InFrontOfEngine;
 
-        [Tooltip("Side length of the square work surface, metres.")]
-        [SerializeField] private float size = 0.32f;
+        [Tooltip("Side length of the square mat, metres.")]
+        [SerializeField] private float size = 0.30f;
 
-        [Tooltip("Height of the surface above the TOP of the engine block, metres.")]
-        [SerializeField] private float heightAboveEngine = 0.10f;
+        [Tooltip("Height of the mat above the detected desk, metres.")]
+        [SerializeField] private float heightAboveDesk = 0.02f;
 
-        [Tooltip("Shift from the block's centre towards the participant, metres.")]
-        [SerializeField] private float towardsUser = 0.08f;
+        [Tooltip("Gap between the engine block's footprint and the near edge of the mat, metres.")]
+        [SerializeField] private float gapFromEngine = 0.06f;
 
-        [Tooltip("Clearance kept above the surface by the lowest point of a posed kit ghost.")]
-        [SerializeField] private float kitClearance = 0.015f;
+        [Tooltip("Clearance between the mat and the lowest point of the posed kit ghost (the head's crown).")]
+        [SerializeField] private float kitClearance = 0.005f;
 
         [Header("Appearance")]
-        [SerializeField] private Color gridColor = new Color(0.25f, 0.82f, 0.85f, 0.55f);
-        [SerializeField] private Color fillColor = new Color(0.25f, 0.82f, 0.85f, 0.08f);
-        [SerializeField] private int gridCells = 8;
+        [SerializeField] private Color gridColor = new Color(0.25f, 0.82f, 0.85f, 0.50f);
+        [SerializeField] private Color fillColor = new Color(0.25f, 0.82f, 0.85f, 0.07f);
+        [SerializeField] private Color markingColor = new Color(0.25f, 0.82f, 0.85f, 0.75f);
+        [SerializeField] private int gridCells = 6;
 
         [Header("Collider")]
-        [Tooltip("Thickness of the solid slab under the surface, so parts rest on it.")]
         [SerializeField] private float slabThickness = 0.02f;
 
         [Header("Debug")]
@@ -61,7 +61,9 @@ namespace AdaptiveAR.MR
         public bool IsShown { get { return _visual != null && _visual.activeSelf; } }
 
         private GameObject _visual;
+        private GameObject _marking;
         private Material _material;
+        private Material _markingMaterial;
         private BoxCollider _collider;
 
         private static readonly string[] KitRoles =
@@ -74,21 +76,26 @@ namespace AdaptiveAR.MR
         // Placement and visibility
         // =====================================================================
 
-        /// <summary>Poses the surface for the current engine position. Does not show it.</summary>
-        public void Place(Transform engineRoot, Transform head)
+        /// <summary>Poses the mat for the current engine position and desk height. Does not show it.</summary>
+        public void Place(Transform engineRoot, float deskY, Transform head)
         {
             EnsureVisual();
 
-            if (placementMode == PlacementMode.AboveEngine)
+            if (placementMode == PlacementMode.InFrontOfEngine)
             {
                 Transform block = engineRoot != null ? engineRoot.Find("Offset/Ghosties/oilPan") : null;
                 Bounds engine = BoundsOf(block != null ? block : engineRoot, out bool hasEngine);
 
                 Vector3 centre = hasEngine ? engine.center : (engineRoot != null ? engineRoot.position : Vector3.zero);
-                float top = hasEngine ? engine.max.y : centre.y;
-
                 Vector3 toUser = ViewDirectionToUser(centre, head);
-                Vector3 pos = new Vector3(centre.x, top + heightAboveEngine, centre.z) + toUser * towardsUser;
+
+                // Footprint of the block along the line to the participant.
+                float along = hasEngine
+                    ? Mathf.Abs(engine.extents.x * toUser.x) + Mathf.Abs(engine.extents.z * toUser.z)
+                    : 0.3f;
+
+                Vector3 pos = new Vector3(centre.x, deskY + heightAboveDesk, centre.z)
+                              + toUser * (along + gapFromEngine + size * 0.5f);
 
                 transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toUser, Vector3.up));
             }
@@ -103,6 +110,7 @@ namespace AdaptiveAR.MR
         {
             EnsureVisual();
             if (_visual != null && _visual.activeSelf != shown) _visual.SetActive(shown);
+            if (_marking != null && _marking.activeSelf != shown) _marking.SetActive(shown);
             if (_collider != null) _collider.enabled = shown;
 
             if (logChanges) Debug.Log("[WorkSurface] " + (shown ? "shown" : "hidden"));
@@ -171,7 +179,7 @@ namespace AdaptiveAR.MR
             }
 
             if (logChanges)
-                Debug.Log($"[WorkSurface] {arranged} ghost kit(s) arranged on the work surface.");
+                Debug.Log($"[WorkSurface] {arranged} ghost kit(s) arranged on the mat.");
             return arranged;
         }
 
@@ -194,11 +202,13 @@ namespace AdaptiveAR.MR
             }
             if (headChild == null || rodChild == null) return false;
 
-            Vector3 downLocal = (rodChild.localPosition - headChild.localPosition).normalized;
-            Quaternion r0 = Quaternion.FromToRotation(downLocal, Vector3.down);
+            // Head flat on the mat, crown down: the rod is ABOVE the head, attached from above.
+            Vector3 towardsRodLocal = (rodChild.localPosition - headChild.localPosition).normalized;
+            Quaternion r0 = Quaternion.FromToRotation(towardsRodLocal, Vector3.up);
 
             if (pinChild != null)
             {
+                // The pin goes in from the side: its axis runs across the participant's view.
                 Vector3 pinAxisLocal = pinChild.localRotation * Vector3.forward;
                 Vector3 pinWorld = r0 * pinAxisLocal;
                 pinWorld.y = 0f;
@@ -214,6 +224,8 @@ namespace AdaptiveAR.MR
             kitRoot.rotation = r0;
             kitRoot.position = SurfaceCenter;
 
+            // Lift so the lowest point (the head's crown) rests just above the mat, and
+            // centre the head over the mat.
             float minY = float.MaxValue;
             foreach (Transform child in kitRoot)
             {
@@ -236,11 +248,21 @@ namespace AdaptiveAR.MR
                                         SurfaceCenter.y + kitClearance - minY,
                                         SurfaceCenter.z - headWorld.z);
             kitRoot.position += shift;
+
+            // Marked head area on the mat, sized to the head.
+            float headRadius = 0.04f;
+            var hmf = headChild.GetComponent<MeshFilter>();
+            if (hmf != null && hmf.sharedMesh != null)
+            {
+                Vector3 e = Vector3.Scale(hmf.sharedMesh.bounds.extents, headChild.lossyScale);
+                headRadius = Mathf.Max(Mathf.Abs(e.x), Mathf.Abs(e.z), Mathf.Abs(e.y)) ;
+            }
+            PlaceMarking(headChild.position, headRadius * 2.6f);
             return true;
         }
 
         // =====================================================================
-        // Visual + collider
+        // Visual, marking, collider
         // =====================================================================
 
         private void EnsureVisual()
@@ -252,7 +274,6 @@ namespace AdaptiveAR.MR
             _visual.transform.SetParent(transform, false);
             _visual.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             _visual.transform.localScale = new Vector3(size, size, 1f);
-
             Collider quadCol = _visual.GetComponent<Collider>();
             if (quadCol != null) Destroy(quadCol);
 
@@ -267,6 +288,21 @@ namespace AdaptiveAR.MR
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             r.receiveShadows = false;
 
+            _marking = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            _marking.name = "HeadMarking";
+            _marking.transform.SetParent(transform, false);
+            _marking.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            Collider mc = _marking.GetComponent<Collider>();
+            if (mc != null) Destroy(mc);
+            _markingMaterial = new Material(shader);
+            _markingMaterial.mainTexture = BuildRingTexture(128);
+            _markingMaterial.color = markingColor;
+            var mr = _marking.GetComponent<MeshRenderer>();
+            mr.sharedMaterial = _markingMaterial;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            _marking.transform.localScale = new Vector3(0.1f, 0.1f, 1f);
+
             _collider = gameObject.GetComponent<BoxCollider>();
             if (_collider == null) _collider = gameObject.AddComponent<BoxCollider>();
             _collider.size = new Vector3(size, slabThickness, size);
@@ -275,7 +311,16 @@ namespace AdaptiveAR.MR
             if (!gameObject.name.StartsWith("WorkSurface")) gameObject.name = "WorkSurface";
 
             _visual.SetActive(false);
+            _marking.SetActive(false);
             _collider.enabled = false;
+        }
+
+        private void PlaceMarking(Vector3 headWorld, float diameter)
+        {
+            if (_marking == null) return;
+            Vector3 local = transform.InverseTransformPoint(new Vector3(headWorld.x, SurfaceCenter.y + 0.002f, headWorld.z));
+            _marking.transform.localPosition = local;
+            _marking.transform.localScale = new Vector3(diameter, diameter, 1f);
         }
 
         private Texture2D BuildGridTexture(int px, int cells)
@@ -308,9 +353,34 @@ namespace AdaptiveAR.MR
             return tex;
         }
 
+        private static Texture2D BuildRingTexture(int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            float c = (size - 1) * 0.5f;
+            float outer = size * 0.48f, inner = size * 0.42f;
+
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x, y), new Vector2(c, c));
+                float a = d <= outer && d >= inner ? 1f : (d < inner ? 0.12f : 0f);
+                if (a >= 1f)
+                {
+                    float edge = Mathf.Min(Mathf.Abs(d - outer), Mathf.Abs(d - inner));
+                    a *= Mathf.Clamp01(edge / 1.5f);
+                }
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+            }
+
+            tex.Apply();
+            return tex;
+        }
+
         private void OnDestroy()
         {
             if (_material != null) Destroy(_material);
+            if (_markingMaterial != null) Destroy(_markingMaterial);
         }
     }
 }

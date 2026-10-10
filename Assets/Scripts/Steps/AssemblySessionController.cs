@@ -72,6 +72,15 @@ namespace AdaptiveAR.Steps
         [Tooltip("Controller pulses on grab, wrong part and success. Never blocks progression.")]
         [SerializeField] private bool haptics = true;
 
+        [Tooltip("Serialized feedback clips: the same reference mechanism as the authored " +
+                 "crankshaft clip. Used before the Resources lookup; a synthesised tone is the last fallback.")]
+        [SerializeField] private AudioClip successClip;
+        [SerializeField] private AudioClip wrongPartClip;
+        [SerializeField] private AudioClip invalidAttemptClip;
+
+        [Tooltip("Brief colour pulse on the part: green on success, amber on a failed attempt.")]
+        [SerializeField] private bool spatialPulses = true;
+
         [Header("Debug")]
         [SerializeField] private bool logToConsole = true;
 
@@ -204,9 +213,23 @@ namespace AdaptiveAR.Steps
 
             if (logger != null) logger.LogWrongComponent(partKey, validator != null ? validator.PartKey : null);
             if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
+            if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.5f);
 
+            Feedback(wrongPartClip, wrongPartPhrase, ProceduralTones.Kind.Wrong, "wrong component");
+        }
+
+        /// <summary>
+        /// Serialized clip first (the proven path), then the sentence's Resources clip,
+        /// then a synthesised tone so the cue is never silent.
+        /// </summary>
+        private void Feedback(AudioClip clip, string phrase, ProceduralTones.Kind tone, string label)
+        {
             var speech = InstructionSpeech.Ensure(null);
-            if (speech != null) speech.SpeakFeedback(wrongPartPhrase);
+            if (speech == null) return;
+
+            if (speech.PlayFeedbackClip(clip, label)) return;
+            if (speech.SpeakFeedback(phrase)) return;
+            speech.PlayTone(tone);
         }
 
         private void HandleWrongPartReleased(string partKey, Transform part)
@@ -532,12 +555,19 @@ namespace AdaptiveAR.Steps
 
                 // One line per ATTEMPT (zone entered and left, or released inside it) or
                 // per success - never per release far away, never per frame.
+                AssemblyAction current = workflow != null ? workflow.CurrentAction : null;
                 logger.LogValidationAttempt(_attemptsOnStep, success, posErr, rotErr,
                                             posTol, rotTol,
                                             validator != null ? validator.ActiveInstanceKey ?? validator.PartKey : null,
                                             validator != null ? validator.TargetKey : null,
                                             trigger,
-                                            success ? "placement_success" : (validator != null ? validator.LastErrorType : null));
+                                            success ? "placement_success" : (validator != null ? validator.LastErrorType : null),
+                                            current != null ? current.Id : null,
+                                            validator != null ? validator.PartKey : null,
+                                            validator != null ? validator.ActiveInstanceKey : null,
+                                            validator != null && validator.CurrentPart != null ? validator.CurrentPart.name : null,
+                                            validator != null ? validator.LastAttemptPositionOk : (bool?)null,
+                                            validator != null ? validator.LastAttemptOrientationOk : (bool?)null);
 
                 if (success)
                     logger.LogComponentLocked(validator != null ? validator.ActiveInstanceKey : null, posErr, rotErr,
@@ -545,13 +575,20 @@ namespace AdaptiveAR.Steps
                                               validator != null && validator.CurrentPart != null ? validator.CurrentPart.name : null);
             }
 
+            Transform part = validator != null ? validator.CurrentPart : null;
             if (success)
             {
-                if (haptics && validator != null && validator.CurrentPart != null)
-                    HapticFeedback.Pulse(HapticFeedback.Kind.Success, validator.CurrentPart.position);
-
-                var speech = InstructionSpeech.Ensure(null);
-                if (speech != null) speech.SpeakFeedback(successPhrase);
+                if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.Success, part.position);
+                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Success(part, 0.8f);
+                Feedback(successClip, successPhrase, ProceduralTones.Kind.Success, "success");
+            }
+            else
+            {
+                // A genuine near-target attempt that failed: brief amber pulse, warning
+                // haptic, short corrective cue. The part is never recoloured permanently.
+                if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
+                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.4f);
+                Feedback(invalidAttemptClip, "Not quite. Try again.", ProceduralTones.Kind.Invalid, "invalid attempt");
             }
 
             RaiseStateChanged();

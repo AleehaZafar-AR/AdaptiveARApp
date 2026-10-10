@@ -84,6 +84,9 @@ namespace AdaptiveAR.Steps
         [SerializeField] private bool logPresentation = true;
 
         private readonly List<GameObject> _activatedGhosts = new List<GameObject>();
+        private readonly List<GameObject> _activatedAncestors = new List<GameObject>();
+        private readonly List<GameObject> _hiddenSiblings = new List<GameObject>();
+        private StepData _overrideSpokenFor;
         private readonly List<GameObject> _activatedArrows = new List<GameObject>();
         private readonly List<GameObject> _spawnedInstances = new List<GameObject>();
         private readonly HashSet<GameObject> _madeInert = new HashSet<GameObject>();
@@ -389,6 +392,7 @@ namespace AdaptiveAR.Steps
         private void ApplyGhosts()
         {
             DeactivateAll(_activatedGhosts);
+            RestoreIsolation();
             DestroyAll(_spawnedInstances);
 
             if (!_levelShowsGhosts)
@@ -451,6 +455,24 @@ namespace AdaptiveAR.Steps
         {
             if (action == null) return;
 
+            // L1 with an authored stage-level instruction ("Repeat the procedure ..."): that
+            // sentence is spoken once per stage and the atomic actions stay silent.
+            if (_presentedStep != null && CurrentLevel() == SupportLevel.L1_Minimal)
+            {
+                StepSupportContent l1 = _presentedStep.GetContent(SupportLevel.L1_Minimal);
+                if (l1 != null && !string.IsNullOrEmpty(l1.instructionText))
+                {
+                    if (_overrideSpokenFor != _presentedStep)
+                    {
+                        _overrideSpokenFor = _presentedStep;
+                        if (l1.instructionAudio != null) { if (_speech != null) _speech.PlayAuthored(l1.instructionAudio); }
+                        else if (_speech != null) _speech.SpeakInstruction(l1.instructionText);
+                    }
+                    _pendingStageClip = null;
+                    return;
+                }
+            }
+
             if (action.audioCue != null)
             {
                 if (_speech != null) _speech.PlayAuthored(action.audioCue);
@@ -500,12 +522,50 @@ namespace AdaptiveAR.Steps
 
                 if (makeGhostsInert) MakeInert(target);
 
+                // A child ghost (ghost.piston001.PistonEnd) lives inside an inactive group:
+                // switch the group on but hide its other children, so only this target shows.
+                if (into == _activatedGhosts) ActivateIsolated(target);
+
                 target.SetActive(true);
                 into.Add(target);
                 any = true;
             }
 
             return any;
+        }
+
+        private void ActivateIsolated(GameObject target)
+        {
+            var chain = new List<GameObject>();
+            Transform t = target.transform.parent;
+            while (t != null && !t.gameObject.activeSelf)
+            {
+                chain.Add(t.gameObject);
+                t = t.parent;
+            }
+            if (chain.Count == 0) return;
+
+            Transform parent = target.transform.parent;
+            foreach (Transform sib in parent)
+            {
+                if (sib == target.transform || !sib.gameObject.activeSelf) continue;
+                sib.gameObject.SetActive(false);
+                _hiddenSiblings.Add(sib.gameObject);
+            }
+
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                chain[i].SetActive(true);
+                _activatedAncestors.Add(chain[i]);
+            }
+        }
+
+        private void RestoreIsolation()
+        {
+            foreach (GameObject g in _activatedAncestors) if (g != null) g.SetActive(false);
+            _activatedAncestors.Clear();
+            foreach (GameObject g in _hiddenSiblings) if (g != null) g.SetActive(true);
+            _hiddenSiblings.Clear();
         }
 
         /// <summary>
@@ -579,6 +639,7 @@ namespace AdaptiveAR.Steps
         private void ClearPresentation()
         {
             DeactivateAll(_activatedGhosts);
+            RestoreIsolation();
             DeactivateAll(_activatedArrows);
             DestroyAll(_spawnedInstances);
 

@@ -106,6 +106,57 @@ namespace AdaptiveAR.Audio
         }
     }
 
+    /// <summary>Short synthesised cues built once with AudioClip.Create (no asset involved).</summary>
+    public static class ProceduralTones
+    {
+        public enum Kind { Success = 0, Invalid = 1, Wrong = 2 }
+
+        private static readonly Dictionary<Kind, AudioClip> _clips = new Dictionary<Kind, AudioClip>();
+
+        public static AudioClip Get(Kind kind)
+        {
+            if (_clips.TryGetValue(kind, out AudioClip c) && c != null) return c;
+            c = Build(kind);
+            _clips[kind] = c;
+            return c;
+        }
+
+        private static AudioClip Build(Kind kind)
+        {
+            const int rate = 22050;
+            float[] samples;
+            switch (kind)
+            {
+                case Kind.Success:   samples = Sequence(rate, (660f, 0.09f), (880f, 0.14f)); break;        // rising two-note chime
+                case Kind.Invalid:   samples = Sequence(rate, (330f, 0.12f), (0f, 0.04f), (330f, 0.12f)); break; // low double blip
+                default:             samples = Sequence(rate, (220f, 0.16f), (0f, 0.05f), (220f, 0.16f)); break; // lower, longer
+            }
+            var clip = AudioClip.Create("tone_" + kind, samples.Length, 1, rate, false);
+            clip.SetData(samples, 0);
+            return clip;
+        }
+
+        private static float[] Sequence(int rate, params (float hz, float sec)[] notes)
+        {
+            int total = 0;
+            foreach (var n in notes) total += Mathf.RoundToInt(n.sec * rate);
+            var data = new float[total];
+            int i = 0;
+            foreach (var n in notes)
+            {
+                int len = Mathf.RoundToInt(n.sec * rate);
+                for (int k = 0; k < len; k++, i++)
+                {
+                    if (n.hz <= 0f) { data[i] = 0f; continue; }
+                    float t = k / (float)rate;
+                    float env = Mathf.Min(1f, k / (0.01f * rate)) * Mathf.Min(1f, (len - k) / (0.02f * rate));
+                    data[i] = Mathf.Sin(2f * Mathf.PI * n.hz * t) * 0.6f * env;
+                }
+            }
+            return data;
+        }
+    }
+
     /// <summary>
     /// Plays speech through two dedicated 2-D sources: one for instructions (replaced
     /// when a new instruction arrives) and one for short feedback (never cut by an
@@ -202,6 +253,31 @@ namespace AdaptiveAR.Audio
             Debug.Log($"[Speech] authored clip '{clip.name}' requested, loadState={clip.loadState}");
             _lastText = null;
             StartInstruction(clip, "<authored:" + clip.name + ">");
+        }
+
+        /// <summary>
+        /// Plays an authored/serialized feedback clip on the feedback source - the exact
+        /// mechanism the working crankshaft clip uses (a serialized AudioClip reference).
+        /// </summary>
+        public bool PlayFeedbackClip(AudioClip clip, string label)
+        {
+            if (!enabledSpeech || clip == null) return false;
+            Debug.Log($"[Speech] feedback clip '{clip.name}' ({label}) requested, loadState={clip.loadState}, length={clip.length:F2}s");
+            StartCoroutine(PlayWhenLoaded(_feedbackSource, clip, label, oneShot: true, waitForFeedback: false, id: ++_requestId));
+            return true;
+        }
+
+        /// <summary>
+        /// Procedural tone, generated in memory: independent of any imported asset, so it
+        /// also tells apart "the audio path is broken" from "the clip asset is broken".
+        /// </summary>
+        public void PlayTone(ProceduralTones.Kind kind)
+        {
+            if (!enabledSpeech || _feedbackSource == null) return;
+            AudioClip clip = ProceduralTones.Get(kind);
+            if (clip == null) return;
+            _feedbackSource.PlayOneShot(clip, 0.8f);
+            Debug.Log($"[Speech] tone {kind} played on feedback source.");
         }
 
         /// <summary>Speaks a short feedback phrase on its own source; never cut by an instruction.</summary>

@@ -30,6 +30,13 @@ namespace AdaptiveAR.UI
         [SerializeField] private SupportLevelController supportLevel;
         [SerializeField] private StepValidator validator;
 
+        [Tooltip("Resolves the part for the component preview. Found at runtime when empty.")]
+        [SerializeField] private GuidanceRegistry registry;
+
+        [Header("Component preview")]
+        [Tooltip("Show a slowly rotating copy of the component the action is about.")]
+        [SerializeField] private bool showComponentPreview = true;
+
         [Header("Card fields")]
         [Tooltip("Stage name, e.g. \"Crankshaft\".")]
         [SerializeField] private TextMeshProUGUI stageText;
@@ -97,6 +104,7 @@ namespace AdaptiveAR.UI
         private Image _nextImage;
         private Image _backImage;
         private TextMeshProUGUI _backLabel;
+        private ComponentPreview _preview;
 
         // =====================================================================
         // Setup
@@ -107,6 +115,41 @@ namespace AdaptiveAR.UI
             RemoveLegacyPresentation();
             if (ensureInstructionFits) EnsureInstructionFits();
             StyleControls();
+
+            if (registry == null) registry = FindAnyObjectByType<GuidanceRegistry>(FindObjectsInactive.Include);
+
+            if (showComponentPreview)
+            {
+                _preview = GetComponent<ComponentPreview>();
+                if (_preview == null) _preview = gameObject.AddComponent<ComponentPreview>();
+                _preview.Configure(transform);
+            }
+        }
+
+        /// <summary>
+        /// The object the current action is about, for the preview: the action's part, or
+        /// the next action's part during a "find the components" instruction. Any instance
+        /// of the role will do - it is a picture of what to look for.
+        /// </summary>
+        private GameObject PreviewSourceFor(StepData stage, AssemblyAction action)
+        {
+            if (registry == null || stage == null || action == null) return null;
+
+            string key = action.partKey;
+            if (string.IsNullOrEmpty(key) && stage.actions != null)
+            {
+                for (int i = workflow != null ? workflow.ActionIndex + 1 : 0; i < stage.actions.Count; i++)
+                {
+                    AssemblyAction a = stage.actions[i];
+                    if (a != null && a.enabled && !string.IsNullOrEmpty(a.partKey)) { key = a.partKey; break; }
+                }
+            }
+            if (string.IsNullOrEmpty(key)) return null;
+
+            foreach (string candidate in registry.RoleCandidates(key))
+                if (registry.TryResolveQuiet(candidate, out GameObject go) && go != null) return go;
+
+            return null;
         }
 
         private void OnEnable()
@@ -417,8 +460,21 @@ namespace AdaptiveAR.UI
                 else counterText.text = "";
             }
 
+            // L1 with an authored stage-level instruction (pistons 2-4: "Repeat the piston
+            // assembly procedure ...") shows that sentence instead of the atomic action. The
+            // validation sequence underneath is identical at every level.
+            string l1Override = null;
+            if (supportLevel != null && supportLevel.CurrentLevel == SupportLevel.L1_Minimal && stage != null)
+            {
+                StepSupportContent l1 = stage.GetContent(SupportLevel.L1_Minimal);
+                if (l1 != null && !string.IsNullOrEmpty(l1.instructionText)) l1Override = l1.instructionText;
+            }
+
             if (instructionText != null)
-                instructionText.text = action != null ? action.instruction : (stage != null ? stage.stepTitle : "");
+                instructionText.text = l1Override ?? (action != null ? action.instruction : (stage != null ? stage.stepTitle : ""));
+
+            if (_preview != null)
+                _preview.Show(PreviewSourceFor(stage, action));
 
             if (detailText != null)
             {
@@ -486,6 +542,7 @@ namespace AdaptiveAR.UI
 
             if (nextButton != null && nextButton.gameObject.activeSelf) nextButton.gameObject.SetActive(false);
             if (backButton != null && backButton.gameObject.activeSelf) backButton.gameObject.SetActive(false);
+            if (_preview != null) _preview.Clear();
         }
     }
 }

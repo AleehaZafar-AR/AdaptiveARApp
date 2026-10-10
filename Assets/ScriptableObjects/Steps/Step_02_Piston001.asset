@@ -36,169 +36,166 @@ MonoBehaviour:
   - actionId: step_02_piston001.locate
     kind: 0
     instruction: Find the piston components in the parts tray.
-    detail: You will build the piston, then install it.
+    detail: You will build the piston on the assembly mat, then install it.
     partKey: 
     interchangeablePartKeys: []
     targetKey: 
-    positionToleranceMeters: 0.04
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
-    settleSeconds: 0.45
+    settleSeconds: 0.4
     ghostKeys: []
     showArrow: 0
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: c355187d5079dc26ce7c92d9b0bb5cbc, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_02_piston001.PistonHead
     kind: 1
-    instruction: Place a piston head on the work surface target.
-    detail: 
+    instruction: Place one piston head flat on the marked assembly area.
+    detail: Crown down, open side up, inside the ring on the mat.
     partKey: part.PistonKit001.PistonHead
     interchangeablePartKeys: []
     targetKey: ghost.PistonKit001.PistonHead
-    positionToleranceMeters: 0.025
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
     - ghost.PistonKit001.PistonHead
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 4dd65a74c74eac033acdbb0dc125d50b, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_02_piston001.ConnectingRod
     kind: 1
-    instruction: Fit a connecting rod into the piston head.
-    detail: 
+    instruction: Attach a connecting rod to the piston head from above.
+    detail: Small end down into the head.
     partKey: part.PistonKit001.ConnectingRod
     interchangeablePartKeys: []
     targetKey: ghost.PistonKit001.ConnectingRod
-    positionToleranceMeters: 0.025
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
     - ghost.PistonKit001.ConnectingRod
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: aa7ff5b68cc5b40e6eee3770b852c05b, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_02_piston001.ConnectingPin
     kind: 1
-    instruction: Push a connecting pin through the rod and the head.
+    instruction: Insert a connecting pin from the side, through the head and the rod.
     detail: 
     partKey: part.PistonKit001.ConnectingPin
     interchangeablePartKeys: []
     targetKey: ghost.PistonKit001.ConnectingPin
-    positionToleranceMeters: 0.025
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
     - ghost.PistonKit001.ConnectingPin
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: cac3838b35e861ec7c0bf2e9ec31e29a, type: 3}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_02_piston001.install
+    kind: 1
+    instruction: Fit the piston assembly into its cylinder bore, with the rod on the crankshaft.
+    detail: Lift the head, rod and pin together and lower them into the highlighted bore.
+    partKey: part.PistonKit001
+    interchangeablePartKeys: []
+    targetKey: ghost.piston001.PistonHead
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.piston001
+    showArrow: 1
+    audioCue: {fileID: 8300000, guid: 2d4f439367c439c256ce81e4de0f98e9, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_02_piston001.PistonEnd
     kind: 1
-    instruction: Fit a rod end cap onto the connecting rod.
+    instruction: Attach the rod end cap at the crankshaft.
     detail: 
     partKey: part.PistonKit001.PistonEnd
     interchangeablePartKeys: []
-    targetKey: ghost.PistonKit001.PistonEnd
-    positionToleranceMeters: 0.025
+    targetKey: ghost.piston001.PistonEnd
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
-    - ghost.PistonKit001.PistonEnd
+    - ghost.piston001.PistonEnd
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 27dfe637aeb3e71a7140188114ad5cb5, type: 3}
     enabled: 1
     disabledReason: 
   - actionId: step_02_piston001.pistonBolt
     kind: 2
-    instruction: Fit a retaining bolt.
+    instruction: Fit the first retaining bolt.
     detail: 
     partKey: part.PistonKit001.pistonBolt
     interchangeablePartKeys: []
-    targetKey: ghost.PistonKit001.pistonBolt
-    positionToleranceMeters: 0.025
+    targetKey: ghost.piston001.pistonBolt
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
-    - ghost.PistonKit001.pistonBolt
+    - ghost.piston001.pistonBolt
     showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 0cae5c624929fa93ebe7293f3ec17c2f, type: 3}
     enabled: 1
     disabledReason: 
-  - actionId: step_02_piston001.PistonNut
-    kind: 2
-    instruction: Fit the retaining nut.
-    detail: 
-    partKey: part.PistonKit001.PistonNut
-    interchangeablePartKeys: []
-    targetKey: ghost.PistonKit001.PistonNut
-    positionToleranceMeters: 0.025
-    rotationToleranceDegrees: 25
-    settleSeconds: 0.4
-    ghostKeys:
-    - ghost.PistonKit001.PistonNut
-    showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: Authored but off by default to keep a run inside the 15 minute
-      session target. Enable for a full-procedure run.
   - actionId: step_02_piston001.pistonBoltOther
     kind: 2
     instruction: Fit the second retaining bolt.
     detail: 
     partKey: part.PistonKit001.pistonBoltOther
     interchangeablePartKeys: []
-    targetKey: ghost.PistonKit001.pistonBoltOther
-    positionToleranceMeters: 0.025
+    targetKey: ghost.piston001.pistonBoltOther
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
-    - ghost.PistonKit001.pistonBoltOther
+    - ghost.piston001.pistonBoltOther
     showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: Authored but off by default to keep a run inside the 15 minute
-      session target. Enable for a full-procedure run.
+    audioCue: {fileID: 8300000, guid: 12e1bdf4ace194e9b6be520dd148eed1, type: 3}
+    enabled: 1
+    disabledReason: 
+  - actionId: step_02_piston001.PistonNut
+    kind: 2
+    instruction: Fit the first retaining nut.
+    detail: 
+    partKey: part.PistonKit001.PistonNut
+    interchangeablePartKeys: []
+    targetKey: ghost.piston001.PistonNut
+    positionToleranceMeters: 0.03
+    rotationToleranceDegrees: 25
+    settleSeconds: 0.4
+    ghostKeys:
+    - ghost.piston001.PistonNut
+    showArrow: 1
+    audioCue: {fileID: 8300000, guid: 476355c8f71d667cfcf64268398d760e, type: 3}
+    enabled: 1
+    disabledReason: 
   - actionId: step_02_piston001.PistonNutOther
     kind: 2
     instruction: Fit the second retaining nut.
     detail: 
     partKey: part.PistonKit001.PistonNutOther
     interchangeablePartKeys: []
-    targetKey: ghost.PistonKit001.PistonNutOther
-    positionToleranceMeters: 0.025
+    targetKey: ghost.piston001.PistonNutOther
+    positionToleranceMeters: 0.03
     rotationToleranceDegrees: 25
     settleSeconds: 0.4
     ghostKeys:
-    - ghost.PistonKit001.PistonNutOther
+    - ghost.piston001.PistonNutOther
     showArrow: 1
-    audioCue: {fileID: 0}
-    enabled: 0
-    disabledReason: Authored but off by default to keep a run inside the 15 minute
-      session target. Enable for a full-procedure run.
-  - actionId: step_02_piston001.install
-    kind: 1
-    instruction: Install the assembled piston into its cylinder bore.
-    detail: Lower the completed assembly onto the highlighted target.
-    partKey: part.PistonKit001
-    interchangeablePartKeys: []
-    targetKey: ghost.piston001.PistonHead
-    positionToleranceMeters: 0.04
-    rotationToleranceDegrees: 25
-    settleSeconds: 0.45
-    ghostKeys:
-    - ghost.piston001
-    showArrow: 1
-    audioCue: {fileID: 0}
+    audioCue: {fileID: 8300000, guid: 9d34054f2b1fcd06b3d4948dc73eec6a, type: 3}
     enabled: 1
     disabledReason: 
   expectedDurationSeconds: 90
   defaultSupportLevel: 2
   l1Minimal:
-    instructionText: Fit piston 1.
+    instructionText: 
     instructionDetail: 
     ghostKeys: []
     ghostPrefabs: []

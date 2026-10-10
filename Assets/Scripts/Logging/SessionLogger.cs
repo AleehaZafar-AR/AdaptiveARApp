@@ -272,17 +272,33 @@ namespace AdaptiveAR.Logging
             Write(w);
         }
 
+        /// <summary>
+        /// One line per placement ATTEMPT or success. error_type is one of
+        /// placement_success, incorrect_position, incorrect_orientation,
+        /// incorrect_position_and_orientation; position_ok / orientation_ok give the two
+        /// dimensions separately. requested_key is the role the action asked for,
+        /// instance_key / instance_name the object actually used. Stage, action, support
+        /// level and timestamp are in the envelope every line carries.
+        /// </summary>
         public void LogValidationAttempt(int attemptIndex, bool success,
                                          float positionErrorM, float rotationErrorDeg,
                                          float positionToleranceM, float rotationToleranceDeg,
                                          string partKey, string targetKey, string trigger,
-                                         string rejectReason = null)
+                                         string rejectReason = null,
+                                         string actionId = null, string requestedKey = null,
+                                         string instanceKey = null, string instanceName = null,
+                                         bool? positionOk = null, bool? orientationOk = null)
         {
             var w = NewLine(Events.ValidationAttempt);
-            // "placement_success", "incorrect_position" or "incorrect_orientation".
             w.Str("error_type", rejectReason);
+            w.Str("action_id", actionId);
+            w.Str("requested_key", requestedKey);
+            w.Str("instance_key", instanceKey);
+            w.Str("instance_name", instanceName);
             w.Num("attempt_index", attemptIndex);
             w.Bool("success", success);
+            if (positionOk.HasValue) w.Bool("position_ok", positionOk.Value); else w.Str("position_ok", null);
+            if (orientationOk.HasValue) w.Bool("orientation_ok", orientationOk.Value); else w.Str("orientation_ok", null);
             w.Num("position_error_m", positionErrorM);
             w.Num("rotation_error_deg", rotationErrorDeg);
             w.Num("position_tolerance_m", positionToleranceM);
