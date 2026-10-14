@@ -2201,3 +2201,134 @@ add  6 speech clips
 6. logcat `[AudioAB] CONTROL …` then `[AudioAB] TEST …`; report which were audible.
 7. Button fits six visual pistons; crankshaft untouched; log count 6.
 8. Holders 1–4 then camshaft; `[SelfCheck]` all OK at task start.
+
+
+---
+
+## Claude → Reviewer — 2026-10-14 — STEP 1 ONLY: grab event source, wrong-part in READ, crankshaft action/validation/success trace, placement text trace
+
+Base: `0206e58`. Code only - no scene, asset, tolerance, panel, audio, piston, mat,
+auto-complete, camshaft, AI or HRV change. Both assemblies compile with the csc
+harness. Nothing below has run on a headset: every root cause is marked [QV] and
+the logs named here are what the next logcat must show.
+
+### Root cause 1 — wrong grab gave no feedback [QV]
+Deterministic from the source: the wrong-part watcher was built ONLY inside
+`StepValidator.BeginAction`, i.e. only for a PHYSICAL action. Step 1 begins in the
+READ action "Locate the crankshaft ... pick it up"; for that action `BeginAcknowledge`
+watched the crankshaft alone, so a piston head, holder or camshaft picked up there was
+never evaluated - no event, no eligibility, no feedback. (During the later *place*
+action the watcher existed, but only via per-frame polling of `SelectingPointsCount`
+on registry-resolved parts.)
+
+Fix: one session-wide **grab event source** in `StepValidator`, armed on the first
+action and re-checked on every action (READ, PHYSICAL, AUTO):
+- every selectable part is watched: the registry's parts, the convention-bound kit
+  roles and holders (probed explicitly, no longer dependent on the self-check having
+  run first), plus any other object under the engine root with a `PointableElement`
+  and a Collider (`unregistered:<name>`);
+- each part's Interaction SDK `WhenPointerEventRaised` is subscribed (`Select` →
+  grab, `Unselect/Cancel` → release) **and** `SelectingPointsCount` is polled; a grab
+  is reported once per episode whichever source saw it first (`source=isdk_event|poll`);
+- eligibility is judged against whatever is armed: accepted instances of the PHYSICAL
+  action, or the named part of the READ instruction. Logs, in order:
+  `[GrabEvent] RECEIVED object= id= action= source=` →
+  `[Eligibility] object= requested= eligible= reason=` →
+  `[WrongPart] FIRING object= action=`;
+- the session then drives the four channels independently (each in its own
+  try/catch) and reports `[WrongPart] feedback ... log=ok haptic=ok visual=ok spoken=clip|sentence|none`.
+  Card text ("That is not the required component") still comes from the same event.
+- with nothing armed the grab is still logged (`eligible=n/a reason="no action armed"`).
+
+Reading the next logcat: no `[GrabEvent]` → the SDK never raised Select on that
+object AND polling never saw it (object identity problem - the line names the
+object/id). `[GrabEvent]` without `[Eligibility]` → dispatch. `[WrongPart] FIRING`
+with `feedback ... threw` → that channel.
+
+### Root cause 2 — no placement sentence on the card [QV: not reproduced from source]
+The authored text exists (`step_01_crankshaft.place.instruction = "Fit the crankshaft."`,
+L1 override empty). Statically there is no writer that blanks the card's field after
+onboarding: `ParticipantCard.instructionText` and `StepPresenter.titleText` are the same
+TMP (`TitleText` #1384187973); the presenter only clears `CaptionText`/`StatusLine` when
+a card exists; `OnboardingSequence` writes `HomePanel/Title`, a different field; the Back
+button (shown only in the PHYSICAL state) is bottom-left, not over the title; the
+"Instruction" zone of `AdaptivePanelController` is Full at every level. So the cause
+is not provable from the code and I will not guess at it - it is traced instead:
+- one rule for the sentence, `GuidanceText.InstructionFor(stage, action, level)`
+  (new file), used by the card, the presenter and the action diagnostic;
+- the card writes the sentence FIRST in `Refresh` and the preview / detail / live cue /
+  controls each run in their own try/catch, so nothing on the card can skip it;
+- `[Presenter] action= text="..." source=ParticipantCard field=TitleText#id
+  activeInHierarchy= enabled= fontSize= alpha= canvasGroupAlpha= level=` on every
+  change, with an ERROR if the field is not rendering or the text is empty;
+- `[Presenter] action= text="..." owner=ParticipantCard|StepPresenter type= ghosts=`
+  from `StepPresenter.PresentAction` - the action that owns the ghost reports the
+  sentence; when no card exists it now writes the title itself.
+If the next log shows `text="Fit the crankshaft."` with `activeInHierarchy=true
+enabled=true alpha=1.00` and the card is still blank, the problem is visual (occlusion
+or layout), not text flow; if the lines are absent, `Refresh` is not reached.
+
+### Root cause 3 — aligned crankshaft never validated [QV]
+Static trace of the arming path is sound: `part.crankshaft` → `Components/crankshaft`
+(Grabbable, MeshCollider, Rigidbody); `ghost.crankshaft` → `Ghosties/crankshaft`; same
+mesh and pivot, both scale 1 under 0.0041 parents; tolerance 3 cm / 20° AxialFree
+(unchanged); `snapImmediately` on, so success needs no release; `Update` gated only by
+`IsActive`. What the old code could NOT show was *which* of the six cases applied,
+and it had one genuine trap: any exception inside `Succeed` (snap, lock, join) or in
+an `OnAttemptEvaluated` subscriber (logger, haptics, pulse, speech, card) ran after
+`_completed = true` and before `OnStepValidated`, leaving a dead action with no
+`[Progression]` line. Now:
+- `[CrankshaftValidation] part=#id target=#id distance= angle= posOK= rotOK= armed=
+  held= inZone= tol= sym= partPos= targetPos=` at ~4 Hz while held or in the zone,
+  1 Hz otherwise (so a silent validator is visible as such); the arm line also prints
+  both objects' path, mesh, lossyScale and the distance/angle at arm time;
+- `Succeed` is explicit and isolated: `[CrankshaftSuccess] ENTER ...`, then snap, lock
+  and join each in try/catch, then `[CrankshaftSuccess] snapped= locked= partVisible=`
+  (ERROR if either is false) and the success events are raised regardless;
+- the session marks the action complete first, logs `[CrankshaftSuccess] snapped=
+  locked= actionComplete=true`, then `[Progression] action=... validation success ->
+  allowed=true` and advances through the one gate;
+- `[CrankshaftAction] actionId= requestedPart= realPart=name#id (path) target=name#id
+  (path) validatorArmed= guidanceText="..."` once per entry of the place action, with
+  the reason for any null/false (ERROR, and the action stays blocked).
+- `[Step1Check] crankshaftLocateAction= crankshaftPlaceAction= placeText=
+  realCrankshaft= targetGhost= validator= grabEventSource=` at task start; each false
+  is an explicit ERROR with the reason.
+Decision table for the next log: no `[CrankshaftValidation]` lines → validator not
+running / not armed (see `[CrankshaftAction]`); absurd distance with meshes overlapping
+→ wrong transform (the line names both ids and world positions); `posOK=true
+rotOK=false` → orientation; `posOK=false rotOK=true` → position; both true with no
+`[CrankshaftSuccess] ENTER` → success dispatch (now impossible without an ERROR).
+
+### What changed beyond Step 1 (shared mechanism, behaviour unchanged elsewhere)
+The grab source replaces the old `_others` watcher and `MonitorAcknowledge` for every
+action, so wrong-part feedback now also fires during the READ instructions of later
+stages (previously silent there). Piston, mat, auto-complete and camshaft logic,
+tolerances, snap/lock/join order and all events are otherwise as in `0206e58`.
+
+### Files
+```
+mod  StepValidator.cs             grab event source (ISDK events + poll), eligibility/wrong-part in READ and PHYSICAL,
+                                  [GrabEvent]/[Eligibility]/[WrongPart], live [Validation] log, explicit guarded Succeed
+mod  AssemblySessionController.cs [CrankshaftAction]/[PhysicalAction] diagnostic, [Step1Check], guarded wrong-part channels,
+                                  [CrankshaftSuccess] actionComplete line, EnsureGrabSource on every action
+mod  ParticipantCard.cs           sentence via GuidanceText, written first, [Presenter] trace, isolated preview/cue/controls
+mod  StepPresenter.cs             [Presenter] owner line; writes the title itself when no card exists
+new  GuidanceText.cs (+meta)      the one instruction-text rule
+```
+
+### [QV] — the exact Quest sequence
+1. Start task → `[SelfCheck] OK ...` and `[Step1Check] ... all true`, `[GrabSource] watching N selectable part(s)`.
+2. Pick up a wrong component during "Locate the crankshaft" → `[GrabEvent] RECEIVED`
+   → `[Eligibility] ... eligible=false` → `[WrongPart] FIRING` → `[WrongPart] feedback
+   ... log=ok haptic=ok visual=ok spoken=clip` + card line + pulse + haptic + voice.
+3. Pick up the crankshaft → `[Eligibility] ... eligible=true` → `[Progression] ...
+   advance requested by=pick-up acknowledgement allowed=true`.
+4. `[CrankshaftAction] ... validatorArmed=true guidanceText="Fit the crankshaft."` and
+   `[Presenter] ... text="Fit the crankshaft." activeInHierarchy=true` - and the
+   sentence visible on the card.
+5. Green crankshaft ghost (`[Action] ... ghost=crankshaft(visible)`).
+6. Move it in → `[CrankshaftValidation]` lines with distance/angle converging.
+7. Aligned → `[CrankshaftSuccess] ENTER` → `snapped=true locked=true` →
+   `actionComplete=true` → `[Progression] ... allowed=true` → Stage 2 enters.
+Please attach the logcat from launch to step 7 (or wherever it stops).

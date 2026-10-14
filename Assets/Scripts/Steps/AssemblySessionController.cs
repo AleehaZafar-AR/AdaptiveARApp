@@ -179,6 +179,63 @@ namespace AdaptiveAR.Steps
             {
                 Debug.LogError("[SelfCheck] threw: " + e);
             }
+
+            try { RunStep1Check(); }
+            catch (Exception e) { Debug.LogError("[Step1Check] threw: " + e); }
+        }
+
+        /// <summary>
+        /// Step-1-only check, before any participant interaction. Every field false is an
+        /// explicit ERROR with the reason.
+        /// </summary>
+        private void RunStep1Check()
+        {
+            StepData stage = null;
+            for (int i = 0; stepRunner != null && i < stepRunner.StepCount; i++)
+            {
+                StepData s = stepRunner.GetStepAt(i);
+                if (s != null && s.StepIdentifier == "step_01_crankshaft") { stage = s; break; }
+            }
+
+            AssemblyAction locate = null, place = null;
+            if (stage != null && stage.actions != null)
+            {
+                foreach (AssemblyAction a in stage.actions)
+                {
+                    if (a == null || !a.enabled || a.partKey != "part.crankshaft") continue;
+                    if (!a.RequiresPhysicalValidation && locate == null) locate = a;
+                    if (a.RequiresPhysicalValidation && a.targetKey == "ghost.crankshaft" && place == null) place = a;
+                }
+            }
+
+            SupportLevel level = supportLevel != null ? supportLevel.CurrentLevel : SupportLevel.L1_Minimal;
+            string placeText = place != null ? GuidanceText.InstructionFor(stage, place, level) : null;
+
+            GameObject real = null, ghost = null;
+            if (registry != null) registry.TryResolveQuiet("part.crankshaft", out real);
+            if (registry != null) registry.TryResolveQuiet("ghost.crankshaft", out ghost);
+
+            bool realOk = real != null && real.GetComponent<Oculus.Interaction.PointableElement>() != null
+                          && real.GetComponent<Collider>() != null && real.GetComponent<Rigidbody>() != null;
+            bool ghostOk = ghost != null && ghost != real && ghost.GetComponent<Oculus.Interaction.PointableElement>() == null;
+            bool validatorOk = validator != null && validator.isActiveAndEnabled;
+            int watched = validatorOk ? validator.EnsureGrabSource() : 0;
+            bool grabSourceOk = validatorOk && watched > 0 && real != null && validator.IsWatched(real);
+
+            bool locateOk = locate != null, placeOk = place != null, textOk = !string.IsNullOrEmpty(placeText);
+
+            Debug.Log($"[Step1Check] crankshaftLocateAction={locateOk} crankshaftPlaceAction={placeOk} placeText={textOk} " +
+                      $"realCrankshaft={realOk} targetGhost={ghostOk} validator={validatorOk} grabEventSource={grabSourceOk}" +
+                      $" | placeText=\"{placeText}\" real={(real != null ? real.name + "#" + real.GetInstanceID() : "<null>")} " +
+                      $"ghost={(ghost != null ? ghost.name + "#" + ghost.GetInstanceID() : "<null>")} watched={watched} level={level}");
+
+            if (!locateOk) Debug.LogError("[Step1Check] ERROR crankshaftLocateAction=false: no enabled READ action with partKey part.crankshaft in step_01_crankshaft" + (stage == null ? " (stage not found)" : ""));
+            if (!placeOk) Debug.LogError("[Step1Check] ERROR crankshaftPlaceAction=false: no enabled Place action with partKey part.crankshaft and targetKey ghost.crankshaft");
+            if (!textOk) Debug.LogError("[Step1Check] ERROR placeText=false: the place action's instruction is empty (asset text missing)");
+            if (!realOk) Debug.LogError("[Step1Check] ERROR realCrankshaft=false: " + (real == null ? "registry cannot resolve part.crankshaft" : $"'{real.name}' lacks " + (real.GetComponent<Oculus.Interaction.PointableElement>() == null ? "a PointableElement/Grabbable " : "") + (real.GetComponent<Collider>() == null ? "a Collider " : "") + (real.GetComponent<Rigidbody>() == null ? "a Rigidbody" : "")));
+            if (!ghostOk) Debug.LogError("[Step1Check] ERROR targetGhost=false: " + (ghost == null ? "registry cannot resolve ghost.crankshaft" : (ghost == real ? "ghost.crankshaft resolves to the REAL crankshaft" : "ghost.crankshaft resolves to a grabbable object")));
+            if (!validatorOk) Debug.LogError("[Step1Check] ERROR validator=false: " + (validator == null ? "no StepValidator reference on the session controller" : "StepValidator is disabled or on an inactive object"));
+            if (!grabSourceOk) Debug.LogError("[Step1Check] ERROR grabEventSource=false: " + (!validatorOk ? "no validator" : (watched == 0 ? "no selectable part could be watched" : "the real crankshaft is not in the watched set")));
         }
 
         /// <summary>
@@ -279,15 +336,32 @@ namespace AdaptiveAR.Steps
             _errorsTotal++;
             PushEnvelope();
 
-            if (logger != null) logger.LogWrongComponent(partKey, validator != null ? validator.PartKey : null);
-            if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
-            if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.5f);
+            // Four independent channels; one failing must not silence the others.
+            string requested = validator != null ? validator.PartKey : null;
+            string log = "skipped", haptic = "skipped", visual = "skipped", spoken = "skipped";
+
+            try { if (logger != null) { logger.LogWrongComponent(partKey, requested); log = "ok"; } }
+            catch (Exception e) { log = "threw"; Debug.LogError("[WrongPart] log threw: " + e); }
+
+            try { if (haptics && part != null) { HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position); haptic = "ok"; } }
+            catch (Exception e) { haptic = "threw"; Debug.LogError("[WrongPart] haptic threw: " + e); }
+
+            try { if (spatialPulses && part != null) { AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.5f); visual = "ok"; } }
+            catch (Exception e) { visual = "threw"; Debug.LogError("[WrongPart] visual pulse threw: " + e); }
 
             // One spoken warning per distinct wrong-grab episode (the validator raises this on
             // the grab transition only; the speech layer adds a cooldown on top).
-            var speech = InstructionSpeech.Ensure(null);
-            if (speech != null && !speech.PlayFeedbackClipGated(wrongPartClip, "wrong component", 1.5f))
-                speech.SpeakFeedbackGated(wrongPartPhrase, 1.5f);
+            try
+            {
+                var speech = InstructionSpeech.Ensure(null);
+                if (speech == null) spoken = "no speech component";
+                else if (speech.PlayFeedbackClipGated(wrongPartClip, "wrong component", 1.5f)) spoken = "clip";
+                else spoken = speech.SpeakFeedbackGated(wrongPartPhrase, 1.5f) ? "sentence" : "none";
+            }
+            catch (Exception e) { spoken = "threw"; Debug.LogError("[WrongPart] speech threw: " + e); }
+
+            Debug.Log($"[WrongPart] feedback object={(part != null ? part.name : "?")} key={partKey} requested={requested} " +
+                      $"log={log} haptic={haptic} visual={visual} spoken={spoken} (card text via validator event)");
         }
 
         /// <summary>
@@ -590,6 +664,11 @@ namespace AdaptiveAR.Steps
                 }
             }
 
+            // The grab event source is session-wide: armed for AUTO/NONE actions too, so a
+            // grab is logged whatever the state.
+            try { if (validator != null) validator.EnsureGrabSource(); }
+            catch (Exception e) { Debug.LogError("[Session] validator.EnsureGrabSource threw: " + e); }
+
             try
             {
                 if (presenter != null) presenter.PresentAction(action);
@@ -604,7 +683,58 @@ namespace AdaptiveAR.Steps
                                       action.enabled, action.disabledReason);
 
             LogActionLine(action);
+            try { LogPhysicalActionDiagnostic(stage, action); }
+            catch (Exception e) { Debug.LogError("[Session] action diagnostic threw: " + e); }
             RaiseStateChanged();
+        }
+
+        /// <summary>
+        /// One diagnostic per PHYSICAL action entered: the resolved real part, the resolved
+        /// target, whether the validator armed, and the sentence the card must be showing.
+        /// Tagged [CrankshaftAction] for the crankshaft, [PhysicalAction] otherwise.
+        /// </summary>
+        private void LogPhysicalActionDiagnostic(StepData stage, AssemblyAction action)
+        {
+            if (action == null || !action.RequiresPhysicalValidation) return;
+
+            string role = StepValidator.RoleNameOf(action.partKey);
+            string tag = role == "crankshaft" ? "[CrankshaftAction]" : "[PhysicalAction]";
+            SupportLevel level = supportLevel != null ? supportLevel.CurrentLevel : SupportLevel.L1_Minimal;
+            string text = GuidanceText.InstructionFor(stage, action, level);
+
+            Transform real = validator != null ? validator.CurrentPart : null;
+            Transform target = validator != null ? validator.CurrentTarget : null;
+            bool armed = validator != null && validator.IsActive;
+
+            string realDesc, targetDesc;
+            if (real != null) realDesc = $"{real.name}#{real.GetInstanceID()} ({PathOf(real)})";
+            else
+            {
+                bool resolves = registry != null && !string.IsNullOrEmpty(action.partKey) && registry.RoleCandidates(action.partKey).Count > 0;
+                realDesc = "<null> reason=\"" + (validator == null ? "no validator" : (validator.ArmFailureReason ?? (resolves ? "validator did not arm" : $"registry cannot resolve '{action.partKey}'"))) + "\"";
+            }
+            if (target != null) targetDesc = $"{target.name}#{target.GetInstanceID()} ({PathOf(target)}) activeInHierarchy={target.gameObject.activeInHierarchy}";
+            else
+            {
+                bool resolves = registry != null && !string.IsNullOrEmpty(action.targetKey) && registry.TryResolveQuiet(action.targetKey, out GameObject tg) && tg != null;
+                targetDesc = "<null> reason=\"" + (resolves ? "resolves in the registry but the validator did not take it (not armed)" : $"registry cannot resolve '{action.targetKey}'") + "\"";
+            }
+
+            Debug.Log($"{tag} actionId={action.Id} requestedPart={action.partKey} realPart={realDesc} target={targetDesc} " +
+                      $"validatorArmed={armed}{(armed ? "" : $" reason=\"{(validator != null ? validator.ArmFailureReason ?? "unknown" : "no validator")}\"")} " +
+                      $"guidanceText=\"{text}\"{(string.IsNullOrEmpty(text) ? " reason=\"action.instruction is empty and no L1 override\"" : "")}");
+
+            if (real == null || target == null || !armed || string.IsNullOrEmpty(text))
+                Debug.LogError($"{tag} '{action.Id}' is incomplete: realPart={(real != null)} target={(target != null)} armed={armed} text={!string.IsNullOrEmpty(text)}. " +
+                               "A PHYSICAL action that is not armed stays blocked until it validates.");
+        }
+
+        private static string PathOf(Transform t)
+        {
+            if (t == null) return "<null>";
+            var sb = new System.Text.StringBuilder(t.name);
+            while (t.parent != null) { t = t.parent; sb.Insert(0, t.name + "/"); }
+            return sb.ToString();
         }
 
         /// <summary>One concise line per action entered; loud error on an inconsistent PHYSICAL action.</summary>
@@ -785,6 +915,13 @@ namespace AdaptiveAR.Steps
         {
             // The ONLY way a PHYSICAL action advances.
             AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
+            string role = a != null ? StepValidator.RoleNameOf(a.partKey) : null;
+            string tag = role == "crankshaft" ? "[CrankshaftSuccess]" : "[Success]";
+
+            // Mark the action complete FIRST, then report, then advance through the gate.
+            if (workflow != null) workflow.CompleteCurrentAction();
+            Debug.Log($"{tag} snapped={(validator != null && validator.LastSuccessSnapped)} locked={(validator != null && validator.LastSuccessLocked)} " +
+                      $"actionComplete={(workflow != null && workflow.CurrentActionComplete)} action={(a != null ? a.Id : "<none>")}");
             Debug.Log($"[Progression] action={(a != null ? a.Id : "<none>")} validation success -> allowed=true");
 
             // Installing the partial piston ends the mat's job for this piston.

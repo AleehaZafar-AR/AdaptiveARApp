@@ -2,13 +2,28 @@
 // Judges whether the active component is correctly placed, and makes the physical
 // mating possible in the first place.
 //
+// Grab event source (one for the whole session)
+// ---------------------------------------------
+// Every selectable part - registered or not - is watched from the moment the first
+// action is armed: its Interaction SDK PointableElement raises a pointer event on
+// Select, and SelectingPointsCount is polled every frame as a fallback. Either way a
+// grab is reported ONCE per episode and logged before any eligibility logic:
+//   [GrabEvent] RECEIVED object= id= action= source=isdk_event|poll
+//   [Eligibility] object= requested= eligible= reason=
+//   [WrongPart] FIRING object= action=
+// Eligibility is judged against whatever is armed right now: the accepted instances
+// of a PHYSICAL action, or the named part of a READ instruction ("pick it up"). So a
+// wrong part picked up while READING an instruction is reported exactly like one
+// picked up during a placement. With nothing armed the grab is still logged.
+//
 // Immediate snap
 // --------------
 // The participant does not release anything. The moment the correct part is inside
 // position AND orientation tolerance - in the hand or not - it snaps to the exact
 // target, the grab is ended, the part locks and joins its assembly, and success is
 // raised once. Completion is guarded by a flag, so staying inside the zone cannot
-// fire it twice.
+// fire it twice. Every stage of that path is logged and isolated: a failure to snap
+// or lock is an error, never a silently dead action.
 //
 // Per-role tolerance and symmetry
 // -------------------------------
@@ -82,12 +97,21 @@ namespace AdaptiveAR.Steps
                  "instance the action names.")]
         [SerializeField] private bool interchangeableRoles = true;
 
-        [Tooltip("Watch every other registered part so picking up a wrong one gives feedback.")]
+        [Tooltip("Watch every selectable part so picking up a wrong one gives feedback.")]
         [SerializeField] private bool monitorWrongParts = true;
 
         [Tooltip("Metres a part must move from where it started to count as handled, for " +
                  "parts with no Interaction SDK grab state to read.")]
         [SerializeField] private float handledMoveThreshold = 0.05f;
+
+        [Header("Grab event source")]
+        [Tooltip("Subscribe to each selectable part's Interaction SDK pointer events. Polling of " +
+                 "SelectingPointsCount stays on as a fallback; a grab is reported once either way.")]
+        [SerializeField] private bool eventDrivenGrabs = true;
+
+        [Tooltip("Seconds between live validation log lines while the part is handled or near " +
+                 "the target (about 4 Hz). Elsewhere one line per second proves the loop runs.")]
+        [SerializeField] private float liveLogInterval = 0.25f;
 
         [Header("Tolerances by role (override the action's values)")]
         [SerializeField] private List<RoleTolerance> roleTolerances = DefaultRoleTolerances();
@@ -172,8 +196,24 @@ namespace AdaptiveAR.Steps
         /// <summary>Why the last BeginAction could not arm, for the action log and the self-check.</summary>
         public string ArmFailureReason { get; private set; }
 
-        /// <summary>Number of other selectable parts watched for wrong-component feedback.</summary>
-        public int WatchedOtherCount { get { return _others.Count; } }
+        /// <summary>What the last Succeed() actually achieved, for the success log line.</summary>
+        public bool LastSuccessSnapped { get; private set; }
+        public bool LastSuccessLocked { get; private set; }
+
+        /// <summary>Number of selectable parts watched by the grab event source (session-wide).</summary>
+        public int GrabSourceCount { get { return _watchedList.Count; } }
+
+        /// <summary>Selectable parts watched that are NOT accepted by the current action.</summary>
+        public int WatchedOtherCount
+        {
+            get
+            {
+                int n = 0;
+                foreach (Candidate c in _watchedList)
+                    if (c.tf != null && !_acceptedObjects.Contains(c.tf.gameObject)) n++;
+                return n;
+            }
+        }
 
         /// <summary>Legacy reject reason, derived from LastErrorType.</summary>
         public RejectReason LastRejectReason { get; private set; }
@@ -198,15 +238,27 @@ namespace AdaptiveAR.Steps
             public bool moved;
             public float radius;
             public Vector3 axisLocal;
+
+            // grab event source
+            public Action<Oculus.Interaction.PointerEvent> handler;
+            public bool pendingGrab;
+            public bool pendingRelease;
+            public string grabSource;
         }
 
         private readonly List<Candidate> _candidates = new List<Candidate>();
-        private readonly List<Candidate> _others = new List<Candidate>();
+        private readonly HashSet<GameObject> _acceptedObjects = new HashSet<GameObject>();
         private readonly HashSet<string> _consumed = new HashSet<string>();
 
         // READ-state pick-up monitor (instruction completes when the named part is grabbed)
-        private readonly List<Candidate> _ackCandidates = new List<Candidate>();
+        private readonly HashSet<GameObject> _ackObjects = new HashSet<GameObject>();
+        private AssemblyAction _ackAction;
+        private string _ackPartKey;
         private bool _ackArmed;
+
+        // Session-wide grab event source: every selectable part, registered or not.
+        private readonly Dictionary<GameObject, Candidate> _watched = new Dictionary<GameObject, Candidate>();
+        private readonly List<Candidate> _watchedList = new List<Candidate>();
 
         private Candidate _active;
         private Candidate _wrongHeld;
@@ -215,6 +267,7 @@ namespace AdaptiveAR.Steps
         private float _targetRadius;
         private float _posTol, _rotTol, _attemptZone;
         private AxisSymmetry _symmetry;
+        private float _nextLiveLog;
 
         // attempt tracking
         private bool _inAttempt;
@@ -272,6 +325,27 @@ namespace AdaptiveAR.Steps
             return null;
         }
 
+        /// <summary>Log tag for the active part: [CrankshaftValidation] / [CrankshaftSuccess] for the crankshaft, generic otherwise.</summary>
+        private string Tag(string what)
+        {
+            string role = RoleNameOf(PartKey);
+            return role == "crankshaft" ? "[Crankshaft" + what + "]" : "[" + what + "]";
+        }
+
+        private static string Describe(Transform t)
+        {
+            if (t == null) return "<null>";
+            return $"{t.name}#{t.GetInstanceID()}";
+        }
+
+        private static string PathOf(Transform t)
+        {
+            if (t == null) return "<null>";
+            var sb = new System.Text.StringBuilder(t.name);
+            while (t.parent != null) { t = t.parent; sb.Insert(0, t.name + "/"); }
+            return sb.ToString();
+        }
+
         // =====================================================================
         // Arming
         // =====================================================================
@@ -292,15 +366,23 @@ namespace AdaptiveAR.Steps
             return !string.IsNullOrEmpty(instanceKey) && _consumed.Contains(instanceKey);
         }
 
+        /// <summary>True when the grab event source watches this object.</summary>
+        public bool IsWatched(GameObject go)
+        {
+            return go != null && _watched.ContainsKey(go);
+        }
+
         /// <summary>
         /// Arms a light pick-up monitor for an instruction: when any unconsumed instance of
-        /// the named role is grabbed, OnAcknowledgedByGrab fires once. No validation, no
-        /// wrong-part feedback, no error.
+        /// the named role is grabbed, OnAcknowledgedByGrab fires once. Any OTHER selectable
+        /// part grabbed meanwhile is a wrong component, reported like during a placement.
         /// </summary>
         public bool BeginAcknowledge(AssemblyAction action)
         {
-            _ackCandidates.Clear();
+            _ackObjects.Clear();
             _ackArmed = false;
+            _ackAction = action;
+            _ackPartKey = action != null ? action.partKey : null;
             if (action == null || string.IsNullOrEmpty(action.partKey) || guidanceRegistry == null) return false;
 
             foreach (string key in guidanceRegistry.RoleCandidates(action.partKey))
@@ -309,12 +391,14 @@ namespace AdaptiveAR.Steps
                 if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null) continue;
                 var padlock = go.GetComponent<PlacementLock>();
                 if (padlock != null && padlock.IsLocked) continue;
-                _ackCandidates.Add(MakeCandidate(key, go));
+                _ackObjects.Add(go);
             }
 
-            _ackArmed = _ackCandidates.Count > 0;
+            _ackArmed = _ackObjects.Count > 0;
+            int watched = EnsureGrabSource();
             if (logEvaluations)
-                Debug.Log($"[StepValidator] '{action.Id}': pick-up monitor armed for '{action.partKey}' ({_ackCandidates.Count} instance(s)).");
+                Debug.Log($"[StepValidator] '{action.Id}': pick-up monitor armed for '{action.partKey}' " +
+                          $"({_ackObjects.Count} instance(s)); grab source watches {watched} selectable part(s).");
             return _ackArmed;
         }
 
@@ -326,6 +410,14 @@ namespace AdaptiveAR.Steps
                 roleToleranceRevision = CurrentRoleToleranceRevision;
                 Debug.Log($"[StepValidator] Role tolerance table reset to revision {CurrentRoleToleranceRevision} defaults.");
             }
+        }
+
+        private void OnDestroy()
+        {
+            foreach (Candidate c in _watchedList)
+                if (c.pointable != null && c.handler != null) c.pointable.WhenPointerEventRaised -= c.handler;
+            _watchedList.Clear();
+            _watched.Clear();
         }
 
         public bool BeginAction(AssemblyAction action)
@@ -377,7 +469,6 @@ namespace AdaptiveAR.Steps
                     if (!accepted.Contains(k)) accepted.Add(k);
             }
 
-            var acceptedSet = new HashSet<string>();
             foreach (string key in accepted)
             {
                 if (_consumed.Contains(key)) continue;
@@ -397,7 +488,7 @@ namespace AdaptiveAR.Steps
                 }
 
                 _candidates.Add(MakeCandidate(key, go));
-                acceptedSet.Add(key);
+                _acceptedObjects.Add(go);
             }
 
             if (_candidates.Count == 0)
@@ -408,31 +499,12 @@ namespace AdaptiveAR.Steps
                 return false;
             }
 
-            if (monitorWrongParts)
-            {
-                // The SAME object can be reachable under several keys (part.PistonKit001 is an
-                // alias of a head; roles resolve across kits). Anything that is an accepted
-                // instance must never also be watched as a wrong part - that was the false
-                // "not the required component" while holding the right head.
-                var acceptedObjects = new HashSet<GameObject>();
-                foreach (Candidate c in _candidates) if (c.tf != null) acceptedObjects.Add(c.tf.gameObject);
-                var watched = new HashSet<GameObject>();
-
-                foreach (string key in guidanceRegistry.PartKeys())
-                {
-                    if (acceptedSet.Contains(key)) continue;
-                    if (GuidanceRegistry.IsKitHandleKey(key)) continue;              // alias, never a part of its own
-                    if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null) continue;
-                    if (acceptedObjects.Contains(go) || !watched.Add(go)) continue;
-                    if (go.GetComponent<Oculus.Interaction.PointableElement>() == null) continue;
-                    if (go.GetComponent<Collider>() == null) continue;              // kit roots: not grabbable parts
-
-                    var padlock = go.GetComponent<PlacementLock>();
-                    if (padlock != null && padlock.IsLocked) continue;
-
-                    _others.Add(MakeCandidate(key, go));
-                }
-            }
+            if (CurrentTarget.GetComponent<Oculus.Interaction.PointableElement>() != null)
+                Debug.LogError($"[StepValidator] Action '{action.Id}': target '{TargetKey}' resolves to a GRABBABLE object " +
+                               $"({PathOf(CurrentTarget)}); the target must be the ghost, not a real part.", this);
+            foreach (Candidate c in _candidates)
+                if (c.tf == CurrentTarget)
+                    Debug.LogError($"[StepValidator] Action '{action.Id}': part '{c.key}' and target '{TargetKey}' are the SAME object.", this);
 
             _active = _candidates[0];
             CurrentPart = _active.tf;
@@ -440,21 +512,40 @@ namespace AdaptiveAR.Steps
             _completed = false;
             CurrentCue = Cue.None;
             LastErrorType = null;
+            LastSuccessSnapped = false;
+            LastSuccessLocked = false;
+            _nextLiveLog = 0f;
+
+            int watched = EnsureGrabSource();
 
             // Feedback reflects what is in the hand NOW, including across an action change.
-            foreach (Candidate c in _others)
+            if (monitorWrongParts)
             {
-                if (!c.wasHeld) continue;
-                _wrongHeld = c;
-                OnWrongPartGrabbed?.Invoke(c.key, c.tf);
-                break;
+                foreach (Candidate c in _watchedList)
+                {
+                    if (c.tf == null || !c.wasHeld || _acceptedObjects.Contains(c.tf.gameObject)) continue;
+                    _wrongHeld = c;
+                    Debug.Log($"[WrongPart] FIRING object={c.tf.name} action={action.Id} key={c.key} (already held when the action was armed)");
+                    try { OnWrongPartGrabbed?.Invoke(c.key, c.tf); }
+                    catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartGrabbed handler threw: " + e); }
+                    break;
+                }
             }
 
             if (logEvaluations)
+            {
+                var mfP = CurrentPart.GetComponent<MeshFilter>();
+                var mfT = CurrentTarget.GetComponent<MeshFilter>();
                 Debug.Log($"[StepValidator] '{action.Id}': {_candidates.Count} accepted instance(s) for '{PartKey}' " +
                           $"vs '{TargetKey}'; tolerance {_posTol * 100f:F1} cm / {_rotTol:F0} deg ({_symmetry}); " +
                           $"attempt zone {_attemptZone * 100f:F0} cm; assist gap {assistGapMeters * 100f:F0} cm; " +
-                          $"{_others.Count} other part(s) watched.");
+                          $"{watched} selectable part(s) watched.\n" +
+                          $"    realPart={Describe(CurrentPart)} path={PathOf(CurrentPart)} mesh={(mfP != null && mfP.sharedMesh != null ? mfP.sharedMesh.name : "-")} " +
+                          $"lossyScale={CurrentPart.lossyScale} pos={CurrentPart.position}\n" +
+                          $"    target={Describe(CurrentTarget)} path={PathOf(CurrentTarget)} mesh={(mfT != null && mfT.sharedMesh != null ? mfT.sharedMesh.name : "-")} " +
+                          $"lossyScale={CurrentTarget.lossyScale} pos={CurrentTarget.position} activeInHierarchy={CurrentTarget.gameObject.activeInHierarchy}\n" +
+                          $"    distanceNow={Vector3.Distance(CurrentPart.position, CurrentTarget.position):F3} m angleNow={OrientationError(_active):F1} deg");
+            }
 
             return true;
         }
@@ -501,21 +592,24 @@ namespace AdaptiveAR.Steps
 
         public void Clear()
         {
-            _ackCandidates.Clear();
+            _ackObjects.Clear();
             _ackArmed = false;
+            _ackAction = null;
+            _ackPartKey = null;
             DisengageAssist();
 
             if (_wrongHeld != null)
             {
                 Candidate w = _wrongHeld;
                 _wrongHeld = null;
-                OnWrongPartReleased?.Invoke(w.key, w.tf);
+                try { OnWrongPartReleased?.Invoke(w.key, w.tf); }
+                catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartReleased handler threw: " + e); }
             }
 
             IsActive = false;
             _completed = false;
             _candidates.Clear();
-            _others.Clear();
+            _acceptedObjects.Clear();
             _active = null;
             _action = null;
             CurrentPart = null;
@@ -531,12 +625,220 @@ namespace AdaptiveAR.Steps
         }
 
         // =====================================================================
+        // Grab event source
+        // =====================================================================
+
+        /// <summary>
+        /// Watches every selectable part for the rest of the session: the registry's parts
+        /// (including the convention-bound kit roles and holders) plus any other object
+        /// under the engine root that carries a PointableElement and a Collider. Idempotent;
+        /// returns the number of parts watched.
+        /// </summary>
+        public int EnsureGrabSource()
+        {
+            if (guidanceRegistry == null) return _watchedList.Count;
+
+            int before = _watchedList.Count;
+            var seen = new HashSet<GameObject>();
+
+            // 1. registered and convention-bound keys
+            ProbeConventionKeys();
+            foreach (string key in guidanceRegistry.PartKeys())
+            {
+                if (GuidanceRegistry.IsKitHandleKey(key)) continue;              // alias of a head
+                if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null) continue;
+                if (!seen.Add(go)) continue;
+                Watch(key, go);
+            }
+
+            // 2. anything selectable under the same root as the crankshaft that no key names
+            if (guidanceRegistry.TryResolveQuiet("part.crankshaft", out GameObject crank) && crank != null)
+            {
+                foreach (var pe in crank.transform.root.GetComponentsInChildren<Oculus.Interaction.PointableElement>(true))
+                {
+                    if (pe == null || pe is Oculus.Interaction.PointableCanvas) continue;
+                    GameObject go = pe.gameObject;
+                    if (seen.Contains(go) || _watched.ContainsKey(go)) continue;
+                    if (go.GetComponent<Collider>() == null) continue;
+                    Watch("unregistered:" + go.name, go);
+                }
+            }
+
+            if (_watchedList.Count != before)
+                Debug.Log($"[GrabSource] watching {_watchedList.Count} selectable part(s) (+{_watchedList.Count - before}) " +
+                          $"eventDriven={eventDrivenGrabs}");
+            return _watchedList.Count;
+        }
+
+        /// <summary>Binds the convention keys so the kit roles and holders exist before anything asks for them.</summary>
+        private void ProbeConventionKeys()
+        {
+            string[] roles = { "PistonHead", "ConnectingRod", "ConnectingPin", "PistonEnd", "pistonBolt", "pistonBoltOther", "PistonNut", "PistonNutOther" };
+            for (int k = 1; k <= 4; k++)
+            {
+                foreach (string role in roles) guidanceRegistry.TryResolveQuiet($"part.PistonKit00{k}.{role}", out _);
+                guidanceRegistry.TryResolveQuiet($"part.engineBlockSep00{k}", out _);
+            }
+            guidanceRegistry.TryResolveQuiet("part.camshaft", out _);
+        }
+
+        private void Watch(string key, GameObject go)
+        {
+            if (go == null || _watched.ContainsKey(go)) return;
+            var pointable = go.GetComponent<Oculus.Interaction.PointableElement>();
+            if (pointable == null) return;                                        // not selectable
+            if (go.GetComponent<Collider>() == null) return;                      // kit roots: not grabbable parts
+
+            Candidate c = MakeCandidate(key, go);
+            if (eventDrivenGrabs)
+            {
+                Candidate captured = c;
+                c.handler = evt => HandlePointerEvent(captured, evt);
+                pointable.WhenPointerEventRaised += c.handler;
+            }
+            _watched.Add(go, c);
+            _watchedList.Add(c);
+        }
+
+        private void HandlePointerEvent(Candidate c, Oculus.Interaction.PointerEvent evt)
+        {
+            if (c == null || c.tf == null) return;
+            switch (evt.Type)
+            {
+                case Oculus.Interaction.PointerEventType.Select:
+                    if (!c.wasHeld && !c.pendingGrab)
+                    {
+                        c.pendingGrab = true;
+                        c.grabSource = "isdk_event";
+                        Debug.Log($"[GrabEvent] RECEIVED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
+                                  $"source=isdk_event selecting={(c.pointable != null ? c.pointable.SelectingPointsCount : -1)} key={c.key}");
+                    }
+                    break;
+                case Oculus.Interaction.PointerEventType.Unselect:
+                case Oculus.Interaction.PointerEventType.Cancel:
+                    if (c.pointable == null || c.pointable.SelectingPointsCount == 0) c.pendingRelease = true;
+                    break;
+            }
+        }
+
+        private string CurrentActionId()
+        {
+            if (_action != null) return _action.Id;
+            if (_ackArmed && _ackAction != null) return _ackAction.Id;
+            return "<none>";
+        }
+
+        /// <summary>Runs every frame, armed or not: one grab / one release per episode, whichever source saw it first.</summary>
+        private void ProcessGrabSource()
+        {
+            for (int i = 0; i < _watchedList.Count; i++)
+            {
+                Candidate c = _watchedList[i];
+                if (c.tf == null) continue;
+
+                bool held = c.pointable != null && c.pointable.SelectingPointsCount > 0;
+                bool grab = c.pendingGrab || (held && !c.wasHeld);
+                bool release = c.pendingRelease || (!held && c.wasHeld);
+                string source = c.pendingGrab ? c.grabSource : "poll";
+                c.pendingGrab = false;
+                c.pendingRelease = false;
+
+                if (grab && !c.wasHeld)
+                {
+                    c.wasHeld = true;
+                    if (source != "isdk_event")
+                        Debug.Log($"[GrabEvent] RECEIVED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
+                                  $"source=poll selecting={(c.pointable != null ? c.pointable.SelectingPointsCount : -1)} key={c.key}");
+                    HandleGrab(c, source);
+                }
+
+                if (release && c.wasHeld && !held)
+                {
+                    c.wasHeld = false;
+                    HandleRelease(c);
+                }
+            }
+        }
+
+        private void HandleGrab(Candidate c, string source)
+        {
+            GameObject go = c.tf.gameObject;
+            bool physical = IsActive && !_completed;
+            bool ack = _ackArmed;
+            string actionId = CurrentActionId();
+
+            if (!physical && !ack)
+            {
+                Debug.Log($"[Eligibility] object={go.name} requested=<none> eligible=n/a reason=\"no action armed: nothing to validate or acknowledge\"");
+                return;
+            }
+
+            string requested = physical ? PartKey : _ackPartKey;
+            bool eligible = physical ? _acceptedObjects.Contains(go) : _ackObjects.Contains(go);
+            string reason;
+            if (eligible)
+                reason = physical ? "accepted instance of the requested role for this placement"
+                                  : "the part this instruction asks for (pick-up acknowledges it)";
+            else if (physical)
+                reason = $"selectable part but not an accepted instance of '{requested}' (accepted: {DescribeAccepted()})";
+            else
+                reason = $"selectable part but not the part this instruction asks for ('{requested}')";
+
+            Debug.Log($"[Eligibility] object={go.name} requested={RoleNameOf(requested) ?? "<none>"} eligible={eligible} " +
+                      $"reason=\"{reason}\" key={c.key} action={actionId} source={source}");
+
+            if (eligible)
+            {
+                if (ack)
+                {
+                    _ackArmed = false;
+                    if (logEvaluations) Debug.Log($"[StepValidator] instruction '{actionId}' acknowledged by picking up '{c.key}' ({go.name}).");
+                    try { OnAcknowledgedByGrab?.Invoke(c.key, c.tf); }
+                    catch (Exception e) { Debug.LogError("[StepValidator] OnAcknowledgedByGrab handler threw: " + e); }
+                }
+                // PHYSICAL: OnPartGrabbed is raised by the attempt lifecycle below (same frame).
+                return;
+            }
+
+            if (!monitorWrongParts) return;
+
+            _wrongHeld = c;
+            Debug.Log($"[WrongPart] FIRING object={go.name} action={actionId} key={c.key}");
+            try { OnWrongPartGrabbed?.Invoke(c.key, c.tf); }
+            catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartGrabbed handler threw: " + e); }
+        }
+
+        private void HandleRelease(Candidate c)
+        {
+            if (_wrongHeld == c)
+            {
+                _wrongHeld = null;
+                try { OnWrongPartReleased?.Invoke(c.key, c.tf); }
+                catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartReleased handler threw: " + e); }
+                return;
+            }
+
+            if (IsActive && c.tf != null && _acceptedObjects.Contains(c.tf.gameObject))
+            {
+                try { OnPartReleased?.Invoke(c.key, c.tf); }
+                catch (Exception e) { Debug.LogError("[StepValidator] OnPartReleased handler threw: " + e); }
+            }
+        }
+
+        private string DescribeAccepted()
+        {
+            var names = new List<string>();
+            foreach (Candidate k in _candidates) if (k.tf != null) names.Add($"{k.tf.name}#{k.tf.GetInstanceID()}");
+            return string.Join(", ", names);
+        }
+
+        // =====================================================================
         // Per frame
         // =====================================================================
 
         private void Update()
         {
-            if (_ackArmed) MonitorAcknowledge();
+            ProcessGrabSource();
 
             if (!IsActive || _completed || CurrentTarget == null) return;
 
@@ -558,8 +860,6 @@ namespace AdaptiveAR.Steps
                 else if (Vector3.Distance(c.tf.position, c.startPos) > handledMoveThreshold) c.moved = true;
             }
 
-            MonitorWrongParts();
-
             Candidate chosen = PickActive();
             if (chosen != null && chosen != _active)
             {
@@ -574,8 +874,8 @@ namespace AdaptiveAR.Steps
             if (grabbedNow != null)
             {
                 _stickyAlmostThere = false;
-                Debug.Log(DescribeEligibility(grabbedNow, true));
-                OnPartGrabbed?.Invoke(grabbedNow.key, grabbedNow.tf);
+                try { OnPartGrabbed?.Invoke(grabbedNow.key, grabbedNow.tf); }
+                catch (Exception e) { Debug.LogError("[StepValidator] OnPartGrabbed handler threw: " + e); }
                 // Picking the part up again inside the zone starts a fresh attempt.
                 if (grabbedNow == _active) _inAttempt = false;
             }
@@ -586,6 +886,8 @@ namespace AdaptiveAR.Steps
 
             bool ok = WithinTolerance(_active, out float posErr, out float rotErr);
             bool inZone = posErr <= _attemptZone;
+
+            LiveLog(posErr, rotErr, anyHeld, inZone);
 
             // --- attempt lifecycle: enter zone -> success | leave zone | release inside ---
             if (inZone && !_inAttempt && (anyHeld || HasBeenHandled))
@@ -638,58 +940,20 @@ namespace AdaptiveAR.Steps
             else CurrentCue = Cue.TurnToMatch;
         }
 
-        private void MonitorAcknowledge()
+        /// <summary>
+        /// Throttled live readout of the REAL part against the REAL target: about 4 Hz while
+        /// the part is handled or near the target, 1 Hz otherwise so a silent validator is
+        /// visible as such.
+        /// </summary>
+        private void LiveLog(float posErr, float rotErr, bool anyHeld, bool inZone)
         {
-            foreach (Candidate c in _ackCandidates)
-            {
-                if (c.tf == null) continue;
-                bool held = IsHeld(c);
-                if (held && !c.wasHeld)
-                {
-                    _ackArmed = false;
-                    if (logEvaluations) Debug.Log($"[StepValidator] instruction acknowledged by picking up '{c.key}' ({c.tf.name}).");
-                    OnAcknowledgedByGrab?.Invoke(c.key, c.tf);
-                    return;
-                }
-                c.wasHeld = held;
-            }
-        }
+            if (!logEvaluations || Time.time < _nextLiveLog) return;
+            _nextLiveLog = Time.time + ((anyHeld || inZone) ? liveLogInterval : 1f);
 
-        private string DescribeEligibility(Candidate c, bool eligible)
-        {
-            var cands = new List<string>();
-            foreach (Candidate k in _candidates) cands.Add(k.key);
-            string kit = GuidanceRegistry.KitOf(PartKey);
-            string bound = kit != null && guidanceRegistry != null && guidanceRegistry.TryGetKitHandle(kit, out Transform h) && h != null ? h.name : "-";
-            string reason = eligible ? "instance is an accepted candidate for the requested role"
-                                     : "instance is a selectable part but not an accepted instance of the requested role";
-            return $"[Eligibility] grabbed='{c.tf.name}'#{c.tf.GetInstanceID()} key={c.key} requestedRole={PartKey} " +
-                   $"candidates=[{string.Join(", ", cands)}] boundKitInstance={bound} eligible={eligible} reason={reason}";
-        }
-
-        private void MonitorWrongParts()
-        {
-            if (_others.Count == 0) return;
-
-            foreach (Candidate c in _others)
-            {
-                if (c.tf == null) continue;
-                bool held = IsHeld(c);
-
-                if (held && !c.wasHeld)
-                {
-                    _wrongHeld = c;
-                    Debug.Log(DescribeEligibility(c, false));
-                    OnWrongPartGrabbed?.Invoke(c.key, c.tf);
-                }
-                else if (!held && c.wasHeld && _wrongHeld == c)
-                {
-                    _wrongHeld = null;
-                    OnWrongPartReleased?.Invoke(c.key, c.tf);
-                }
-
-                c.wasHeld = held;
-            }
+            Debug.Log($"{Tag("Validation")} part={Describe(_active.tf)} target={Describe(CurrentTarget)} " +
+                      $"distance={posErr:F4} angle={rotErr:F1} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol} " +
+                      $"armed={IsActive} held={anyHeld} inZone={inZone} tol={_posTol:F3}m/{_rotTol:F0}deg sym={_symmetry} " +
+                      $"partPos={_active.tf.position} targetPos={CurrentTarget.position}");
         }
 
         private static bool IsHeld(Candidate c)
@@ -792,9 +1056,15 @@ namespace AdaptiveAR.Steps
                 Debug.Log($"[StepValidator] Attempt {AttemptCount} FAILED ({trigger}) on '{_active.key}': {LastErrorType}; " +
                           $"closest {pos * 100f:F1} cm, orientation {rot:F0} deg (tol {_posTol * 100f:F1} cm / {_rotTol:F0} deg).");
 
-            OnAttemptEvaluated?.Invoke(false, pos, rot, trigger);
+            try { OnAttemptEvaluated?.Invoke(false, pos, rot, trigger); }
+            catch (Exception e) { Debug.LogError("[StepValidator] OnAttemptEvaluated handler threw: " + e); }
         }
 
+        /// <summary>
+        /// Exactly once per action: snap, lock, join, then raise success. Each stage is
+        /// isolated and reported; the success events are raised even if a stage failed, so
+        /// a snap problem is an error in the log rather than a dead action.
+        /// </summary>
         private void Succeed(string trigger, float posErr, float rotErr)
         {
             if (_completed || _active == null || _active.tf == null) return;
@@ -810,30 +1080,64 @@ namespace AdaptiveAR.Steps
             CurrentCue = Cue.None;
             _consumed.Add(_active.key);
 
+            string tag = Tag("Success");
+            Debug.Log($"{tag} ENTER part={Describe(_active.tf)} target={Describe(CurrentTarget)} " +
+                      $"distance={posErr:F4} angle={rotErr:F1} trigger={trigger} tol={_posTol:F3}m/{_rotTol:F0}deg");
+
             if (logEvaluations)
                 Debug.Log($"[StepValidator] Attempt {AttemptCount} ACCEPTED ({trigger}) on '{_active.key}': " +
                           $"off by {posErr * 100f:F1} cm / {rotErr:F0} deg.");
 
             // 1. exact pose, 2. grab ended + locked (PlacementLock disables the SDK components
             //    and enforces pose + kinematic state continuously), 3. joined to its assembly.
-            PartWatch.Log("Succeed(before snap)", _active.tf);
-            SnapToTarget(_active);
+            bool snapped = false, locked = false;
+            PlacementLock padlock = null;
 
-            var padlock = _active.tf.GetComponent<PlacementLock>();
-            if (padlock == null) padlock = _active.tf.gameObject.AddComponent<PlacementLock>();
-            padlock.LockAt(CurrentTarget);
+            PartWatch.Log("Succeed(before snap)", _active.tf);
+            try
+            {
+                SnapToTarget(_active);
+                snapped = Vector3.Distance(_active.tf.position, CurrentTarget.position) < 0.002f
+                          && Quaternion.Angle(_active.tf.rotation, CurrentTarget.rotation) < 1f;
+            }
+            catch (Exception e) { Debug.LogError($"{tag} snap threw: {e}"); }
+
+            try
+            {
+                padlock = _active.tf.GetComponent<PlacementLock>();
+                if (padlock == null) padlock = _active.tf.gameObject.AddComponent<PlacementLock>();
+                padlock.LockAt(CurrentTarget);
+                locked = padlock.IsLocked;
+            }
+            catch (Exception e) { Debug.LogError($"{tag} lock threw: {e}"); }
             PartWatch.Log("Succeed(after lock)", _active.tf);
 
-            BindAndJoin(_active);
-            padlock.RefreshLockedPose();
+            try
+            {
+                BindAndJoin(_active);
+                if (padlock != null) padlock.RefreshLockedPose();
+            }
+            catch (Exception e) { Debug.LogError($"{tag} join threw: {e}"); }
             PartWatch.Log("Succeed(after join)", _active.tf);
 
             // Collisions with the assembly stay ignored for this part: it lives inside it now.
             _assistFor = null;
             IsAssisting = false;
 
-            OnAttemptEvaluated?.Invoke(true, posErr, rotErr, trigger);
-            OnStepValidated?.Invoke();
+            LastSuccessSnapped = snapped;
+            LastSuccessLocked = locked;
+
+            var renderer = _active.tf.GetComponent<Renderer>();
+            Debug.Log($"{tag} snapped={snapped} locked={locked} partVisible={(renderer != null && renderer.enabled && _active.tf.gameObject.activeInHierarchy)} " +
+                      $"-> raising OnAttemptEvaluated + OnStepValidated");
+            if (!snapped || !locked)
+                Debug.LogError($"{tag} incomplete: snapped={snapped} locked={locked} (see exceptions above). Progression continues on the authoritative gate.");
+
+            try { OnAttemptEvaluated?.Invoke(true, posErr, rotErr, trigger); }
+            catch (Exception e) { Debug.LogError($"{tag} OnAttemptEvaluated handler threw: {e}"); }
+
+            try { OnStepValidated?.Invoke(); }
+            catch (Exception e) { Debug.LogError($"{tag} OnStepValidated handler threw: {e}"); }
         }
 
         private void SnapToTarget(Candidate c)

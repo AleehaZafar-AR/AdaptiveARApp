@@ -283,6 +283,19 @@ namespace AdaptiveAR.Steps
 
             ApplyGhosts();
 
+            // The action that owns the ghost owns the sentence. The ParticipantCard renders it
+            // when present (single writer); otherwise this presenter writes the title itself.
+            string text = GuidanceText.InstructionFor(_presentedStep, action, CurrentLevel());
+            if (!_textOwnedByCard && titleText != null && action != null)
+                titleText.text = text;
+            if (action != null)
+            {
+                Debug.Log($"[Presenter] action={action.Id} text=\"{text}\" owner={(_textOwnedByCard ? "ParticipantCard" : "StepPresenter")} " +
+                          $"type={(action.RequiresPhysicalValidation ? "PHYSICAL" : "READ")} ghosts={DescribeActiveGhosts()}");
+                if (action.enabled && string.IsNullOrEmpty(text))
+                    Debug.LogError($"[Presenter] action '{action.Id}' has no instruction text (asset instruction empty, no L1 override).");
+            }
+
             SpeakAction(action);
 
             if (logPresentation)

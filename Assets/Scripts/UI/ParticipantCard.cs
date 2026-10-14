@@ -101,6 +101,7 @@ namespace AdaptiveAR.UI
         private float _successUntil;
         private FeedbackKind _feedbackKind;
         private string _lastActionKey;
+        private string _lastLoggedText;
         private Image _nextImage;
         private Image _backImage;
         private TextMeshProUGUI _backLabel;
@@ -475,42 +476,65 @@ namespace AdaptiveAR.UI
                 else counterText.text = "";
             }
 
-            // L1 with an authored stage-level instruction (pistons 2-4: "Repeat the piston
-            // assembly procedure ...") shows that sentence instead of the atomic action. The
-            // validation sequence underneath is identical at every level.
-            string l1Override = null;
-            if (supportLevel != null && supportLevel.CurrentLevel == SupportLevel.L1_Minimal && stage != null)
-            {
-                StepSupportContent l1 = stage.GetContent(SupportLevel.L1_Minimal);
-                if (l1 != null && !string.IsNullOrEmpty(l1.instructionText)) l1Override = l1.instructionText;
-            }
+            // The one sentence for this action (L1 stage override, else the action's own
+            // instruction - see GuidanceText). Written first and verified, so nothing that
+            // follows on this card can leave the field empty.
+            SupportLevel level = supportLevel != null ? supportLevel.CurrentLevel : SupportLevel.L1_Minimal;
+            string text = GuidanceText.InstructionFor(stage, action, level);
 
             if (instructionText != null)
-                instructionText.text = l1Override ?? (action != null ? action.instruction : (stage != null ? stage.stepTitle : ""));
-
-            if (_preview != null)
             {
-                GameObject src = PreviewSourceFor(stage, action);
-                string role = StepValidator.RoleNameOf(PreviewKeyFor(stage, action));
-                _preview.Show(src, role);
+                instructionText.text = text;
+                if (text != _lastLoggedText)
+                {
+                    _lastLoggedText = text;
+                    var group = instructionText.GetComponentInParent<CanvasGroup>();
+                    Debug.Log($"[Presenter] action={(action != null ? action.Id : "<none>")} text=\"{text}\" source=ParticipantCard " +
+                              $"field={instructionText.name}#{instructionText.GetInstanceID()} activeInHierarchy={instructionText.gameObject.activeInHierarchy} " +
+                              $"enabled={instructionText.enabled} fontSize={instructionText.fontSize} alpha={instructionText.color.a:F2} " +
+                              $"canvasGroupAlpha={(group != null ? group.alpha.ToString("F2") : "n/a")} level={level}");
+                    if (action != null && action.enabled && string.IsNullOrEmpty(text))
+                        Debug.LogError($"[Presenter] action '{action.Id}' has no instruction text to show (asset instruction empty, no L1 override).");
+                    if (!instructionText.gameObject.activeInHierarchy || !instructionText.enabled)
+                        Debug.LogError($"[Presenter] instruction field '{instructionText.name}' is not rendering (activeInHierarchy={instructionText.gameObject.activeInHierarchy}, enabled={instructionText.enabled}).");
+                }
             }
+            else if (action != null)
+                Debug.LogError("[Presenter] ParticipantCard has no instructionText field assigned; the instruction cannot be shown.");
 
-            if (detailText != null)
+            try
             {
-                bool showDetail = supportLevel != null
-                                  && supportLevel.CurrentLevel != SupportLevel.L1_Minimal
-                                  && action != null
-                                  && !string.IsNullOrEmpty(action.detail);
-
-                detailText.text = showDetail ? action.detail : "";
-                detailText.gameObject.SetActive(showDetail);
+                if (_preview != null)
+                {
+                    GameObject src = PreviewSourceFor(stage, action);
+                    string role = StepValidator.RoleNameOf(PreviewKeyFor(stage, action));
+                    _preview.Show(src, role);
+                }
             }
+            catch (System.Exception e) { Debug.LogError("[ParticipantCard] component preview threw: " + e); }
 
-            if (_feedbackKind == FeedbackKind.Success && Time.time > _successUntil)
-                ClearFeedback();
+            try
+            {
+                if (detailText != null)
+                {
+                    bool showDetail = supportLevel != null
+                                      && supportLevel.CurrentLevel != SupportLevel.L1_Minimal
+                                      && action != null
+                                      && !string.IsNullOrEmpty(action.detail);
 
-            UpdateLiveCue();
-            UpdateControls(action);
+                    detailText.text = showDetail ? action.detail : "";
+                    detailText.gameObject.SetActive(showDetail);
+                }
+
+                if (_feedbackKind == FeedbackKind.Success && Time.time > _successUntil)
+                    ClearFeedback();
+
+                UpdateLiveCue();
+            }
+            catch (System.Exception e) { Debug.LogError("[ParticipantCard] detail/feedback threw: " + e); }
+
+            try { UpdateControls(action); }
+            catch (System.Exception e) { Debug.LogError("[ParticipantCard] controls threw: " + e); }
         }
 
         /// <summary>
@@ -555,6 +579,7 @@ namespace AdaptiveAR.UI
             if (instructionText != null) instructionText.text = "";
             ClearFeedback();
             _lastActionKey = null;
+            _lastLoggedText = null;
 
             if (detailText != null)
             {
