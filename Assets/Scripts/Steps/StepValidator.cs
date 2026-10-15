@@ -244,6 +244,7 @@ namespace AdaptiveAR.Steps
             public bool pendingGrab;
             public bool pendingRelease;
             public string grabSource;
+            public string releaseSource;
         }
 
         private readonly List<Candidate> _candidates = new List<Candidate>();
@@ -325,11 +326,35 @@ namespace AdaptiveAR.Steps
             return null;
         }
 
-        /// <summary>Log tag for the active part: [CrankshaftValidation] / [CrankshaftSuccess] for the crankshaft, generic otherwise.</summary>
+        /// <summary>
+        /// Role prefix for log tags: "Crankshaft", "PistonHead", "ConnectingRod" ... so the
+        /// crankshaft lines read [CrankshaftValidation] and the head lines [PistonHeadValidation].
+        /// </summary>
+        public static string RoleTag(string partKey)
+        {
+            string role = RoleNameOf(partKey);
+            if (string.IsNullOrEmpty(role)) return "Part";
+            return char.ToUpperInvariant(role[0]) + role.Substring(1);
+        }
+
         private string Tag(string what)
         {
-            string role = RoleNameOf(PartKey);
-            return role == "crankshaft" ? "[Crankshaft" + what + "]" : "[" + what + "]";
+            return "[" + RoleTag(PartKey) + what + "]";
+        }
+
+        private AdaptiveAR.MR.AssemblyWorkSurface _workSurface;
+
+        /// <summary>
+        /// Head-on-the-mat actions validate against the mat's ONE head target, which is also
+        /// where the ghost is posed and where the part snaps. Null for every other action.
+        /// </summary>
+        private Transform MatHeadTargetFor(AssemblyAction action)
+        {
+            if (action == null || string.IsNullOrEmpty(action.targetKey) || !action.targetKey.StartsWith("ghost.PistonKit")) return null;
+            if (RoleNameOf(action.partKey) != "PistonHead") return null;
+            if (_workSurface == null) _workSurface = FindAnyObjectByType<AdaptiveAR.MR.AssemblyWorkSurface>(FindObjectsInactive.Include);
+            if (_workSurface == null || !_workSurface.HeadTargetValid || _workSurface.HeadTarget == null) return null;
+            return _workSurface.HeadTarget;
         }
 
         private static string Describe(Transform t)
@@ -461,6 +486,20 @@ namespace AdaptiveAR.Steps
             CurrentTarget = targetGo.transform;
             _targetRadius = ShapeRadius(CurrentTarget);
 
+            Transform matTarget = MatHeadTargetFor(action);
+            if (matTarget != null)
+            {
+                float dPos = Vector3.Distance(targetGo.transform.position, matTarget.position);
+                float dRot = Quaternion.Angle(targetGo.transform.rotation, matTarget.rotation);
+                Debug.Log($"[PistonHeadAction] validation target = mat head target {Describe(matTarget)} ({PathOf(matTarget)}); " +
+                          $"ghost {Describe(targetGo.transform)} residual {dPos * 1000f:F2} mm / {dRot:F2} deg; snap destination = the same transform.");
+                if (dPos > 0.002f || dRot > 1f)
+                    Debug.LogError($"[PistonHeadAction] ghost '{targetGo.name}' is NOT at the head target (residual {dPos * 1000f:F1} mm / {dRot:F1} deg): the visible ghost and the measured target differ.");
+                CurrentTarget = matTarget;
+            }
+            else if (RoleNameOf(action.partKey) == "PistonHead" && !string.IsNullOrEmpty(action.targetKey) && action.targetKey.StartsWith("ghost.PistonKit"))
+                Debug.LogError($"[PistonHeadAction] no valid mat head target for '{action.Id}': measuring against the ghost '{targetGo.name}' instead (mat not shown or target not derived).");
+
             var accepted = new List<string>();
             foreach (string key in action.AcceptedPartKeys())
             {
@@ -485,6 +524,12 @@ namespace AdaptiveAR.Steps
                         if (logEvaluations)
                             Debug.Log($"[StepValidator] Kit handle '{key}' ({go.name}) unlocked for installation.");
                     }
+                }
+
+                if (!go.activeInHierarchy)
+                {
+                    if (logEvaluations) Debug.Log($"[StepValidator] '{key}' ({go.name}) is inactive in the scene: not a candidate.");
+                    continue;
                 }
 
                 _candidates.Add(MakeCandidate(key, go));
@@ -706,17 +751,29 @@ namespace AdaptiveAR.Steps
             switch (evt.Type)
             {
                 case Oculus.Interaction.PointerEventType.Select:
-                    if (!c.wasHeld && !c.pendingGrab)
+                    if (c.pendingGrab) break;
+                    if (c.wasHeld)
                     {
-                        c.pendingGrab = true;
-                        c.grabSource = "isdk_event";
-                        Debug.Log($"[GrabEvent] RECEIVED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
-                                  $"source=isdk_event selecting={(c.pointable != null ? c.pointable.SelectingPointsCount : -1)} key={c.key}");
+                        // A Select while we still think the part is held means a release was
+                        // missed. Close that episode and open a new one rather than staying mute.
+                        Debug.Log($"[GrabEvent] Select on object={c.tf.name} id={c.tf.GetInstanceID()} while still marked held: closing the stale episode first.");
+                        c.pendingRelease = true;
                     }
+                    c.pendingGrab = true;
+                    c.grabSource = "isdk_event";
+                    Debug.Log($"[GrabEvent] RECEIVED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
+                              $"source=isdk_event selecting={(c.pointable != null ? c.pointable.SelectingPointsCount : -1)} key={c.key}");
                     break;
                 case Oculus.Interaction.PointerEventType.Unselect:
                 case Oculus.Interaction.PointerEventType.Cancel:
-                    if (c.pointable == null || c.pointable.SelectingPointsCount == 0) c.pendingRelease = true;
+                    if (c.pointable == null || c.pointable.SelectingPointsCount == 0)
+                    {
+                        c.pendingRelease = true;
+                        c.releaseSource = "isdk_event";
+                        if (c.wasHeld)
+                            Debug.Log($"[GrabEvent] RELEASED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
+                                      $"source=isdk_event({evt.Type}) selecting=0 key={c.key}");
+                    }
                     break;
             }
         }
@@ -740,8 +797,20 @@ namespace AdaptiveAR.Steps
                 bool grab = c.pendingGrab || (held && !c.wasHeld);
                 bool release = c.pendingRelease || (!held && c.wasHeld);
                 string source = c.pendingGrab ? c.grabSource : "poll";
+                string releaseSource = c.pendingRelease ? c.releaseSource : "poll";
                 c.pendingGrab = false;
                 c.pendingRelease = false;
+
+                // Release FIRST: an episode is closed the moment the part is no longer selected
+                // (event or poll), so the next grab - same object or another - can warn again.
+                if (release && c.wasHeld)
+                {
+                    c.wasHeld = false;
+                    if (releaseSource != "isdk_event")
+                        Debug.Log($"[GrabEvent] RELEASED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
+                                  $"source=poll selecting={(c.pointable != null ? c.pointable.SelectingPointsCount : -1)} key={c.key}");
+                    HandleRelease(c);
+                }
 
                 if (grab && !c.wasHeld)
                 {
@@ -750,12 +819,6 @@ namespace AdaptiveAR.Steps
                         Debug.Log($"[GrabEvent] RECEIVED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} " +
                                   $"source=poll selecting={(c.pointable != null ? c.pointable.SelectingPointsCount : -1)} key={c.key}");
                     HandleGrab(c, source);
-                }
-
-                if (release && c.wasHeld && !held)
-                {
-                    c.wasHeld = false;
-                    HandleRelease(c);
                 }
             }
         }
@@ -813,6 +876,7 @@ namespace AdaptiveAR.Steps
             if (_wrongHeld == c)
             {
                 _wrongHeld = null;
+                Debug.Log($"[WrongPart] episode closed object={c.tf.name} id={c.tf.GetInstanceID()} (warned state cleared; the next grab is a new episode)");
                 try { OnWrongPartReleased?.Invoke(c.key, c.tf); }
                 catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartReleased handler threw: " + e); }
                 return;
@@ -950,10 +1014,18 @@ namespace AdaptiveAR.Steps
             if (!logEvaluations || Time.time < _nextLiveLog) return;
             _nextLiveLog = Time.time + ((anyHeld || inZone) ? liveLogInterval : 1f);
 
+            // Breakdown under the mechanical axes regardless of the rule in force: how far the
+            // long axis is off, and how much roll about it remains.
+            Vector3 partAxis = _active.tf.rotation * _active.axisLocal;
+            Vector3 targetAxis = CurrentTarget.rotation * _active.axisLocal;
+            float axisAngle = Vector3.Angle(partAxis, targetAxis);
+            Quaternion alignAxes = Quaternion.FromToRotation(partAxis, targetAxis);
+            float roll = Quaternion.Angle(Quaternion.Inverse(CurrentTarget.rotation) * (alignAxes * _active.tf.rotation), Quaternion.identity);
+
             Debug.Log($"{Tag("Validation")} part={Describe(_active.tf)} target={Describe(CurrentTarget)} " +
                       $"distance={posErr:F4} angle={rotErr:F1} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol} " +
                       $"armed={IsActive} held={anyHeld} inZone={inZone} tol={_posTol:F3}m/{_rotTol:F0}deg sym={_symmetry} " +
-                      $"partPos={_active.tf.position} targetPos={CurrentTarget.position}");
+                      $"axisOff={axisAngle:F1} roll={roll:F1} partPos={_active.tf.position} targetPos={CurrentTarget.position}");
         }
 
         private static bool IsHeld(Candidate c)

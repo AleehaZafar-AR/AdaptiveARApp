@@ -2332,3 +2332,121 @@ new  GuidanceText.cs (+meta)      the one instruction-text rule
 7. Aligned → `[CrankshaftSuccess] ENTER` → `snapped=true locked=true` →
    `actionComplete=true` → `[Progression] ... allowed=true` → Stage 2 enters.
 Please attach the logcat from launch to step 7 (or wherever it stops).
+
+
+---
+
+## Claude → Reviewer — 2026-10-15 — Wrong-grab episodes, crankshaft colour restore, mat closer, ONE piston-head target + head trace
+
+Base: `943f52f`. Code only - no scene, asset, tolerance, audio, AI/HRV, overview,
+camshaft or rod/pin/cap/bolt/nut change. Step 1 validation/progression untouched
+(the only Step-1 edits are the colour fix and log tags). Both assemblies compile
+with the csc harness. Nothing has run on a headset: every item is [QV].
+
+### 1. Wrong-object warning did not repeat after a release [QV]
+Source trace: the grab source already closed an episode on ISDK `Unselect`/`Cancel`
+(the SDK removes the selecting point before raising the event, so the count is 0)
+and by polling, and `[WrongPart] FIRING` was raised once per episode. The one
+deterministic silencer was in the session: the spoken warning went through
+`PlayFeedbackClipGated(..., 1.5 s)` keyed on the label, so a grab → release → grab
+inside 1.5 s produced the card line and a 0.4 s amber pulse but NO voice. Changes:
+- episode boundaries are explicit in the log: `[GrabEvent] RELEASED object= id=
+  source=isdk_event(Unselect|Cancel)|poll selecting=` and `[WrongPart] episode closed
+  object=` (warned state cleared) → next grab logs `[GrabEvent] RECEIVED` →
+  `[Eligibility]` → `[WrongPart] FIRING` again; releases are processed before grabs
+  in the same frame so a quick re-grasp is two episodes;
+- stale-state guard: an ISDK `Select` on an object still marked held closes the old
+  episode and opens a new one (logged), so a missed release can never mute a part;
+- the spoken warning is now per episode (0.3 s double-dispatch guard only). Holding
+  continuously never re-warns: the validator raises one event per episode.
+Correct-object eligibility is untouched.
+
+### 2. Crankshaft stayed red after a successful placement [QV, deterministic]
+`FeedbackPulse.Pulse` stopped a running pulse (the red "far" pulse of the last failed
+attempt, 0.45 s) WITHOUT restoring it, then the green pulse captured the half-red
+property block as its "original" and restored that red at the end - permanently, on
+a part that is locked and never pulsed again. Fix in `FeedbackPulse`: the authored
+block is captured once per part at the first pulse of an episode; an interrupting
+pulse restores it first; every frame lerps from the authored colour (or the
+material's own colour when the block has none), and the final restore is the authored
+block, logged (`[FeedbackPulse] restored authored state on 'crankshaft'`). Success
+explicitly cancels any failure pulse before the green one. `AttentionFader` no longer
+dims a part mid-pulse and ends any pulse on a part it dimmed before restoring it, so
+neither system can hand the other a wrong "original".
+
+### 3. Mat closer to the oil pan [QV]
+The mat sat gap 2 cm + half a 28 cm mat from the pan edge (ring 16 cm away), and the
+whole thing was 0.6x smaller than configured because the object inherits
+EngineAnchor's scale. Now (layout revision 1, applied over the scene's serialized
+values exactly like the tolerance table): true-metre sizing (parent scale
+compensated), mat 0.20 m, gap 0.01 m from the oil pan's footprint, head ring 0.07 m
+from the mat's engine-side edge (so ~8 cm from the pan), same desk plane
+(`deskY + 0.004`), engine/workspace height untouched. Once posed, the mat stays put
+for the session unless the engine moves (same mat, same ring for piston 1 and 2).
+
+### 4. ONE piston-head target; head floating; head never validating [QV]
+Previous design: the kit-root was rotated "rod up" and lifted so the head mesh's
+*bounding-box corner* sat `kitClearance` (serialized **1 cm**) above the mat; the
+ring followed the head's pivot. A box corner is only the crown when the head's
+cylinder axis is a mesh axis; otherwise the corner is below the visible crown and the
+ghost floats. Validation measured the ghost's own transform (same lossy scale as the
+real head, so pivot-to-pivot is consistent) under the PistonHead rule: position
+2.5 cm, **full orientation 22° (symmetry None)** - which includes the roll about the
+head's cylinder axis that a participant cannot see unless they read the pin bore.
+Not loosened: the new trace decides it (see `axisOff`/`roll` below).
+
+Now, in `AssemblyWorkSurface`:
+- `HeadTarget` = child `PistonHeadMatTarget`, the single authority. Orientation: head
+  crown-down as in the assembled piston (rod direction up), pin axis across the view.
+  Position: the HEAD mesh's geometry centre over the ring, its actual lowest point
+  (real vertices when the mesh is readable, bounds corners otherwise - the log says
+  which) `kitClearance` = **3 mm** above the mat. Nothing from kit bounds.
+- Every ghost kit is posed so its head ghost coincides with `HeadTarget`
+  (`kitRoot.rotation = target * inverse(head.localRotation)`, then translate); the
+  residual is logged per kit and is an ERROR above 1 mm / 1°. The ring is drawn at
+  the target.
+- `StepValidator.BeginAction`: for a head action whose target key is
+  `ghost.PistonKit*` the measured target becomes `HeadTarget` itself (logged with the
+  ghost residual; ERROR if they differ), and `Succeed` snaps to `CurrentTarget`, so
+  **ghost pose == validation pose == snap pose** by construction. The same transform
+  serves piston 1 and piston 2.
+- Inactive real parts (`piston001` kit is inactive in the scene) are no longer
+  candidates, so `realPart=` names a grabbable head.
+- Lock/join unchanged: on success the head locks and is bound as the kit handle; the
+  rod/pin later join under it and the install action unlocks it.
+
+Instrumentation is the crankshaft's, keyed by role: `[PistonHeadAction] actionId=
+requestedPart= realPart= target=PistonHeadMatTarget#id validatorArmed= guidanceText=`,
+`[PistonHeadValidation] distance= angle= posOK= rotOK= armed= held= inZone= tol= sym=
+axisOff= roll= partPos= targetPos=` at ~4 Hz near the target, `[PistonHeadSuccess]
+ENTER` → `snapped= locked=` → `actionComplete=true` → `[Progression] ... allowed=true`.
+`[WorkSurface] head target derived from ... lowest point ... clearance 3 mm` and
+`kit N ... residual x mm / y deg` show the target itself.
+
+Reading the next log: `posOK=true rotOK=false` with small `axisOff` and large `roll`
+means the head is flat and centred but turned about its axis - then the PistonHead
+rule needs a pin-bore symmetry (half turn about the head axis), which is a rule
+change to make deliberately, not a tolerance loosening.
+
+### Files
+```
+mod  FeedbackPulse.cs             authored block captured once per episode, restore-before-restart, Cancel/CancelAll/IsPulsing
+mod  AttentionFader.cs            no dimming mid-pulse; pulses on dimmed parts ended before restore
+mod  AssemblyWorkSurface.cs       layout revision 1 (true metres, 0.20 m, gap 1 cm, ring 7 cm), PistonHeadMatTarget, kits posed onto it
+mod  StepValidator.cs             role tags, mat head target as measured/snap transform, inactive parts skipped,
+                                  RELEASED/stale-episode logs, axisOff/roll in the live line
+mod  AssemblySessionController.cs role tags, per-episode spoken warning, failure pulse cancelled before success
+```
+
+### [QV] - the exact Quest sequence
+1. Wrong grab → `[WrongPart] FIRING` + voice/pulse/card; release → `[GrabEvent]
+   RELEASED` + `[WrongPart] episode closed`; wrong grab again (same or another part)
+   → `FIRING` + voice again; hold continuously → nothing more.
+2. Crankshaft: green pulse, then `[FeedbackPulse] restored authored state on
+   'crankshaft'` and the locked crankshaft in its authored colour.
+3. Mat ~1 cm in front of the oil pan, ring ~8 cm from the pan, same desk plane.
+4. `[WorkSurface] head target derived ... clearance 3 mm`, `kit 1 ... residual < 1 mm`,
+   ghost head lying flat on the ring; `[PistonHeadAction] target=PistonHeadMatTarget`;
+   `[PistonHeadValidation]` converging; aligned → `[PistonHeadSuccess] ENTER` →
+   `snapped=true locked=true` → `[Progression] ... allowed=true` → rod action enters.
+Please attach the logcat through step 4 (or wherever it stops).

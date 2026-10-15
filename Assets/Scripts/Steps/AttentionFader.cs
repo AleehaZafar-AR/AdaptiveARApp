@@ -72,6 +72,9 @@ namespace AdaptiveAR.Steps
 
                 var padlock = go.GetComponent<PlacementLock>();
                 if (padlock != null && padlock.IsLocked) continue;             // installed: leave it
+                // A part mid-pulse (green success, amber warning) keeps its pulse: the pulse
+                // restores the authored block when it ends, and dimming it now would be undone.
+                if (AdaptiveAR.UI.FeedbackPulse.IsPulsing(go.transform)) continue;
                 parts++;
 
                 // Only this part's own renderer: a joined child keeps its own rule.
@@ -107,6 +110,10 @@ namespace AdaptiveAR.Steps
 
         private void Restore()
         {
+            // A pulse started while a part was dimmed captured the dimmed block as its
+            // "authored" state; end it now so it cannot put the dim back after this restore.
+            for (int i = 0; i < _dimmed.Count; i++)
+                if (_dimmed[i] != null) AdaptiveAR.UI.FeedbackPulse.Cancel(_dimmed[i].transform);
             for (int i = 0; i < _dimmed.Count; i++)
                 if (_dimmed[i] != null) _dimmed[i].SetPropertyBlock(_dimmedOriginal[i]);
             int n = _dimmed.Count;

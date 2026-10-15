@@ -353,10 +353,13 @@ namespace AdaptiveAR.Steps
             // the grab transition only; the speech layer adds a cooldown on top).
             try
             {
+                // One spoken warning per grab EPISODE: the validator raises this event exactly
+                // once per grab and closes the episode on release, so a time cooldown would only
+                // silence a legitimate second episode. 0.3 s guards against a double dispatch.
                 var speech = InstructionSpeech.Ensure(null);
                 if (speech == null) spoken = "no speech component";
-                else if (speech.PlayFeedbackClipGated(wrongPartClip, "wrong component", 1.5f)) spoken = "clip";
-                else spoken = speech.SpeakFeedbackGated(wrongPartPhrase, 1.5f) ? "sentence" : "none";
+                else if (speech.PlayFeedbackClipGated(wrongPartClip, "wrong component", 0.3f)) spoken = "clip";
+                else spoken = speech.SpeakFeedbackGated(wrongPartPhrase, 0.3f) ? "sentence" : "none";
             }
             catch (Exception e) { spoken = "threw"; Debug.LogError("[WrongPart] speech threw: " + e); }
 
@@ -381,6 +384,7 @@ namespace AdaptiveAR.Steps
         private void HandleWrongPartReleased(string partKey, Transform part)
         {
             if (logger != null) logger.LogNote("wrong_component_released:" + partKey);
+            Debug.Log($"[WrongPart] released object={(part != null ? part.name : "?")} key={partKey}: episode over, the next wrong grab warns again.");
         }
 
         /// <summary>The correct part was let go far from the target. An interaction event, not an error.</summary>
@@ -697,8 +701,7 @@ namespace AdaptiveAR.Steps
         {
             if (action == null || !action.RequiresPhysicalValidation) return;
 
-            string role = StepValidator.RoleNameOf(action.partKey);
-            string tag = role == "crankshaft" ? "[CrankshaftAction]" : "[PhysicalAction]";
+            string tag = "[" + StepValidator.RoleTag(action.partKey) + "Action]";
             SupportLevel level = supportLevel != null ? supportLevel.CurrentLevel : SupportLevel.L1_Minimal;
             string text = GuidanceText.InstructionFor(stage, action, level);
 
@@ -889,9 +892,15 @@ namespace AdaptiveAR.Steps
             var speech = InstructionSpeech.Ensure(null);
             if (success)
             {
-                // Success: chime + haptic + green pulse. No speech - the chime is clearer.
+                // Success: chime + haptic + green pulse. No speech - the chime is clearer. Any
+                // failure pulse still running is cancelled (authored state restored) first, so
+                // the green pulse ends on the authored material, never on a red block.
                 if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.Success, part.position);
-                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Success(part, 0.8f);
+                if (spatialPulses && part != null)
+                {
+                    AdaptiveAR.UI.FeedbackPulse.Cancel(part);
+                    AdaptiveAR.UI.FeedbackPulse.Success(part, 0.8f);
+                }
                 if (speech != null) speech.PlayCue(ProceduralTones.Kind.Success);
             }
             else
@@ -915,8 +924,7 @@ namespace AdaptiveAR.Steps
         {
             // The ONLY way a PHYSICAL action advances.
             AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
-            string role = a != null ? StepValidator.RoleNameOf(a.partKey) : null;
-            string tag = role == "crankshaft" ? "[CrankshaftSuccess]" : "[Success]";
+            string tag = "[" + StepValidator.RoleTag(a != null ? a.partKey : null) + "Success]";
 
             // Mark the action complete FIRST, then report, then advance through the gate.
             if (workflow != null) workflow.CompleteCurrentAction();
