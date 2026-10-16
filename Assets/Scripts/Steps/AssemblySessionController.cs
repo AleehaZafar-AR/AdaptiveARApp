@@ -182,6 +182,19 @@ namespace AdaptiveAR.Steps
 
             try { RunStep1Check(); }
             catch (Exception e) { Debug.LogError("[Step1Check] threw: " + e); }
+
+            // What the participant can actually pick up vs what the wrong-component system watches.
+            try { if (validator != null) validator.AuditGrabCoverage(); }
+            catch (Exception e) { Debug.LogError("[GrabCoverage] threw: " + e); }
+
+            // Every instruction against the guidance actually shown at each support level.
+            try
+            {
+                var arrow = FindAnyObjectByType<AdaptiveAR.UI.GuidanceArrow>(FindObjectsInactive.Include);
+                if (arrow != null) GuidanceAudit.ArrowMinimumLevel = arrow.MinimumLevel;
+                GuidanceAudit.Run(stepRunner, registry, "task_start");
+            }
+            catch (Exception e) { Debug.LogError("[GuidanceAudit] threw: " + e); }
         }
 
         /// <summary>
@@ -675,7 +688,9 @@ namespace AdaptiveAR.Steps
 
             try
             {
-                if (presenter != null) presenter.PresentAction(action);
+                // Either-side actions hand the presenter every free target so all of them show.
+                if (presenter != null)
+                    presenter.PresentAction(action, validator != null && validator.IsActive ? validator.ActiveTargetKeys : null);
             }
             catch (Exception e)
             {

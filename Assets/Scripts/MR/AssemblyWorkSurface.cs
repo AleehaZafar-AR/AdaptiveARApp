@@ -3,21 +3,28 @@
 //
 // Lifecycle: it does not exist for the participant until a piston stage begins;
 // StepManager shows it then, poses the ghost kit on it, and hides it as soon as the
-// partial piston (head + rod + pin) has been installed on the crankshaft. Position:
-// right in front of the oil pan, towards the participant, on the desk plane - a small
-// working gap, not a separate workstation.
+// partial piston (head + rod + pin) has been installed on the crankshaft.
+//
+// Authoring (Edit Mode, no Play)
+// ------------------------------
+// With placementMode = Authored this object's own transform IS the mat: move it on
+// the desk with the normal Move tool and it stays there at runtime (nothing re-poses
+// it). The custom inspector's "Show Authoring Preview" creates Editor-only reference
+// objects under it - the mat quad, the ring and a green piston-head reference - so the
+// head can be laid exactly where it belongs with Move/Rotate. "Capture Piston Head
+// Target Pose" serialises that pose relative to the mat (authoredHeadLocalPosition /
+// authoredHeadLocalRotation) and switches headTargetMode to Authored. From then on
+// no runtime bounding-box / crown / orientation calculation happens: the authored pose
+// IS the green ghost pose, the validation target and the snap destination.
 //
 // ONE head target
 // ---------------
 // `HeadTarget` (child "PistonHeadMatTarget") is the single authoritative pose for the
-// piston head on the mat: centred on the marked ring, head lying flat (crown down, as
-// in the assembled piston with the rod above it), its actual lowest point a few
-// millimetres above the mat. It is computed from the HEAD mesh alone, never from kit
-// bounds, and it is the same transform for every piston. The ghost kits are posed so
-// that each kit's head ghost coincides with it exactly (residual logged), the validator
-// measures against it and snaps to it, so: ghost pose == validation pose == snap pose.
-// A subtle ring on the mat marks it; the ring is always there (it defines the task
-// area) so that L1, with no ghost, still knows where the system expects the head.
+// piston head on the mat, the same transform for every piston. The ghost kits are posed
+// so that each kit's head ghost coincides with it exactly (residual logged), the
+// validator measures against it and snaps to it. Derived mode (the fallback when no
+// pose has been captured) computes it from the HEAD mesh alone: crown down, centred
+// on the ring, actual lowest point a few millimetres above the mat.
 
 using System.Collections.Generic;
 using AdaptiveAR.Steps;
@@ -31,7 +38,7 @@ namespace AdaptiveAR.MR
         {
             /// <summary>In front of the engine block, towards the participant, on the desk plane.</summary>
             InFrontOfEngine = 0,
-            /// <summary>Use this object's own transform as authored in the scene.</summary>
+            /// <summary>Use this object's own transform as authored in the scene. Never re-posed.</summary>
             Authored = 1
         }
 
@@ -39,7 +46,7 @@ namespace AdaptiveAR.MR
         {
             /// <summary>Derived from the head mesh: crown down, centred on the ring, lowest point on the mat.</summary>
             Derived = 0,
-            /// <summary>Copied verbatim from authoredHeadTarget's pose as placed in the Editor.</summary>
+            /// <summary>The captured authored pose (relative to this mat) is used verbatim.</summary>
             Authored = 1
         }
 
@@ -47,35 +54,34 @@ namespace AdaptiveAR.MR
         [SerializeField] private PlacementMode placementMode = PlacementMode.InFrontOfEngine;
 
         [Header("Head target")]
-        [Tooltip("Derived: computed from the head mesh and the mat. Authored: the pose of authoredHeadTarget " +
-                 "is used as-is (lay the PistonKit001/PistonHead ghost flat where you want it and assign it).")]
+        [Tooltip("Authored: the captured pose below is the ghost pose, validation target and snap " +
+                 "destination. Derived: computed from the head mesh and the mat at runtime.")]
         [SerializeField] private HeadTargetMode headTargetMode = HeadTargetMode.Derived;
 
-        [Tooltip("Transform whose world pose IS the head target in Authored mode (an empty child of this " +
-                 "object, or a head ghost positioned in the Editor). Its pose is copied; it is never moved.")]
-        [SerializeField] private Transform authoredHeadTarget;
+        [Tooltip("Captured by 'Capture Piston Head Target Pose': the head pivot's pose in this mat's local space.")]
+        [SerializeField] private Vector3 authoredHeadLocalPosition;
+        [SerializeField] private Quaternion authoredHeadLocalRotation = Quaternion.identity;
+        [SerializeField] private bool hasAuthoredHeadPose;
 
         // Field names carry a "mat" prefix on purpose: the scene object you authored still
         // serialises the earlier names (heightAboveDesk 0.1 etc.), and those must not win.
-        [Tooltip("Side length of the square mat, metres (true metres: parent scale is compensated).")]
+        [Header("Layout")]
+        [Tooltip("Side length of the square mat in TRUE metres (the parent scale is compensated).")]
         [SerializeField] private float matSize = 0.20f;
 
-        [Tooltip("Height of the mat above the detected desk plane, metres. Millimetres: it only avoids z-fighting.")]
+        [Tooltip("InFrontOfEngine only: height of the mat above the detected desk plane, metres.")]
         [SerializeField] private float matHeightAboveDesk = 0.004f;
 
-        [Tooltip("Gap between the oil pan's footprint and the near edge of the mat, metres.")]
+        [Tooltip("InFrontOfEngine only: gap between the oil pan's footprint and the near edge of the mat, metres.")]
         [SerializeField] private float matGapFromEngine = 0.01f;
 
-        [Tooltip("Distance from the mat's engine-side edge to the centre of the head ring, metres.")]
+        [Tooltip("Derived head target only: distance from the mat's engine-side edge to the ring centre, metres.")]
         [SerializeField] private float headRingFromEngineEdge = 0.07f;
 
-        [Tooltip("Clearance between the mat surface and the head's actual lowest point, metres.")]
+        [Tooltip("Derived head target only: clearance between the mat surface and the head's lowest point, metres.")]
         [SerializeField] private float kitClearance = 0.003f;
 
-        [Tooltip("Revision of the layout defaults above. When the code's defaults are newer than the " +
-                 "values serialized in the scene, the layout fields are reset to the defaults at start.")]
-        [SerializeField] private int layoutRevision = 0;
-        private const int CurrentLayoutRevision = 1;
+        [SerializeField, HideInInspector] private int layoutRevision = 0;
 
         [Header("Appearance")]
         [SerializeField] private Color gridColor = new Color(0.25f, 0.82f, 0.85f, 0.50f);
@@ -92,6 +98,10 @@ namespace AdaptiveAR.MR
         public Vector3 SurfaceCenter { get { return transform.position; } }
         public bool IsPlaced { get; private set; }
         public bool IsShown { get { return _visual != null && _visual.activeSelf; } }
+        public PlacementMode Placement { get { return placementMode; } }
+        public HeadTargetMode HeadMode { get { return headTargetMode; } }
+        public bool HasAuthoredHeadPose { get { return hasAuthoredHeadPose; } }
+        public float MatSize { get { return matSize; } }
 
         /// <summary>The one authoritative pose for a piston head on the mat. Null until arranged.</summary>
         public Transform HeadTarget { get { return _headTarget; } }
@@ -107,6 +117,8 @@ namespace AdaptiveAR.MR
         private Vector3 _placedForEngine;
         private bool _placedForEngineKnown;
 
+        private const string AuthoringPrefix = "~Authoring";
+
         private static readonly string[] KitRoles =
         {
             "PistonHead", "ConnectingRod", "ConnectingPin", "PistonEnd",
@@ -115,20 +127,17 @@ namespace AdaptiveAR.MR
 
         private void Awake()
         {
-            ApplyLayoutRevision();
-        }
-
-        private void ApplyLayoutRevision()
-        {
-            if (layoutRevision >= CurrentLayoutRevision) return;
-            matSize = 0.20f;
-            matHeightAboveDesk = 0.004f;
-            matGapFromEngine = 0.01f;
-            headRingFromEngineEdge = 0.07f;
-            kitClearance = 0.003f;
-            layoutRevision = CurrentLayoutRevision;
-            Debug.Log($"[WorkSurface] Layout fields reset to revision {CurrentLayoutRevision} defaults " +
-                      $"(size {matSize} m, gap {matGapFromEngine} m, ring {headRingFromEngineEdge} m from the engine edge, clearance {kitClearance} m).");
+            // Editor-only authoring references must never exist at runtime (they are tagged
+            // EditorOnly and stripped from builds; this covers Play Mode in the Editor).
+            if (Application.isPlaying)
+            {
+                var stale = new List<GameObject>();
+                foreach (Transform t in transform)
+                    if (t != null && t.name.StartsWith(AuthoringPrefix)) stale.Add(t.gameObject);
+                foreach (GameObject g in stale) Destroy(g);
+                if (stale.Count > 0 && logChanges)
+                    Debug.Log($"[WorkSurface] {stale.Count} authoring reference object(s) removed for Play Mode.");
+            }
         }
 
         // =====================================================================
@@ -136,14 +145,26 @@ namespace AdaptiveAR.MR
         // =====================================================================
 
         /// <summary>
-        /// Poses the mat for the current engine position and desk height. Does not show it.
-        /// Once posed, it stays where it is for the session (same mat, same ring, same head
-        /// target for every piston) unless the engine itself has moved.
+        /// Poses the mat for the current engine position and desk height (InFrontOfEngine)
+        /// or leaves the authored transform exactly as it is (Authored). Does not show it.
         /// </summary>
         public void Place(Transform engineRoot, float deskY, Transform head)
         {
-            ApplyLayoutRevision();
             EnsureVisual();
+
+            if (placementMode == PlacementMode.Authored)
+            {
+                // The authored transform is the mat. Nothing here moves it, now or later.
+                Vector3 headWorld = transform.TransformPoint(authoredHeadLocalPosition);
+                _ringWorld = hasAuthoredHeadPose
+                    ? new Vector3(headWorld.x, SurfaceCenter.y, headWorld.z)
+                    : transform.position + transform.forward * (matSize * 0.5f - headRingFromEngineEdge);
+                ApplyVisualScale();
+                IsPlaced = true;
+                if (logChanges)
+                    Debug.Log($"[WorkSurface] Placed (Authored): mat kept at its authored transform pos={transform.position} rot={transform.rotation.eulerAngles} size={matSize:F2} m.");
+                return;
+            }
 
             Vector3 engineNow = engineRoot != null ? engineRoot.position : Vector3.zero;
             if (IsPlaced && _placedForEngineKnown && (engineNow - _placedForEngine).sqrMagnitude < 1e-6f)
@@ -152,34 +173,26 @@ namespace AdaptiveAR.MR
                 return;
             }
 
-            if (placementMode == PlacementMode.InFrontOfEngine)
-            {
-                Transform block = engineRoot != null ? engineRoot.Find("Offset/Ghosties/oilPan") : null;
-                Bounds engine = BoundsOf(block != null ? block : engineRoot, out bool hasEngine);
+            Transform block = engineRoot != null ? engineRoot.Find("Offset/Ghosties/oilPan") : null;
+            Bounds engine = BoundsOf(block != null ? block : engineRoot, out bool hasEngine);
 
-                Vector3 centre = hasEngine ? engine.center : (engineRoot != null ? engineRoot.position : Vector3.zero);
-                Vector3 toUser = ViewDirectionToUser(centre, head);
+            Vector3 centre = hasEngine ? engine.center : (engineRoot != null ? engineRoot.position : Vector3.zero);
+            Vector3 toUser = ViewDirectionToUser(centre, head);
 
-                // Footprint of the oil pan along the line to the participant.
-                float along = hasEngine
-                    ? Mathf.Abs(engine.extents.x * toUser.x) + Mathf.Abs(engine.extents.z * toUser.z)
-                    : 0.3f;
+            // Footprint of the oil pan along the line to the participant.
+            float along = hasEngine
+                ? Mathf.Abs(engine.extents.x * toUser.x) + Mathf.Abs(engine.extents.z * toUser.z)
+                : 0.3f;
 
-                Vector3 edge = new Vector3(centre.x, deskY + matHeightAboveDesk, centre.z) + toUser * (along + matGapFromEngine);
-                Vector3 pos = edge + toUser * (matSize * 0.5f);
-                _ringWorld = edge + toUser * headRingFromEngineEdge;
+            Vector3 edge = new Vector3(centre.x, deskY + matHeightAboveDesk, centre.z) + toUser * (along + matGapFromEngine);
+            Vector3 pos = edge + toUser * (matSize * 0.5f);
+            _ringWorld = edge + toUser * headRingFromEngineEdge;
 
-                transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toUser, Vector3.up));
+            transform.SetPositionAndRotation(pos, Quaternion.LookRotation(-toUser, Vector3.up));
 
-                if (logChanges)
-                    Debug.Log($"[WorkSurface] Placed ({placementMode}) at {transform.position}: oil pan {(block != null ? "bounds" : "ROOT bounds (oilPan ghost not found)")} " +
-                              $"centre={centre} halfDepth={along:F3} gap={matGapFromEngine:F3} size={matSize:F2}; ring {headRingFromEngineEdge:F3} m from the engine edge at {_ringWorld}.");
-            }
-            else
-            {
-                _ringWorld = transform.position + transform.forward * (matSize * 0.5f - headRingFromEngineEdge);
-                if (logChanges) Debug.Log($"[WorkSurface] Placed ({placementMode}) at {transform.position}.");
-            }
+            if (logChanges)
+                Debug.Log($"[WorkSurface] Placed ({placementMode}) at {transform.position}: oil pan {(block != null ? "bounds" : "ROOT bounds (oilPan ghost not found)")} " +
+                          $"centre={centre} halfDepth={along:F3} gap={matGapFromEngine:F3} size={matSize:F2}; ring {headRingFromEngineEdge:F3} m from the engine edge at {_ringWorld}.");
 
             ApplyVisualScale();
             IsPlaced = true;
@@ -197,11 +210,12 @@ namespace AdaptiveAR.MR
                 chain = t.name + (t.gameObject.activeSelf ? "" : "[INACTIVE]") + "/" + chain;
             Debug.Log($"[WorkSurface] {where}: activeInHierarchy={gameObject.activeInHierarchy} visual={(_visual != null ? _visual.activeSelf.ToString() : "none")} " +
                       $"renderer={(r != null ? r.enabled.ToString() : "none")} collider={(_collider != null ? _collider.enabled.ToString() : "none")} " +
-                      $"pos={transform.position} lossyScale={transform.lossyScale} headTarget={(HeadTargetValid && _headTarget != null ? _headTarget.position.ToString() : "INVALID")} chain={chain}");
+                      $"pos={transform.position} lossyScale={transform.lossyScale} placement={placementMode} headMode={headTargetMode} " +
+                      $"headTarget={(HeadTargetValid && _headTarget != null ? _headTarget.position.ToString() : "INVALID")} chain={chain}");
             if (_visual != null && !_visual.activeInHierarchy)
                 Debug.LogError("[WorkSurface] visual is NOT active in hierarchy after SHOW - see chain above.");
             if (!HeadTargetValid)
-                Debug.LogError("[WorkSurface] head target is not valid after SHOW: ArrangeKitGhosts did not derive it (see errors above).");
+                Debug.LogError("[WorkSurface] head target is not valid after SHOW: ArrangeKitGhosts did not establish it (see errors above).");
         }
 
         public void Show(bool shown)
@@ -260,16 +274,14 @@ namespace AdaptiveAR.MR
         // =====================================================================
 
         /// <summary>
-        /// Derives the ONE head target from the head mesh and the assembled piston's
-        /// head/rod/pin relation, then poses every ghost kit so its head ghost coincides
-        /// with that target. Returns the number of kits arranged.
+        /// Establishes the ONE head target (authored pose, or derived from the head mesh),
+        /// then poses every ghost kit so its head ghost coincides with it. Returns the
+        /// number of kits arranged.
         /// </summary>
         public int ArrangeKitGhosts(GuidanceRegistry registry, Transform head)
         {
             if (registry == null || !IsPlaced) return 0;
 
-            // The relation head->rod->pin is the same in every assembled piston; use the
-            // first one that resolves to derive the flat orientation.
             Transform refKitRoot = null, refAssembled = null;
             for (int n = 1; n <= 4 && refKitRoot == null; n++)
             {
@@ -279,9 +291,14 @@ namespace AdaptiveAR.MR
                 refAssembled = asm.transform;
             }
 
-            if (refKitRoot == null || !DeriveHeadTarget(refKitRoot, refAssembled))
+            bool established = refKitRoot != null && (headTargetMode == HeadTargetMode.Authored
+                ? UseAuthoredHeadTarget(refKitRoot)
+                : DeriveHeadTarget(refKitRoot, refAssembled));
+
+            if (!established)
             {
-                Debug.LogError("[WorkSurface] head target could NOT be derived: no ghost kit / assembled piston ghost resolved.");
+                Debug.LogError("[WorkSurface] head target could NOT be established: " +
+                               (refKitRoot == null ? "no ghost kit / assembled piston ghost resolved." : "see the error above."));
                 return 0;
             }
 
@@ -299,21 +316,52 @@ namespace AdaptiveAR.MR
             }
 
             if (logChanges)
-                Debug.Log($"[WorkSurface] {arranged} ghost kit(s) arranged on the head target.");
+                Debug.Log($"[WorkSurface] {arranged} ghost kit(s) arranged on the head target ({headTargetMode}).");
             return arranged;
         }
 
+        /// <summary>Authored mode: the captured local pose is the head target. No derivation, no lift.</summary>
+        private bool UseAuthoredHeadTarget(Transform kitRoot)
+        {
+            if (!hasAuthoredHeadPose)
+            {
+                Debug.LogError("[WorkSurface] headTargetMode is Authored but no pose has been captured " +
+                               "(use 'Capture Piston Head Target Pose' in the Inspector). Falling back to Derived for this session.");
+                return false;
+            }
+
+            EnsureHeadTarget();
+            _headTarget.localPosition = authoredHeadLocalPosition;
+            _headTarget.localRotation = authoredHeadLocalRotation;
+            HeadTargetValid = true;
+
+            Vector3 pos = _headTarget.position;
+            _ringWorld = new Vector3(pos.x, SurfaceCenter.y, pos.z);
+            PlaceMarking(_ringWorld, HeadFootprint(kitRoot) * 1.3f);
+
+            if (logChanges)
+                Debug.Log($"[WorkSurface] head target: AUTHORED local pos={authoredHeadLocalPosition} rot={authoredHeadLocalRotation.eulerAngles} " +
+                          $"-> world pos={pos} rot={_headTarget.rotation.eulerAngles} (pivot {(pos.y - SurfaceCenter.y) * 1000f:F0} mm above the mat plane), ring at {_ringWorld}.");
+            return true;
+        }
+
+        private float HeadFootprint(Transform kitRoot)
+        {
+            Transform headGhost = kitRoot != null ? kitRoot.Find("PistonHead") : null;
+            var mf = headGhost != null ? headGhost.GetComponent<MeshFilter>() : null;
+            if (mf == null || mf.sharedMesh == null) return 0.05f;
+            Vector3 e = Vector3.Scale(mf.sharedMesh.bounds.size, Vector3.Scale(headGhost.localScale, kitRoot.lossyScale));
+            return Mathf.Max(Mathf.Abs(e.x), Mathf.Abs(e.z), Mathf.Abs(e.y));
+        }
+
         /// <summary>
-        /// Head flat on the mat, crown down, centred on the ring, actual lowest point
-        /// kitClearance above the mat. Orientation: in the assembled piston the rod hangs
-        /// below the head, so "rod direction up" lays the head crown-down; the pin axis is
-        /// then turned to run across the participant's view.
+        /// Derived mode: head flat on the mat, crown down, centred on the ring, actual lowest
+        /// point kitClearance above the mat. Orientation: in the assembled piston the rod hangs
+        /// below the head, so "rod direction up" lays the head crown-down; the pin axis is then
+        /// turned to run across the participant's view.
         /// </summary>
         private bool DeriveHeadTarget(Transform kitRoot, Transform assembled)
         {
-            if (headTargetMode == HeadTargetMode.Authored)
-                return UseAuthoredHeadTarget(kitRoot);
-
             Transform headSrc = assembled != null ? assembled.Find("PistonHead") : null;
             Transform rodSrc = assembled != null ? assembled.Find("ConnectingRod") : null;
             Transform pinSrc = assembled != null ? assembled.Find("ConnectingPin") : null;
@@ -324,7 +372,6 @@ namespace AdaptiveAR.MR
                 return false;
             }
 
-            // Kit-root orientation that lays the head flat (as before), expressed in world space.
             Vector3 towardsRodLocal = (rodSrc.localPosition - headSrc.localPosition).normalized;
             Quaternion r0 = Quaternion.FromToRotation(towardsRodLocal, Vector3.up);
             if (pinSrc != null)
@@ -339,7 +386,6 @@ namespace AdaptiveAR.MR
                 }
             }
 
-            // The head's own world rotation at that kit orientation, and its world scale.
             Quaternion headRot = r0 * headSrc.localRotation;
             Vector3 headScale = Vector3.Scale(headGhost.localScale, kitRoot.lossyScale);
 
@@ -351,8 +397,6 @@ namespace AdaptiveAR.MR
                 return false;
             }
 
-            // Lowest point and footprint centre of the HEAD mesh alone, at the target rotation,
-            // from real vertices when the mesh is readable (bounds corners otherwise).
             Matrix4x4 m = Matrix4x4.TRS(Vector3.zero, headRot, headScale);
             float minY = float.MaxValue;
             Vector3 lo = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
@@ -384,8 +428,7 @@ namespace AdaptiveAR.MR
                 }
             }
 
-            // Pivot placement: geometry centre over the ring, lowest point on the mat + clearance.
-            Vector3 centreOffset = (lo + hi) * 0.5f;                   // pivot -> geometry centre, world axes
+            Vector3 centreOffset = (lo + hi) * 0.5f;
             Vector3 pivot = new Vector3(_ringWorld.x - centreOffset.x,
                                         SurfaceCenter.y + kitClearance - minY,
                                         _ringWorld.z - centreOffset.z);
@@ -398,46 +441,9 @@ namespace AdaptiveAR.MR
             PlaceMarking(_ringWorld, footprint * 1.3f);
 
             if (logChanges)
-                Debug.Log($"[WorkSurface] head target derived from {source}: pos={pivot} rot={headRot.eulerAngles} " +
+                Debug.Log($"[WorkSurface] head target DERIVED from {source}: pos={pivot} rot={headRot.eulerAngles} " +
                           $"lowest point {SurfaceCenter.y + kitClearance:F4} vs mat {SurfaceCenter.y:F4} (clearance {kitClearance * 1000f:F0} mm), " +
                           $"footprint {footprint * 100f:F1} cm, ring at {_ringWorld}, headScale={headScale}.");
-            return true;
-        }
-
-        /// <summary>
-        /// Authored mode: the researcher laid the head where they want it in the Editor; that
-        /// world pose is copied into the head target (which stays a child of the mat), the ring
-        /// is drawn under it, and the usual kit posing / validation / snap use it unchanged.
-        /// </summary>
-        private bool UseAuthoredHeadTarget(Transform kitRoot)
-        {
-            if (authoredHeadTarget == null)
-            {
-                Debug.LogError("[WorkSurface] headTargetMode is Authored but authoredHeadTarget is not assigned.");
-                return false;
-            }
-
-            EnsureHeadTarget();
-            Vector3 pos = authoredHeadTarget.position;
-            Quaternion rot = authoredHeadTarget.rotation;
-            _headTarget.SetPositionAndRotation(pos, rot);
-            HeadTargetValid = true;
-            _ringWorld = new Vector3(pos.x, SurfaceCenter.y, pos.z);
-
-            // Ring sized from the head mesh footprint when a head ghost is available.
-            float footprint = 0.05f;
-            Transform headGhost = kitRoot != null ? kitRoot.Find("PistonHead") : null;
-            var mf = headGhost != null ? headGhost.GetComponent<MeshFilter>() : null;
-            if (mf != null && mf.sharedMesh != null)
-            {
-                Vector3 e = Vector3.Scale(mf.sharedMesh.bounds.size, Vector3.Scale(headGhost.localScale, kitRoot.lossyScale));
-                footprint = Mathf.Max(Mathf.Abs(e.x), Mathf.Abs(e.z), Mathf.Abs(e.y));
-            }
-            PlaceMarking(_ringWorld, footprint * 1.3f);
-
-            if (logChanges)
-                Debug.Log($"[WorkSurface] head target: authored from '{authoredHeadTarget.name}' pos={pos} rot={rot.eulerAngles} " +
-                          $"(height above mat {(pos.y - SurfaceCenter.y) * 1000f:F0} mm at the pivot), ring at {_ringWorld}.");
             return true;
         }
 
@@ -477,7 +483,6 @@ namespace AdaptiveAR.MR
             }
             if (headChild == null || !HeadTargetValid) return false;
 
-            // Direct child: world = root * local.
             kitRoot.rotation = _headTarget.rotation * Quaternion.Inverse(headChild.localRotation);
             kitRoot.position += _headTarget.position - headChild.position;
 
@@ -537,7 +542,7 @@ namespace AdaptiveAR.MR
             ApplyVisualScale();
             EnsureHeadTarget();
 
-            if (!gameObject.name.StartsWith("WorkSurface")) gameObject.name = "WorkSurface";
+            if (!gameObject.name.StartsWith("WorkSurface") && !gameObject.name.StartsWith("Worksurface")) gameObject.name = "WorkSurface";
 
             _visual.SetActive(false);
             _marking.SetActive(false);
@@ -630,5 +635,156 @@ namespace AdaptiveAR.MR
             if (_material != null) Destroy(_material);
             if (_markingMaterial != null) Destroy(_markingMaterial);
         }
+
+#if UNITY_EDITOR
+        // =====================================================================
+        // Edit-Mode authoring (no Play). Reference objects are Editor-only: tagged
+        // EditorOnly (stripped from builds), never saved into a build, and destroyed in
+        // Play Mode. They carry no Rigidbody, collider or Interaction SDK component.
+        // =====================================================================
+
+        public bool EditorHasAuthoringPreview
+        {
+            get { return transform.Find(AuthoringPrefix + "PistonHead") != null; }
+        }
+
+        public Transform EditorAuthoringHead
+        {
+            get { return transform.Find(AuthoringPrefix + "PistonHead"); }
+        }
+
+        /// <summary>Creates the mat quad, the ring and a green piston-head reference under this object.</summary>
+        public string EditorShowAuthoringPreview()
+        {
+            var registry = FindAnyObjectByType<GuidanceRegistry>(FindObjectsInactive.Include);
+            GameObject headGhost = null;
+            if (registry != null) registry.TryResolveQuiet("ghost.PistonKit001.PistonHead", out headGhost);
+            if (headGhost == null)
+            {
+                foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
+                {
+                    if (t == null || t.name != "PistonHead" || t.parent == null || t.parent.name != "PistonKit001") continue;
+                    if (t.gameObject.scene.IsValid() && t.GetComponent<Oculus.Interaction.PointableElement>() == null) { headGhost = t.gameObject; break; }
+                }
+            }
+            if (headGhost == null) return "Could not find the ghost piston head (ghost.PistonKit001.PistonHead) to copy its mesh and material.";
+
+            var srcMf = headGhost.GetComponent<MeshFilter>();
+            var srcMr = headGhost.GetComponent<MeshRenderer>();
+            if (srcMf == null || srcMf.sharedMesh == null || srcMr == null) return "The ghost piston head has no MeshFilter/MeshRenderer.";
+
+            float k = LocalPerMetre();
+
+            // Mat quad, at the size runtime will draw it.
+            GameObject mat = GetOrCreateAuthoringChild(AuthoringPrefix + "Mat");
+            SetupAuthoringQuad(mat, BuildGridTexture(256, gridCells), Color.white);
+            mat.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            mat.transform.localPosition = Vector3.zero;
+            mat.transform.localScale = new Vector3(matSize * k, matSize * k, 1f);
+
+            // Head reference: same mesh, same green ghost material, same world scale as the real head.
+            GameObject head = GetOrCreateAuthoringChild(AuthoringPrefix + "PistonHead");
+            var mf = head.GetComponent<MeshFilter>(); if (mf == null) mf = head.AddComponent<MeshFilter>();
+            var mr = head.GetComponent<MeshRenderer>(); if (mr == null) mr = head.AddComponent<MeshRenderer>();
+            mf.sharedMesh = srcMf.sharedMesh;
+            mr.sharedMaterials = srcMr.sharedMaterials;
+            Vector3 want = headGhost.transform.lossyScale;
+            Vector3 have = transform.lossyScale;
+            head.transform.localScale = new Vector3(want.x / Mathf.Max(1e-6f, have.x), want.y / Mathf.Max(1e-6f, have.y), want.z / Mathf.Max(1e-6f, have.z));
+            if (hasAuthoredHeadPose)
+            {
+                head.transform.localPosition = authoredHeadLocalPosition;
+                head.transform.localRotation = authoredHeadLocalRotation;
+            }
+            else if (head.transform.localPosition == Vector3.zero)
+            {
+                head.transform.localPosition = new Vector3(0f, 0.02f * k, 0f);
+                head.transform.localRotation = Quaternion.identity;
+            }
+
+            GameObject ring = GetOrCreateAuthoringChild(AuthoringPrefix + "Ring");
+            SetupAuthoringQuad(ring, BuildRingTexture(128), markingColor);
+            ring.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            EditorUpdateRingPreview();
+
+            return $"Authoring preview shown. Move/Rotate '{AuthoringPrefix}PistonHead' with the Scene tools, then press Capture. " +
+                   $"Mat size {matSize:F2} m (true metres).";
+        }
+
+        /// <summary>Keeps the ring preview under the head reference while it is being moved.</summary>
+        public void EditorUpdateRingPreview()
+        {
+            Transform head = EditorAuthoringHead;
+            Transform ring = transform.Find(AuthoringPrefix + "Ring");
+            if (head == null || ring == null) return;
+            float k = LocalPerMetre();
+            Vector3 local = head.localPosition;
+            ring.localPosition = new Vector3(local.x, 0.002f * k, local.z);
+            float d = 0.05f;
+            var mf = head.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null)
+            {
+                Vector3 e = Vector3.Scale(mf.sharedMesh.bounds.size, head.lossyScale);
+                d = Mathf.Max(Mathf.Abs(e.x), Mathf.Abs(e.z), Mathf.Abs(e.y));
+            }
+            ring.localScale = new Vector3(d * 1.3f * k, d * 1.3f * k, 1f);
+        }
+
+        /// <summary>Serialises the head reference's pose relative to this mat and switches to Authored.</summary>
+        public string EditorCaptureHeadPose()
+        {
+            Transform head = EditorAuthoringHead;
+            if (head == null) return "No authoring preview: press 'Show Authoring Preview' first.";
+
+            authoredHeadLocalPosition = head.localPosition;
+            authoredHeadLocalRotation = head.localRotation;
+            hasAuthoredHeadPose = true;
+            headTargetMode = HeadTargetMode.Authored;
+            placementMode = PlacementMode.Authored;
+            EditorUpdateRingPreview();
+
+            Vector3 world = head.position;
+            return $"Captured: local pos={authoredHeadLocalPosition} rot={authoredHeadLocalRotation.eulerAngles} " +
+                   $"(world {world}); headTargetMode=Authored, placementMode=Authored. Save the scene.";
+        }
+
+        public string EditorHideAuthoringPreview()
+        {
+            int n = 0;
+            var stale = new List<GameObject>();
+            foreach (Transform t in transform)
+                if (t != null && t.name.StartsWith(AuthoringPrefix)) stale.Add(t.gameObject);
+            foreach (GameObject g in stale) { DestroyImmediate(g); n++; }
+            return $"{n} authoring object(s) removed. The captured pose is kept.";
+        }
+
+        private GameObject GetOrCreateAuthoringChild(string name)
+        {
+            Transform t = transform.Find(name);
+            GameObject go = t != null ? t.gameObject : new GameObject(name);
+            if (t == null) go.transform.SetParent(transform, false);
+            go.tag = "EditorOnly";
+            go.hideFlags = HideFlags.DontSaveInBuild;
+            return go;
+        }
+
+        private static void SetupAuthoringQuad(GameObject go, Texture2D tex, Color colour)
+        {
+            var mf = go.GetComponent<MeshFilter>(); if (mf == null) mf = go.AddComponent<MeshFilter>();
+            var mr = go.GetComponent<MeshRenderer>(); if (mr == null) mr = go.AddComponent<MeshRenderer>();
+            if (mf.sharedMesh == null)
+            {
+                GameObject tmp = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                mf.sharedMesh = tmp.GetComponent<MeshFilter>().sharedMesh;
+                DestroyImmediate(tmp);
+            }
+            Shader shader = Shader.Find("Sprites/Default");
+            if (shader == null) shader = Shader.Find("Unlit/Transparent");
+            var m = new Material(shader) { mainTexture = tex, color = colour, hideFlags = HideFlags.DontSave };
+            mr.sharedMaterial = m;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+        }
+#endif
     }
 }

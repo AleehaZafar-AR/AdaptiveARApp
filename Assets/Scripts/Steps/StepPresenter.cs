@@ -111,6 +111,7 @@ namespace AdaptiveAR.Steps
         private bool _levelShowsGhosts;
 
         private AssemblyAction _currentAction;
+        private string[] _extraGhostKeys;
         private bool _textOwnedByCard;
         private InstructionSpeech _speech;
         private AudioClip _pendingStageClip;
@@ -274,6 +275,16 @@ namespace AdaptiveAR.Steps
         /// </summary>
         public void PresentAction(AssemblyAction action)
         {
+            PresentAction(action, null);
+        }
+
+        /// <summary>
+        /// As above, with extra ghost keys the validator accepts for this action (both free
+        /// bolt/nut positions), so every valid target is visible.
+        /// </summary>
+        public void PresentAction(AssemblyAction action, IEnumerable<string> extraGhostKeys)
+        {
+            _extraGhostKeys = extraGhostKeys != null ? new List<string>(extraGhostKeys).ToArray() : null;
             _currentAction = action;
 
             // READ state: parts dimmed and not grabbable, no ghost, no arrow. INTERACT state:
@@ -430,6 +441,15 @@ namespace AdaptiveAR.Steps
 
             bool activatedAny = ActivateByKeys(keys, _activatedGhosts);
 
+            // Either-side actions: the other free target is just as valid, so it is shown too.
+            if (actionHasOwn && _extraGhostKeys != null)
+            {
+                var extra = new List<string>();
+                foreach (string k in _extraGhostKeys)
+                    if (!string.IsNullOrEmpty(k) && System.Array.IndexOf(keys, k) < 0) extra.Add(k);
+                if (extra.Count > 0 && ActivateByKeys(extra.ToArray(), _activatedGhosts)) activatedAny = true;
+            }
+
             bool spawnedAny = false;
             if (!actionHasOwn)
                 spawnedAny = SpawnPrefabs(_stageGhostPrefabs, _stageGhostOffset);
@@ -467,6 +487,16 @@ namespace AdaptiveAR.Steps
             // A stage with no performable action gets its clip now.
             if (step.NextEnabledActionIndex(0) < 0)
                 FlushStageClip();
+        }
+
+        /// <summary>True while at least one ghost is actually visible for the current action.</summary>
+        public bool AnyGhostVisible
+        {
+            get
+            {
+                foreach (GameObject g in _activatedGhosts) if (g != null && g.activeInHierarchy) return true;
+                return false;
+            }
         }
 
         /// <summary>Keys of the ghosts currently switched on, for the [Action] line.</summary>

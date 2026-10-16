@@ -2453,3 +2453,167 @@ Please attach the logcat through step 4 (or wherever it stops).
 
 ### Addendum 2026-10-16 — authored head target
 `AssemblyWorkSurface.headTargetMode = Authored` + `authoredHeadTarget`: the assigned transform's world pose is copied verbatim into `PistonHeadMatTarget` (no derivation, no lift); ring, kit posing, validation and snap use it unchanged. Logs `[WorkSurface] head target: authored from ...`. Default stays Derived. [QV]
+
+
+---
+
+## Claude → Reviewer — 2026-10-16 — Workflow-integrity pass: grab coverage audit, Edit-Mode mat/head authoring, piston-2 rod trace, either-side bolts/nuts, guidance-text audit
+
+Base: `3d23626`. Your uncommitted scene / build-profile edits are untouched and NOT
+committed (they are yours). No tolerance, panel, ghost material, arrow rotation,
+piston object, AI/HRV or audio-system change. Both assemblies compile with the csc
+harness. Nothing has run on a headset: everything is [QV].
+
+### 1. Why only the camshaft produced a wrong-grab warning [QV]
+What the source proves, and what it does not:
+- The one hard wiring fault found in the scene: `Components/engineBlockSep001/
+  ISDK_HandGrabInteraction` has its **Pointable Element set to the crankshaft's
+  Grabbable** (`_pointableElement` → `Components/crankshaft`). Grabbing holder 1
+  therefore selects the crankshaft, never the holder. It is now repaired at runtime
+  (re-injected to the holder's own Grabbable, `[GrabCoverage] MISWIRE … repaired`),
+  but please fix the reference in the Inspector. All 37 other HandGrabInteractables
+  point at their own part's Grabbable.
+- For every other part the registry resolution, the Collider/Grabbable requirement
+  and the subscription path are correct in the source, so the cause of the silence is
+  not provable from here. Instead of another guess, the grab source now watches each
+  part from **three directions** and the startup audit prints what the device actually
+  wires: the part's Grabbable events, the events and `State` of every
+  `HandGrabInteractable`/`GrabInteractable` under the engine root (keyed by the
+  Rigidbody the hand really grabs - these are the objects that carry the working Quest
+  interaction, not the registry's idea of them), and polling. A grab is reported once
+  whichever source sees it first (`source=grabbable_event|HandGrabInteractable_event|poll`).
+- `[GrabCoverage] object=<path> id= selectable=true active= monitored= key=
+  interactables=[…] sources=… grabbable=own|NONE` for every interactable part at task
+  start; ERROR for an interactable part that is not monitored and for any registered
+  assembly component with no grab interactable (it cannot be picked up at all). The
+  rows cover crankshaft, 4 × (head, rod, pin, cap, 2 bolts, 2 nuts), 4 holders,
+  camshaft. (`piston001`'s kit is inactive in the scene and shows `active=false`.)
+- Eligibility is judged against the CURRENT action (accepted instances of a PHYSICAL
+  action, the named part of a READ instruction) exactly as before.
+Reading the next log: a part with `monitored=true` that still gives no `[GrabEvent]
+RECEIVED` on pickup would mean the device selects something that is not that part's
+Grabbable nor any interactable under it - the coverage row names what it is wired to.
+
+### 2. Component preview in front of the panel [QV]
+`ComponentPreview` depth: default −20 mm / large 0 mm (embedded in the glass) →
+**−110 mm / −150 mm** in front of the panel plane, same x/y, so the whole object
+floats clear of the surface and still belongs to the card. Applies to every preview
+(the component is runtime-created; no panel transform touched).
+
+### 3. Edit-Mode authoring of the mat and the head target [QV]
+`AssemblyWorkSurface` inspector (select `Worksurface`):
+1. **Placement Mode = Authored** (you already set it): the object's own transform IS the
+   mat. Move it on the desk with the Move tool. Runtime never re-poses it (also not on
+   workspace reposition).
+2. **Show Authoring Preview** → three Editor-only children appear: `~AuthoringMat`
+   (the quad at the exact runtime size), `~AuthoringRing`, `~AuthoringPistonHead` (the
+   real head mesh in the green ghost material, at the real head's world scale). They
+   are tagged EditorOnly, never saved into a build, carry no Rigidbody/collider/SDK
+   component, and are destroyed in Play Mode.
+3. Select `~AuthoringPistonHead` (button "Select the head reference") and lay it flat
+   where it belongs with Move/Rotate; the ring follows it.
+4. **Capture Piston Head Target Pose** → `authoredHeadLocalPosition/Rotation`
+   (relative to the mat) are serialised, Head Target Mode = Authored, scene marked
+   dirty. Save the scene. Hide Authoring Preview is optional (the pose is kept).
+At runtime the captured pose is copied verbatim into `PistonHeadMatTarget`; the kit
+ghosts are posed onto it, the validator measures against it and snaps to it - no
+bounding-box / crown / orientation calculation once a pose exists (`[WorkSurface]
+head target: AUTHORED …`). The earlier automatic layout-revision reset is gone: the
+serialized `matSize` (0.28 in your scene) is the true side length in metres - adjust
+it in the inspector; the preview shows that size.
+
+### 4. Piston-2 rod disappearing [QV - traced, guarded]
+Source trace of grab → validation → snap → join → lock → SDK release → DropIntoTray:
+the join parents the rod under the kit-2 handle (whichever head was placed for kit
+2), `PlacementLock` adopts the new parent and re-asserts pose/kinematic every frame,
+and `DropIntoTray` refuses recovery once the parent changed or the lock is on. No
+code path hides a real rod: the presenter refuses ghost keys that resolve to a
+grabbable, the kit-2 ghost keys resolve to `Ghosties/PistonKits/PistonKit002/*`, and
+`RestoreIsolation` only touches ghost ancestors/siblings. So the cause is not provable
+from source and the next run must show it:
+- `[Piston2RodSuccess] real=<name#id> parentBefore=<name#id> kit=PistonKit002 target=…`
+  at success, then at +0 s / +0.5 s / +2 s
+  `[Piston2RodSuccess] real= visible= active= parent=(before: …) position=
+  distanceFromSnap= locked= kinematic= handle= underKitHandle=` with ERRORs if the rod
+  is inactive, invisible, > 5 cm from its snap pose, or not under the kit-2 handle.
+  (Same watch for every placed part: `[Piston1HeadSuccess]`, `[Piston2PinSuccess]`…)
+- `BindAndJoin` now re-activates a part found inactive at join time (ERROR) and errors
+  if the kit handle itself is inactive in the hierarchy.
+- Inactive real parts are no longer candidates (the inactive `piston001` kit cannot
+  become a handle or a joined part).
+
+### 5. Either bolt / either nut [QV]
+`StepValidator`: for the roles `{pistonBolt, pistonBoltOther}` and `{PistonNut,
+PistonNutOther}` an action accepts **any loose part of either role from any kit**, and
+offers **every unoccupied target of either role for that piston** (`ghost.piston00N.
+pistonBolt` + `…pistonBoltOther`). The active part is judged against the **nearest free
+target** (re-chosen live, logged on switch); on success that target becomes occupied
+and the part is consumed, so the second action is left with the remaining part(s) and
+the remaining target. Picking the "other" bolt/nut is never a wrong component. The
+presenter shows every free target's ghost (both for the first bolt, one for the
+second); `[Progression]`/attempt logs record the actual instance key and the actual
+target key used. Asset text: "Fit a retaining bolt." / "Either bolt fits either of the
+two highlighted positions." and "Fit the remaining retaining bolt." / "Into the
+remaining highlighted position." (nuts likewise), with four new clips.
+
+### 6. Guidance text vs shown guidance - audit and corrections [QV]
+`GuidanceAudit` (new) runs at task start and from **AdaptiveAR ▸ Guidance ▸ Audit
+instruction text vs shown guidance** in the Editor. For every (stage, action, L1/L2/L3)
+it logs `[GuidanceAudit] stage= action= level= type=READ|PHYSICAL|AUTO text= detail=
+ghost= arrow= preview= mat= ring= parts=[…] targets=[…] expects=…`, derived from the
+same rules the presenter/arrow/card use (ghost only on PHYSICAL actions and only when
+the level block authors ghost keys; arrow only on PHYSICAL+showArrow at ≥ the arrow's
+minimum level (L2); ring only for the head-on-mat action; mat for head/rod/pin
+actions), then errors `[GuidanceAudit] CONTRADICTION …` when text mentions a ghost /
+green guide, highlighted position, arrow, ring/marked area or mat that is not shown,
+or when a READ instruction describes a placement cue.
+
+Inconsistencies found and corrected:
+1. **Live cues said "ghost" with no ghost** - "Turn the part to match the ghost",
+   "Almost there — align with the ghost", "Move closer to the highlighted position"
+   were shown at L1 (no ghost at any stage) and at L2 for piston 2 (see 2). The card
+   now picks wording by whether a ghost is actually visible: with a guide "…the green
+   guide"; without, "Move the part closer to its position" / "Turn the part to match
+   its orientation" / "Almost there — adjust the part's position" (wording revision 1,
+   applied over the scene's serialized strings).
+2. **Piston 2 at L2 had no ghosts at all** (`Step_03.l2Guided.ghostKeys` empty while
+   piston 1's L2 has `ghost.piston001`), so the L2 details "lower them into the
+   highlighted bore" and the bolt/nut "highlighted position" had nothing to point at.
+   Added `ghost.piston002` to Step_03 L2 (L1 override and L3 unchanged). Revert if the
+   empty L2 was intentional - then the L2 details must change instead.
+3. **"Fit the first/second retaining bolt/nut"** forced the participant to guess which
+   identical part the software wanted - rewritten for either-side acceptance (5).
+4. Everything else audits clean: "marked assembly area" / "ring on the mat" only on
+   the head-on-mat action (the ring exists at every level, L1 included), "assembly mat"
+   only on actions where the mat is shown (it is shown from the piston locate action
+   on), "highlighted bore/position" only in L2/L3 details where a ghost is authored,
+   READ instructions never describe a cue, no text mentions an arrow.
+
+### Files
+```
+mod  StepValidator.cs            three-source grab watch (Grabbable + interactables + poll), [GrabCoverage] audit, runtime miswire repair,
+                                 either-side targets/parts, nearest-free-target choice, placed-part watchdog ([Piston2RodSuccess]…), join guards
+mod  StepPresenter.cs            PresentAction(action, extraGhostKeys), AnyGhostVisible
+mod  AssemblySessionController.cs passes free targets to the presenter; runs GrabCoverage + GuidanceAudit at task start
+mod  ParticipantCard.cs          ghost-aware live cues (revision 1)
+mod  ComponentPreview.cs         preview 11/15 cm in front of the panel
+mod  GuidanceArrow.cs            MinimumLevel getter
+mod  AssemblyWorkSurface.cs      Authored placement never re-posed; captured head pose; Edit-Mode preview API; no layout reset
+new  Assets/Editor/AssemblyWorkSurfaceAuthoring.cs   inspector buttons + audit menu
+new  GuidanceAudit.cs            the audit
+mod  Step_02/03/05 assets        either-side bolt/nut texts + clips; Step_03 L2 ghost
+add  4 speech clips (+metas)
+```
+
+### [QV]
+1. Task start: `[GrabCoverage]` rows for every part, `0 NOT monitored`; `MISWIRE` line
+   for holder 1 (repaired) until the scene reference is fixed; `[GuidanceAudit] END OK`.
+2. Pick up any wrong part at any point → `[GrabEvent] RECEIVED` → `[Eligibility] …
+   eligible=false` → `[WrongPart] FIRING` → feedback; release → `RELEASED`.
+3. Preview floats clearly in front of the card.
+4. After capturing a pose in the Editor: `[WorkSurface] head target: AUTHORED …`,
+   ghost flat where you put it, validation/snap there.
+5. Piston 2 rod: `[Piston2RodSuccess]` lines with `visible=true … underKitHandle=true`
+   at +2 s - or the ERROR that names what happened.
+6. Bolts: both ghosts shown for the first bolt; either bolt into either; second bolt →
+   remaining ghost; no wrong-component on the "other" bolt; nuts likewise.

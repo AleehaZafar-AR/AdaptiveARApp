@@ -28,9 +28,10 @@ namespace AdaptiveAR.UI
         [SerializeField] private string[] largeRoles = { "crankshaft", "camshaft" };
         [SerializeField] private float largeSize = 0.14f;
 
-        [Tooltip("Depth of the preview centre relative to the panel plane, canvas units (negative = towards the viewer).")]
-        [SerializeField] private float defaultDepth = -20f;
-        [SerializeField] private float largeDepth = 0f;
+        [Tooltip("Depth of the preview centre relative to the panel plane, canvas units (negative = towards the " +
+                 "viewer). Far enough that the WHOLE object floats in front of the glass: nothing intersects the panel.")]
+        [SerializeField] private float defaultDepth = -110f;
+        [SerializeField] private float largeDepth = -150f;
 
         private float _sizeInUse;
         private float _depthInUse;

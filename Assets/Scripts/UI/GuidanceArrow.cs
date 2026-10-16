@@ -89,6 +89,9 @@ namespace AdaptiveAR.UI
                  "L1 is meant to be minimal.")]
         [SerializeField] private SupportLevel minimumLevel = SupportLevel.L2_Guided;
 
+        /// <summary>Lowest support level at which the arrow is shown (read by the guidance audit).</summary>
+        public SupportLevel MinimumLevel { get { return minimumLevel; } }
+
         /// <summary>The axis the arrow art points along in its own local space (legacy mode).</summary>
         public enum MeshForwardAxis
         {

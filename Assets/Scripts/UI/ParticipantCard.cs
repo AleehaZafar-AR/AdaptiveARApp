@@ -89,9 +89,19 @@ namespace AdaptiveAR.UI
         [Header("Participant wording")]
         [SerializeField] private string wrongPartMessage = "That is not the required component";
         [SerializeField] private string successMessage = "Correct";
-        [SerializeField] private string moveCloserMessage = "Move closer to the highlighted position";
-        [SerializeField] private string turnToMatchMessage = "Turn the part to match the ghost";
-        [SerializeField] private string almostThereMessage = "Almost there — align with the ghost";
+        [Tooltip("Live cues while a GREEN GUIDE (ghost) is visible for the action.")]
+        [SerializeField] private string moveCloserMessage = "Move closer to the green guide";
+        [SerializeField] private string turnToMatchMessage = "Turn the part to match the green guide";
+        [SerializeField] private string almostThereMessage = "Almost there — align with the green guide";
+
+        [Tooltip("Live cues when NO ghost is shown (e.g. L1): they must not describe a guide that is not there.")]
+        [SerializeField] private string moveCloserNoGuideMessage = "Move the part closer to its position";
+        [SerializeField] private string turnToMatchNoGuideMessage = "Turn the part to match its orientation";
+        [SerializeField] private string almostThereNoGuideMessage = "Almost there — adjust the part's position";
+
+        [Tooltip("Revision of the cue wording above; older serialized wording is replaced at start.")]
+        [SerializeField] private int cueWordingRevision = 0;
+        private const int CurrentCueWordingRevision = 1;
 
         [SerializeField] private float refreshInterval = 0.12f;
 
@@ -106,6 +116,7 @@ namespace AdaptiveAR.UI
         private Image _backImage;
         private TextMeshProUGUI _backLabel;
         private ComponentPreview _preview;
+        private StepPresenter _presenter;
 
         // =====================================================================
         // Setup
@@ -113,6 +124,19 @@ namespace AdaptiveAR.UI
 
         private void Awake()
         {
+            if (cueWordingRevision < CurrentCueWordingRevision)
+            {
+                moveCloserMessage = "Move closer to the green guide";
+                turnToMatchMessage = "Turn the part to match the green guide";
+                almostThereMessage = "Almost there — align with the green guide";
+                moveCloserNoGuideMessage = "Move the part closer to its position";
+                turnToMatchNoGuideMessage = "Turn the part to match its orientation";
+                almostThereNoGuideMessage = "Almost there — adjust the part's position";
+                cueWordingRevision = CurrentCueWordingRevision;
+                Debug.Log($"[ParticipantCard] Live cue wording reset to revision {CurrentCueWordingRevision} (ghost-aware).");
+            }
+            _presenter = FindAnyObjectByType<StepPresenter>(FindObjectsInactive.Include);
+
             RemoveLegacyPresentation();
             if (ensureInstructionFits) EnsureInstructionFits();
             StyleControls();
@@ -364,8 +388,8 @@ namespace AdaptiveAR.UI
             }
 
             string msg = validator != null && validator.LastErrorType == "incorrect_orientation"
-                ? turnToMatchMessage
-                : almostThereMessage;
+                ? Cue(turnToMatchMessage, turnToMatchNoGuideMessage)
+                : Cue(almostThereMessage, almostThereNoGuideMessage);
             SetFeedback(FeedbackKind.Failed, msg, MrTheme.Warning);
         }
 
@@ -384,6 +408,13 @@ namespace AdaptiveAR.UI
             if (feedbackText != null) feedbackText.text = "";
         }
 
+        /// <summary>The wording that matches what is on the bench: a guide is mentioned only while one is visible.</summary>
+        private string Cue(string withGuide, string withoutGuide)
+        {
+            bool guide = _presenter != null && _presenter.AnyGhostVisible;
+            return guide ? withGuide : withoutGuide;
+        }
+
         /// <summary>Live cue from the validator while a part is being worked with.</summary>
         private void UpdateLiveCue()
         {
@@ -396,11 +427,11 @@ namespace AdaptiveAR.UI
             switch (validator.CurrentCue)
             {
                 case StepValidator.Cue.MoveCloser:
-                    SetFeedback(FeedbackKind.Cue, moveCloserMessage, MrTheme.Warning); break;
+                    SetFeedback(FeedbackKind.Cue, Cue(moveCloserMessage, moveCloserNoGuideMessage), MrTheme.Warning); break;
                 case StepValidator.Cue.TurnToMatch:
-                    SetFeedback(FeedbackKind.Cue, turnToMatchMessage, MrTheme.Warning); break;
+                    SetFeedback(FeedbackKind.Cue, Cue(turnToMatchMessage, turnToMatchNoGuideMessage), MrTheme.Warning); break;
                 case StepValidator.Cue.AlmostThere:
-                    SetFeedback(FeedbackKind.Cue, almostThereMessage, MrTheme.Warning); break;
+                    SetFeedback(FeedbackKind.Cue, Cue(almostThereMessage, almostThereNoGuideMessage), MrTheme.Warning); break;
                 default:
                     // Outside the zone: a failed-attempt message may stay until the next grab;
                     // a plain cue clears.
