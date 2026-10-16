@@ -35,8 +35,25 @@ namespace AdaptiveAR.MR
             Authored = 1
         }
 
+        public enum HeadTargetMode
+        {
+            /// <summary>Derived from the head mesh: crown down, centred on the ring, lowest point on the mat.</summary>
+            Derived = 0,
+            /// <summary>Copied verbatim from authoredHeadTarget's pose as placed in the Editor.</summary>
+            Authored = 1
+        }
+
         [Header("Placement")]
         [SerializeField] private PlacementMode placementMode = PlacementMode.InFrontOfEngine;
+
+        [Header("Head target")]
+        [Tooltip("Derived: computed from the head mesh and the mat. Authored: the pose of authoredHeadTarget " +
+                 "is used as-is (lay the PistonKit001/PistonHead ghost flat where you want it and assign it).")]
+        [SerializeField] private HeadTargetMode headTargetMode = HeadTargetMode.Derived;
+
+        [Tooltip("Transform whose world pose IS the head target in Authored mode (an empty child of this " +
+                 "object, or a head ghost positioned in the Editor). Its pose is copied; it is never moved.")]
+        [SerializeField] private Transform authoredHeadTarget;
 
         // Field names carry a "mat" prefix on purpose: the scene object you authored still
         // serialises the earlier names (heightAboveDesk 0.1 etc.), and those must not win.
@@ -294,6 +311,9 @@ namespace AdaptiveAR.MR
         /// </summary>
         private bool DeriveHeadTarget(Transform kitRoot, Transform assembled)
         {
+            if (headTargetMode == HeadTargetMode.Authored)
+                return UseAuthoredHeadTarget(kitRoot);
+
             Transform headSrc = assembled != null ? assembled.Find("PistonHead") : null;
             Transform rodSrc = assembled != null ? assembled.Find("ConnectingRod") : null;
             Transform pinSrc = assembled != null ? assembled.Find("ConnectingPin") : null;
@@ -381,6 +401,43 @@ namespace AdaptiveAR.MR
                 Debug.Log($"[WorkSurface] head target derived from {source}: pos={pivot} rot={headRot.eulerAngles} " +
                           $"lowest point {SurfaceCenter.y + kitClearance:F4} vs mat {SurfaceCenter.y:F4} (clearance {kitClearance * 1000f:F0} mm), " +
                           $"footprint {footprint * 100f:F1} cm, ring at {_ringWorld}, headScale={headScale}.");
+            return true;
+        }
+
+        /// <summary>
+        /// Authored mode: the researcher laid the head where they want it in the Editor; that
+        /// world pose is copied into the head target (which stays a child of the mat), the ring
+        /// is drawn under it, and the usual kit posing / validation / snap use it unchanged.
+        /// </summary>
+        private bool UseAuthoredHeadTarget(Transform kitRoot)
+        {
+            if (authoredHeadTarget == null)
+            {
+                Debug.LogError("[WorkSurface] headTargetMode is Authored but authoredHeadTarget is not assigned.");
+                return false;
+            }
+
+            EnsureHeadTarget();
+            Vector3 pos = authoredHeadTarget.position;
+            Quaternion rot = authoredHeadTarget.rotation;
+            _headTarget.SetPositionAndRotation(pos, rot);
+            HeadTargetValid = true;
+            _ringWorld = new Vector3(pos.x, SurfaceCenter.y, pos.z);
+
+            // Ring sized from the head mesh footprint when a head ghost is available.
+            float footprint = 0.05f;
+            Transform headGhost = kitRoot != null ? kitRoot.Find("PistonHead") : null;
+            var mf = headGhost != null ? headGhost.GetComponent<MeshFilter>() : null;
+            if (mf != null && mf.sharedMesh != null)
+            {
+                Vector3 e = Vector3.Scale(mf.sharedMesh.bounds.size, Vector3.Scale(headGhost.localScale, kitRoot.lossyScale));
+                footprint = Mathf.Max(Mathf.Abs(e.x), Mathf.Abs(e.z), Mathf.Abs(e.y));
+            }
+            PlaceMarking(_ringWorld, footprint * 1.3f);
+
+            if (logChanges)
+                Debug.Log($"[WorkSurface] head target: authored from '{authoredHeadTarget.name}' pos={pos} rot={rot.eulerAngles} " +
+                          $"(height above mat {(pos.y - SurfaceCenter.y) * 1000f:F0} mm at the pivot), ring at {_ringWorld}.");
             return true;
         }
 

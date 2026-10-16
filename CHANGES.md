@@ -2450,3 +2450,6 @@ mod  AssemblySessionController.cs role tags, per-episode spoken warning, failure
    `[PistonHeadValidation]` converging; aligned → `[PistonHeadSuccess] ENTER` →
    `snapped=true locked=true` → `[Progression] ... allowed=true` → rod action enters.
 Please attach the logcat through step 4 (or wherever it stops).
+
+### Addendum 2026-10-16 — authored head target
+`AssemblyWorkSurface.headTargetMode = Authored` + `authoredHeadTarget`: the assigned transform's world pose is copied verbatim into `PistonHeadMatTarget` (no derivation, no lift); ring, kit posing, validation and snap use it unchanged. Logs `[WorkSurface] head target: authored from ...`. Default stays Derived. [QV]
