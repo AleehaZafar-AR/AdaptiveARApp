@@ -3030,3 +3030,62 @@ mod  AssemblyWorkSurface.cs       oil pan lookup by name
 4. Grab the grey ring: engine turns, trays/mat/UI stay; Reset View appears on the card only while turned.
 5. Sideways bolt/camshaft: no snap, `[InsertionCheck] allowed=false`; along the axis: snap.
 6. Completion chime once; timer signal once at 10 min. 7. Only the engine and the result UI remain at the end.
+
+
+---
+
+## Claude → Reviewer — 2026-10-17 (c) — Two regressions only: piston-head validation, wrong-grab binding
+
+Base: `46c3463`. Only `StepValidator.cs` changed. Holder workflow, turntable, audio,
+status panel, symmetry rules, tolerance numbers, UI, authored head pose and mat are
+untouched. Compiles; [QV].
+
+### A. Piston-head validation - the regression, isolated [QV]
+Introduced in `dba5360` when positions started being compared at the geometric centre:
+the target centre was computed as `target.TransformPoint(meshCentre)`, which scales the
+centre offset by the TARGET's lossy scale. For ghost targets that equals the part's
+scale, so every bore/engine target still worked - but the mat's `PistonHeadMatTarget`
+is an empty transform under the Worksurface (lossy scale 0.6) while the head's lossy
+scale is 0.17: the "target centre" was put the head's whole pivot-to-centre offset ×
+(0.6 − 0.17) away from where the head's centre really belongs, so a perfectly aligned
+head measured a large distance and never validated. Fix: the target centre is now
+`target.position + target.rotation × (meshCentre × PART lossy scale)` everywhere
+(error, snap, nearest-target choice, active-candidate choice) - identical to before for
+ghost targets, correct for the authored head target. Ghost pose == validation target
+pose == snap pose is unchanged by construction (ghost kits are posed onto `HeadTarget`,
+the validator measures `HeadTarget`, the snap goes to `HeadTarget`); the arm-time line
+now proves it with numbers:
+`[PistonHeadAction] real= target= armed=true pivotDistance= centreDistance= (centre offset … at part scale …; target lossyScale …) ghostPose==targetPose==snapPose: …`
+then `[PistonHeadValidation] positionError= rotationError= posOK= rotOK= …` at 4 Hz and
+`[PistonHeadSuccess] ENTER … snapped= locked=` → `[Progression] … allowed=true`.
+
+### B. Wrong-object detection - one callback, one decision [QV]
+The decision now hangs on the one event that provably fires whenever a grab works at
+all: the grabbed part's own `Grabbable.WhenPointerEventRaised` - the component the SDK
+moves. At task start `BindGrabCallbacks()` subscribes that callback on every real
+grabbable assembly part (a Grabbable with a collider on the same object and a
+hand/controller grab interactable beneath it, under the engine root; the turntable
+excluded) and prints the table you asked for:
+`[WrongGrabBinding] part=<path> id= key= callbackBound=true active=`
+plus `callbackBound=false` ERRORs for any registered part that could not be bound.
+On Select: `[GrabCallback] part= selecting= action=` → `OpenEpisode` → `EvaluateGrab`:
+`selectedPart ∈ acceptedParts (or tolerated)` → fine / READ acknowledged; otherwise,
+with an action armed → ONE `[WrongPart] FIRING`. On the last Unselect/Cancel
+(`SelectingPointsCount == 0`) → `CloseEpisode` → `[WrongPart] episode closed`. A Select
+on a part whose episode is still open but whose Grabbable has only this one selecting
+point means the earlier release was lost: the stale episode is closed and the new grab
+is decided. The interactor-side `[GrabRuntime]` line is kept as a diagnostic and calls
+the same `OpenEpisode` (a no-op for a grab already opened this frame; an ERROR if the
+grabbed part has no bound callback). Polling and the watch list no longer decide
+anything; no refcounts, no registry order, no camshaft special case.
+Source-path test at every arming: `[WrongGrabDryRun] part= action= acceptedNow=
+wouldFireWrongPart=` for every bound part - during the crankshaft locate action every
+head, rod, pin, cap, bolt, nut, holder and the camshaft must read `wouldFireWrongPart=true`
+and the crankshaft `false`; the same table at each later action shows the accepted set
+moving with the action. This is the in-source proof; the device proof is one
+`[GrabCallback]` + `[WrongPart] FIRING` per wrong grab in the logcat.
+
+### [QV]
+1. Piston head on the mat: `[PistonHeadAction] … centreDistance` small when aligned → validates, snaps, advances.
+2. `[WrongGrabBinding]` table: every part `callbackBound=true`; `[WrongGrabDryRun]` as above.
+3. Wrong grab of each listed part → `[GrabCallback]` → `[EligibilityRuntime] eligible=false` → `[WrongPart] FIRING` → feedback; release → `episode closed`; again → fires again.

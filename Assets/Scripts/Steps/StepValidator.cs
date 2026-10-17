@@ -523,6 +523,7 @@ namespace AdaptiveAR.Steps
 
             _ackArmed = _ackObjects.Count > 0;
             int watched = EnsureGrabSource();
+            LogWrongGrabDryRun();
             if (logEvaluations)
                 Debug.Log($"[StepValidator] '{action.Id}': pick-up monitor armed for '{action.partKey}' " +
                           $"({_ackObjects.Count} instance(s)); grab source watches {watched} selectable part(s).");
@@ -541,6 +542,8 @@ namespace AdaptiveAR.Steps
 
         private void OnDestroy()
         {
+            foreach (KeyValuePair<GameObject, Action<Oculus.Interaction.PointerEvent>> kv in _boundHandlers)
+                if (kv.Key != null && _boundParts.TryGetValue(kv.Key, out Oculus.Interaction.Grabbable g) && g != null) g.WhenPointerEventRaised -= kv.Value;
             foreach (Candidate c in _watchedList)
             {
                 if (c.pointable != null && c.handler != null) c.pointable.WhenPointerEventRaised -= c.handler;
@@ -744,20 +747,30 @@ namespace AdaptiveAR.Steps
 
             int watched = EnsureGrabSource();
 
-            // Feedback reflects what is in the hand NOW, including across an action change.
+            // Feedback reflects what is in the hand NOW, including across an action change:
+            // a bound part that is being held right now opens its episode against this action.
             if (monitorWrongParts)
             {
-                foreach (Candidate c in _watchedList)
+                foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
                 {
-                    if (c.tf == null || !c.wasHeld || _acceptedObjects.Contains(c.tf.gameObject)) continue;
-                    _wrongHeld = c;
-                    Debug.Log($"[WrongPart] FIRING object={c.tf.name} action={action.Id} key={c.key} (already held when the action was armed)");
-                    try { OnWrongPartGrabbed?.Invoke(c.key, c.tf); }
-                    catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartGrabbed handler threw: " + e); }
+                    if (kv.Value == null || kv.Value.SelectingPointsCount == 0) continue;
+                    if (_acceptedObjects.Contains(kv.Key) || _toleratedObjects.Contains(kv.Key)) continue;
+                    if (_episodes.ContainsKey(kv.Key)) CloseEpisode(kv.Key, _boundKeys[kv.Key], "re-armed");
+                    OpenEpisode(kv.Key, _boundKeys[kv.Key], kv.Value, "already_held_at_arm");
                     break;
                 }
             }
+            LogWrongGrabDryRun();
 
+            if (logEvaluations && _active != null)
+            {
+                Vector3 partCentre = CentreWorld(_active.tf, _active.centreLocal);
+                Vector3 targetCentreNow = TargetCentre(_active, CurrentTarget);
+                Debug.Log($"{Tag("Action")} real={Describe(_active.tf)} target={Describe(CurrentTarget)} armed=true " +
+                          $"pivotDistance={Vector3.Distance(_active.tf.position, CurrentTarget.position):F3}m centreDistance={Vector3.Distance(partCentre, targetCentreNow):F3}m " +
+                          $"(centre offset {Vector3.Scale(_active.centreLocal, _active.tf.lossyScale).magnitude * 100f:F1} cm at part scale {_active.tf.lossyScale.x:F3}; target lossyScale {CurrentTarget.lossyScale.x:F3}) " +
+                          $"ghostPose==targetPose==snapPose: target is {(CurrentTarget == targetGo.transform ? "the ghost itself" : "the mat head target; ghost residual logged above")}");
+            }
             if (logEvaluations)
             {
                 var mfP = CurrentPart.GetComponent<MeshFilter>();
@@ -870,10 +883,23 @@ namespace AdaptiveAR.Steps
             return mf != null && mf.sharedMesh != null ? mf.sharedMesh.bounds.center : Vector3.zero;
         }
 
-        /// <summary>World position of the part's geometric centre (same mesh on part and ghost, so it is comparable).</summary>
+        /// <summary>World position of the part's geometric centre.</summary>
         private static Vector3 CentreWorld(Transform t, Vector3 centreLocal)
         {
             return t.TransformPoint(centreLocal);
+        }
+
+        /// <summary>
+        /// Where the part's geometric centre would be if its PIVOT sat on the target. The
+        /// offset is scaled by the PART's lossy scale, never the target's: the mat's
+        /// PistonHeadMatTarget is an empty transform under a differently scaled parent, so
+        /// target.TransformPoint(centreLocal) put the "target centre" metres away from the
+        /// pivot and the head could never validate. (Ghost targets share the part's scale,
+        /// for which both formulas agree.)
+        /// </summary>
+        private static Vector3 TargetCentre(Candidate c, Transform target)
+        {
+            return target.position + target.rotation * Vector3.Scale(c.centreLocal, c.tf.lossyScale);
         }
 
         private static float ShapeRadius(Transform t)
@@ -999,6 +1025,7 @@ namespace AdaptiveAR.Steps
             }
 
             HookInteractors();
+            BindGrabCallbacks();
 
             if (_watchedList.Count != before)
                 Debug.Log($"[GrabSource] watching {_watchedList.Count} selectable part(s) (+{_watchedList.Count - before}) " +
@@ -1082,11 +1109,124 @@ namespace AdaptiveAR.Steps
             }
         }
 
-        // Grab episodes keyed by the selected object itself, independent of any watch list:
-        // refcount per object (two hands = one episode), cleared when the last hand lets go.
-        private readonly Dictionary<GameObject, int> _episodes = new Dictionary<GameObject, int>();
+        // Grab episodes keyed by the grabbed object itself: open from the first Select until
+        // the Grabbable reports no selecting hand. Two hands = one episode. A Select arriving
+        // while an episode is open but the Grabbable has only this one selecting point means
+        // the earlier release was lost: that episode is closed and a new one opened.
+        private readonly Dictionary<GameObject, int> _episodes = new Dictionary<GameObject, int>();   // value = frame opened
         private GameObject _wrongEpisodeObject;
         private int _interactorCount;
+
+        // THE binding: every real grabbable assembly part's own Grabbable (the component the
+        // SDK moves when a grab works) -> one callback -> one decision function.
+        private readonly Dictionary<GameObject, Oculus.Interaction.Grabbable> _boundParts = new Dictionary<GameObject, Oculus.Interaction.Grabbable>();
+        private readonly Dictionary<GameObject, Action<Oculus.Interaction.PointerEvent>> _boundHandlers = new Dictionary<GameObject, Action<Oculus.Interaction.PointerEvent>>();
+        private readonly Dictionary<GameObject, string> _boundKeys = new Dictionary<GameObject, string>();
+        private bool _bindingTablePrinted;
+
+        /// <summary>
+        /// Binds the one callback to every real grabbable assembly part: a Grabbable with a
+        /// collider on the same object and a hand/controller grab interactable beneath it,
+        /// under the engine root (the turntable excluded). Idempotent. Prints
+        /// [WrongGrabBinding] part= callbackBound= for every part once, ERROR for a
+        /// registered part that could not be bound.
+        /// </summary>
+        public int BindGrabCallbacks()
+        {
+            Transform root = EngineRoot();
+            if (root == null) { Debug.LogError("[WrongGrabBinding] engine root not found: nothing bound."); return 0; }
+
+            int added = 0;
+            foreach (var g in root.GetComponentsInChildren<Oculus.Interaction.Grabbable>(true))
+            {
+                if (g == null) continue;
+                GameObject go = g.gameObject;
+                if (_boundParts.ContainsKey(go)) continue;
+                if (go.GetComponent<Collider>() == null) continue;                                   // kit roots / Components root
+                if (go.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null) continue;    // viewing control
+                bool hasInteractable = go.GetComponentInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true) != null
+                                       || go.GetComponentInChildren<Oculus.Interaction.GrabInteractable>(true) != null;
+                if (!hasInteractable) continue;
+
+                string key = _watched.TryGetValue(go, out Candidate wc) ? wc.key : KeyForObject(go);
+                Oculus.Interaction.Grabbable captured = g;
+                GameObject capturedGo = go;
+                string capturedKey = key;
+                Action<Oculus.Interaction.PointerEvent> handler = evt => OnPartPointerEvent(capturedGo, capturedKey, captured, evt);
+                g.WhenPointerEventRaised += handler;
+                _boundParts[go] = g;
+                _boundHandlers[go] = handler;
+                _boundKeys[go] = key;
+                added++;
+            }
+
+            if (!_bindingTablePrinted && _boundParts.Count > 0)
+            {
+                _bindingTablePrinted = true;
+                foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
+                    Debug.Log($"[WrongGrabBinding] part={PathOf(kv.Key.transform)} id={kv.Key.GetInstanceID()} key={_boundKeys[kv.Key]} callbackBound=true active={kv.Key.activeInHierarchy}");
+
+                // Registered parts that are NOT bound: that is the bug, by definition.
+                var seen = new HashSet<GameObject>();
+                foreach (string key in guidanceRegistry.PartKeys())
+                {
+                    if (GuidanceRegistry.IsKitHandleKey(key)) continue;
+                    if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null || !seen.Add(go)) continue;
+                    if (go.GetComponent<Collider>() == null) continue;                               // kit root, not a part
+                    if (_boundParts.ContainsKey(go)) continue;
+                    Debug.LogError($"[WrongGrabBinding] part={PathOf(go.transform)} key={key} callbackBound=false " +
+                                   $"(Grabbable={(go.GetComponent<Oculus.Interaction.Grabbable>() != null)} interactable={(go.GetComponentInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true) != null)})");
+                }
+                Debug.Log($"[WrongGrabBinding] {_boundParts.Count} part(s) bound to the single grab callback.");
+            }
+            return _boundParts.Count;
+        }
+
+        private string KeyForObject(GameObject go)
+        {
+            if (guidanceRegistry == null) return "unregistered:" + go.name;
+            foreach (string key in guidanceRegistry.PartKeys())
+            {
+                if (GuidanceRegistry.IsKitHandleKey(key)) continue;
+                if (guidanceRegistry.TryResolveQuiet(key, out GameObject r) && r == go) return key;
+            }
+            return "unregistered:" + go.name;
+        }
+
+        /// <summary>The one callback. Select opens (and decides) an episode; the last Unselect closes it.</summary>
+        private void OnPartPointerEvent(GameObject part, string key, Oculus.Interaction.Grabbable grabbable, Oculus.Interaction.PointerEvent evt)
+        {
+            try
+            {
+                switch (evt.Type)
+                {
+                    case Oculus.Interaction.PointerEventType.Select:
+                        Debug.Log($"[GrabCallback] part={part.name}#{part.GetInstanceID()} selecting={grabbable.SelectingPointsCount} action={CurrentActionId()} key={key}");
+                        OpenEpisode(part, key, grabbable, "grabbable_callback");
+                        break;
+                    case Oculus.Interaction.PointerEventType.Unselect:
+                    case Oculus.Interaction.PointerEventType.Cancel:
+                        if (grabbable.SelectingPointsCount == 0) CloseEpisode(part, key, "grabbable_callback");
+                        break;
+                }
+            }
+            catch (Exception e) { Debug.LogError($"[GrabCallback] handler for '{part.name}' threw: {e}"); }
+        }
+
+        /// <summary>Dry run of the decision for every bound part against the CURRENT action (no events fired).</summary>
+        public void LogWrongGrabDryRun()
+        {
+            bool physical = IsActive && !_completed;
+            bool ack = _ackArmed;
+            foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
+            {
+                GameObject part = kv.Key;
+                bool tolerated = _toleratedObjects.Contains(part);
+                bool eligible = tolerated || (physical && _acceptedObjects.Contains(part)) || (ack && _ackObjects.Contains(part));
+                bool wouldFire = (physical || ack) && !eligible && monitorWrongParts;
+                Debug.Log($"[WrongGrabDryRun] part={part.name}#{part.GetInstanceID()} action={CurrentActionId()} acceptedNow={eligible} wouldFireWrongPart={wouldFire}");
+            }
+        }
 
         /// <summary>The objects a grab is allowed on right now: accepted parts of the action, plus tolerated ones.</summary>
         private List<string> DescribeCurrentlyAccepted(out bool anyArmed)
@@ -1108,17 +1248,28 @@ namespace AdaptiveAR.Steps
         ///     otherwise, while an action is armed                -> ONE wrong-component event
         /// One event per grab episode; the episode ends when the last hand lets go.
         /// </summary>
-        private void EvaluateGrab(GameObject part, string key, string source)
+        private void OpenEpisode(GameObject part, string key, Oculus.Interaction.Grabbable grabbable, string source)
         {
             if (part == null) return;
-            if (_episodes.TryGetValue(part, out int refs) && refs > 0)
+            if (_episodes.TryGetValue(part, out int openedFrame))
             {
-                _episodes[part] = refs + 1;
-                Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} already in an open grab episode (second hand) - no new decision.");
-                return;
+                if (openedFrame == Time.frameCount)
+                    return;                                                         // same grab, other source
+                int selecting = grabbable != null ? grabbable.SelectingPointsCount : 1;
+                if (selecting > 1)
+                {
+                    Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} second hand on an open episode - no new decision.");
+                    return;
+                }
+                Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} episode still open from frame {openedFrame} with one selecting hand: the release was lost - closing it and deciding again.");
+                CloseEpisode(part, key, source + "(stale)");
             }
-            _episodes[part] = 1;
+            _episodes[part] = Time.frameCount;
+            EvaluateGrab(part, key, source);
+        }
 
+        private void EvaluateGrab(GameObject part, string key, string source)
+        {
             bool physical = IsActive && !_completed;
             bool ack = _ackArmed;
             List<string> accepted = DescribeCurrentlyAccepted(out bool armed);
@@ -1149,10 +1300,9 @@ namespace AdaptiveAR.Steps
             catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartGrabbed handler threw: " + e); }
         }
 
-        private void EndGrabEpisode(GameObject part, string key, string source)
+        private void CloseEpisode(GameObject part, string key, string source)
         {
-            if (part == null || !_episodes.TryGetValue(part, out int refs)) return;
-            if (refs > 1) { _episodes[part] = refs - 1; return; }
+            if (part == null || !_episodes.ContainsKey(part)) return;
             _episodes.Remove(part);
             Debug.Log($"[GrabEvent] RELEASED object={part.name} id={part.GetInstanceID()} action={CurrentActionId()} source={source} key={key}");
             if (_wrongEpisodeObject == part)
@@ -1190,7 +1340,11 @@ namespace AdaptiveAR.Steps
             }
             if (c != null) { c.wasHeld = true; c.firedThisEpisode = true; c.pendingGrab = false; c.pendingRelease = false; c.grabSource = "interactor_event"; }
 
-            EvaluateGrab(part, key, "interactor_event");
+            // Same decision function, same episode; a part whose Grabbable callback is bound
+            // has normally already opened this episode in this frame (then this is a no-op).
+            if (!_boundParts.ContainsKey(part) && part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() == null)
+                Debug.LogError($"[WrongGrabBinding] '{PathOf(part.transform)}' was grabbed on the device but has NO bound callback (see the startup table).");
+            OpenEpisode(part, key, grabbable, "interactor_event");
         }
 
         private void OnRuntimeUnselected(MonoBehaviour interactor, MonoBehaviour interactable)
@@ -1199,7 +1353,8 @@ namespace AdaptiveAR.Steps
             GameObject part = body != null ? body.gameObject : (pointable != null ? pointable.gameObject : null);
             if (part == null) return;
             string key = _watched.TryGetValue(part, out Candidate c) ? c.key : "unregistered:" + part.name;
-            EndGrabEpisode(part, key, "interactor_event");
+            var g = part.GetComponent<Oculus.Interaction.Grabbable>();
+            if (g == null || g.SelectingPointsCount == 0) CloseEpisode(part, key, "interactor_event");
             if (c != null && !IsSelected(c)) { c.wasHeld = false; c.firedThisEpisode = false; c.pendingRelease = false; }
         }
 
@@ -1459,11 +1614,10 @@ namespace AdaptiveAR.Steps
             string actionId = CurrentActionId();
             c.firedThisEpisode = true;
 
-            // With interactors hooked, the selection event decides (EvaluateGrab); this path is
-            // then diagnostics only. Without interactors it is the fallback decision path.
-            if (_interactorCount > 0) { EvaluateGrab(go, c.key, source); return; }
-
-            LogEligibilityRuntime(c);
+            // Diagnostics only. The decision is made by the bound Grabbable callback
+            // (OpenEpisode -> EvaluateGrab); polling never decides eligibility.
+            if (logEvaluations) Debug.Log($"[GrabEvent] (poll) {go.name}#{go.GetInstanceID()} held; decision path = bound callback{(_boundParts.ContainsKey(go) ? "" : " - NOT BOUND")}.");
+            return;
 
             if (!physical && !ack)
             {
@@ -1514,17 +1668,8 @@ namespace AdaptiveAR.Steps
 
         private void HandleRelease(Candidate c)
         {
+            // Diagnostics path only: episodes close from the bound callback / interactor unselect.
             c.firedThisEpisode = false;
-            if (_interactorCount > 0) { EndGrabEpisode(c.tf != null ? c.tf.gameObject : null, c.key, "poll"); return; }
-            if (_wrongHeld == c)
-            {
-                _wrongHeld = null;
-                Debug.Log($"[WrongPart] episode closed object={c.tf.name} id={c.tf.GetInstanceID()} (warned state cleared; the next grab is a new episode)");
-                try { OnWrongPartReleased?.Invoke(c.key, c.tf); }
-                catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartReleased handler threw: " + e); }
-                return;
-            }
-
             if (IsActive && c.tf != null && _acceptedObjects.Contains(c.tf.gameObject))
             {
                 try { OnPartReleased?.Invoke(c.key, c.tf); }
@@ -1793,7 +1938,7 @@ namespace AdaptiveAR.Steps
                       $"axisError={axisAngle:F1} rollIgnored={rollIgnored} roll={roll:F1} symmetryVariant={variant} sym={_symmetry} axisLocal={_active.axisLocal} " +
                       $"armed={IsActive} held={anyHeld} inZone={inZone} tol={_posTol:F3}m/{_rotTol:F0}deg " +
                       $"proximity={CurrentProximity} insertion={(_insertion ? (_approachDecided ? (_approachOk ? "along" : "ACROSS") : "undecided") : "n/a")} " +
-                      $"attempt={AttemptId} partCentre={CentreWorld(_active.tf, _active.centreLocal)} targetCentre={CentreWorld(CurrentTarget, _active.centreLocal)}");
+                      $"attempt={AttemptId} partCentre={CentreWorld(_active.tf, _active.centreLocal)} targetCentre={TargetCentre(_active, CurrentTarget)} targetPivot={CurrentTarget.position} partPivot={_active.tf.position}");
         }
 
         /// <summary>Either-side actions: the active part is judged against the nearest FREE target.</summary>
@@ -1805,7 +1950,7 @@ namespace AdaptiveAR.Steps
             foreach (TargetOption t in _targets)
             {
                 if (t.tf == null || _occupiedTargets.Contains(t.tf)) continue;
-                float d = Vector3.Distance(CentreWorld(_active.tf, _active.centreLocal), CentreWorld(t.tf, _active.centreLocal));
+                float d = Vector3.Distance(CentreWorld(_active.tf, _active.centreLocal), TargetCentre(_active, t.tf));
                 if (d < bestD) { bestD = d; best = t; }
             }
             if (best == null || best.tf == CurrentTarget) return;
@@ -1833,7 +1978,7 @@ namespace AdaptiveAR.Steps
             foreach (Candidate c in _candidates)
             {
                 if (c.tf == null) continue;
-                float d = Vector3.Distance(CentreWorld(c.tf, c.centreLocal), CentreWorld(CurrentTarget, c.centreLocal));
+                float d = Vector3.Distance(CentreWorld(c.tf, c.centreLocal), TargetCentre(c, CurrentTarget));
                 float score = c.moved ? d : d + 1000f;
                 if (IsHeld(c)) score -= 2000f;            // the one in the hand always wins
                 if (score < bestScore) { bestScore = score; best = c; }
@@ -1860,7 +2005,7 @@ namespace AdaptiveAR.Steps
         /// </summary>
         private float PositionError(Candidate c)
         {
-            return Vector3.Distance(CentreWorld(c.tf, c.centreLocal), CentreWorld(CurrentTarget, c.centreLocal));
+            return Vector3.Distance(CentreWorld(c.tf, c.centreLocal), TargetCentre(c, CurrentTarget));
         }
 
         /// <summary>
@@ -2102,7 +2247,7 @@ namespace AdaptiveAR.Steps
             c.tf.rotation = EffectiveTargetRotation(c);
             // Rotation first, then align the geometric centres (identical to the pivot snap when
             // the rotations match; keeps the equivalent flip/roll in place when they do not).
-            c.tf.position += CentreWorld(CurrentTarget, c.centreLocal) - CentreWorld(c.tf, c.centreLocal);
+            c.tf.position += TargetCentre(c, CurrentTarget) - CentreWorld(c.tf, c.centreLocal);
         }
 
         private void BindAndJoin(Candidate c)
