@@ -94,6 +94,8 @@ namespace AdaptiveAR.Steps
         public float OverallElapsedMs { get { return _overallMs; } }
         public float StepElapsedMs { get { return _stepMs; } }
         public int AttemptsOnStep { get { return _attemptsOnStep; } }
+        public int AttemptsTotal { get { return _attemptsTotal; } }
+        private int _attemptsTotal;
         public int ErrorsOnStep { get { return _errorsOnStep; } }
         public int ErrorsTotal { get { return _errorsTotal; } }
         public int SupportChangesTotal { get { return _supportChangesTotal; } }
@@ -262,13 +264,10 @@ namespace AdaptiveAR.Steps
                 Transform engine = stepManager != null && stepManager.oilPan != null ? stepManager.oilPan.transform : null;
                 if (engine == null || engine.parent == null) { Debug.LogError("[ViewRotation] EngineAnchor not found: no view rotation."); return; }
                 Transform workspaceRoot = engine.parent;                    // CalibrationOffset
-                var card = FindAnyObjectByType<AdaptiveAR.UI.ParticipantCard>(FindObjectsInactive.Include);
-                var hud = FindAnyObjectByType<AdaptiveAR.UI.TaskListHud>(FindObjectsInactive.Include);
                 var flow = FindAnyObjectByType<AdaptiveAR.UI.AppFlowController>(FindObjectsInactive.Include);
-                AdaptiveAR.MR.WorkspaceViewRotation.Ensure(workspaceRoot, engine,
-                    hud != null ? hud.gameObject : null,
-                    card != null ? card.transform : null,
-                    flow != null ? flow.ButtonTemplate : null,
+                RectTransform panel = flow != null && flow.StepPanel != null ? flow.StepPanel.transform as RectTransform : null;
+                GameObject template = flow != null ? flow.BackButtonTemplate : null;
+                AdaptiveAR.MR.WorkspaceViewRotation.Ensure(workspaceRoot, engine, panel, template,
                     note => { if (logger != null) logger.LogNote(note); });
             }
             catch (Exception e) { Debug.LogError("[ViewRotation] setup threw: " + e); }
@@ -367,9 +366,10 @@ namespace AdaptiveAR.Steps
             if (!spatialPulses || part == null) return;
             try
             {
+                // FAR = authored colour (exploring is not an error); NEAR = amber; anything
+                // else = authored. Red is reserved for a counted failed placement.
                 switch (state)
                 {
-                    case StepValidator.Proximity.Far: AdaptiveAR.UI.FeedbackPulse.Hold(part, FarRed); break;
                     case StepValidator.Proximity.Near: AdaptiveAR.UI.FeedbackPulse.Hold(part, NearAmber); break;
                     default: AdaptiveAR.UI.FeedbackPulse.Release(part); break;
                 }
@@ -915,6 +915,7 @@ namespace AdaptiveAR.Steps
         private void HandleAttempt(bool success, float posErr, float rotErr, string trigger)
         {
             _attemptsOnStep++;
+            _attemptsTotal++;
 
             // Discrete error model: one counted error at most per deliberate placement attempt
             // (released near the target without fitting). Carrying the part in and out of the
@@ -976,8 +977,9 @@ namespace AdaptiveAR.Steps
             {
                 // One deliberate failed placement: one brief tone, warning haptic, amber pulse.
                 // Never speech. Abandoned attempts (carried out of the zone) get nothing.
+                // Red is for exactly this: a counted failed placement.
                 if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
-                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.4f);
+                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Pulse(part, FarRed, 0.5f);
                 if (speech != null) speech.PlayCue(ProceduralTones.Kind.Invalid);
             }
 

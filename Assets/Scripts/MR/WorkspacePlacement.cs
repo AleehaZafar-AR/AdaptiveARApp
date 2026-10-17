@@ -520,9 +520,21 @@ namespace AdaptiveAR.MR
                 ApplyPose(_reticleHasPos ? _reticleSmoothed : _candidatePoint, _candidateNormal);
         }
 
+        /// <summary>
+        /// The participant is actually placing (looking down at a surface, or already has a
+        /// valid one) rather than reading the panel. Surface-validity warnings wait for this.
+        /// </summary>
+        private bool PlacementEngaged()
+        {
+            if (_hasPlacedOnce || HasValidCandidate) return true;
+            return head != null && head.forward.y < -0.17f;        // pitched down ~10 deg or more
+        }
+
         private void UpdateStatus()
         {
-            if (!_hasCandidate)
+            if (!PlacementEngaged())
+                StatusText = "When you are ready, look down at the table where the engine should go.";
+            else if (!_hasCandidate)
                 StatusText = "Point at the table where you want to place the assembly workspace.";
             else if (!HasValidCandidate)
                 StatusText = "That surface is too steep. Point at a flat table.";

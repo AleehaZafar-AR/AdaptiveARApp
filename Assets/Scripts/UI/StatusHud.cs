@@ -60,9 +60,56 @@ namespace AdaptiveAR.UI
         [SerializeField] private float refreshInterval = 0.1f;
 
         private float _timer;
+        private TextMeshProUGUI _stepValue, _levelValue, _attemptsValue, _elapsedValue;
+        private bool _resolved;
+
+        /// <summary>
+        /// The StatusCanvas was laid out by hand and some of its value fields were never
+        /// wired (ErrorValue - the "Placement Retries" that never updated). Resolve every
+        /// field by name under the panel, retitle the labels for the discrete attempt/error
+        /// model, and add the two rows the panel has room for (support level, attempts).
+        /// </summary>
+        private void ResolveFields()
+        {
+            if (_resolved) return;
+            _resolved = true;
+
+            Transform panel = transform.Find("Panel");
+            if (panel == null) return;
+            TextMeshProUGUI T(string n) { Transform t = panel.Find(n); return t != null ? t.GetComponent<TextMeshProUGUI>() : null; }
+
+            if (supportLevelText == null) supportLevelText = T("SupportValue");
+            if (progressValueText == null) progressValueText = T("ProgressValue");
+            if (timeValueText == null) timeValueText = T("TimeValue");
+            if (errorValueText == null) errorValueText = T("ErrorValue");
+            _stepValue = supportLevelText;
+
+            var supportLabel = T("SupportLabel"); if (supportLabel != null) supportLabel.text = "CURRENT STEP";
+            var timeLabel = T("TimeLabel");       if (timeLabel != null) timeLabel.text = "ELAPSED TIME  (total / step)";
+            var errorLabel = T("ErrorLabel");     if (errorLabel != null) errorLabel.text = "TOTAL ERRORS";
+
+            // Two more rows below the errors, cloned from the error row so they match.
+            var errorValueRt = errorValueText != null ? errorValueText.rectTransform : null;
+            if (errorLabel != null && errorValueRt != null)
+            {
+                _levelValue = CloneRow(panel, errorLabel, errorValueText, "SUPPORT LEVEL", 64f);
+                _attemptsValue = CloneRow(panel, errorLabel, errorValueText, "ATTEMPTS THIS STEP", 128f);
+            }
+            Debug.Log($"[StatusHud] fields resolved: step={(supportLevelText != null)} progress={(progressValueText != null)} time={(timeValueText != null)} errors={(errorValueText != null)} level={(_levelValue != null)} attempts={(_attemptsValue != null)}");
+        }
+
+        private static TextMeshProUGUI CloneRow(Transform panel, TextMeshProUGUI label, TextMeshProUGUI value, string title, float down)
+        {
+            var l = Instantiate(label, panel); l.name = title.Replace(" ", "") + "Label"; l.text = title;
+            l.rectTransform.anchoredPosition = label.rectTransform.anchoredPosition + new Vector2(0f, -down);
+            var v = Instantiate(value, panel); v.name = title.Replace(" ", "") + "Value"; v.text = "-";
+            v.rectTransform.anchoredPosition = value.rectTransform.anchoredPosition + new Vector2(0f, -down);
+            return v;
+        }
 
         private void OnEnable()
         {
+            ResolveFields();
             if (session != null)
                 session.OnStateChanged += Refresh;
 
@@ -87,11 +134,22 @@ namespace AdaptiveAR.UI
 
         private void Refresh()
         {
+            ResolveFields();
             UpdateSupportLevel();
             UpdateTime();
             UpdateErrors();
             UpdateProgress();
             UpdatePlacementError();
+            UpdateExtraRows();
+        }
+
+        /// <summary>Support level (L1/L2/L3) and discrete attempts on the current step.</summary>
+        private void UpdateExtraRows()
+        {
+            if (_levelValue != null)
+                _levelValue.text = supportLevel != null ? FriendlyLevel(supportLevel.CurrentLevel) : "-";
+            if (_attemptsValue != null)
+                _attemptsValue.text = session != null ? session.AttemptsOnStep.ToString() : "-";
         }
 
         /// <summary>
@@ -132,9 +190,9 @@ namespace AdaptiveAR.UI
                 return;
             }
 
-            float ms = showOverallTime ? session.OverallElapsedMs : session.StepElapsedMs;
-            int total = Mathf.Max(0, Mathf.FloorToInt(ms / 1000f));
-            timeValueText.text = $"{total / 60:00}:{total % 60:00}";
+            int total = Mathf.Max(0, Mathf.FloorToInt(session.OverallElapsedMs / 1000f));
+            int step = Mathf.Max(0, Mathf.FloorToInt(session.StepElapsedMs / 1000f));
+            timeValueText.text = $"{total / 60:00}:{total % 60:00}  /  {step / 60:00}:{step % 60:00}";
         }
 
         private void UpdateErrors()

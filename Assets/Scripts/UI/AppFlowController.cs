@@ -74,6 +74,20 @@ namespace AdaptiveAR.UI
 
         private bool _endButtonsBuilt;
 
+        /// <summary>The running instruction card's panel (the world-space canvas the SDK ray already drives).</summary>
+        public GameObject StepPanel { get { return stepPanel; } }
+
+        /// <summary>The authored Back button of the card, cloned for the view-rotation buttons so they match.</summary>
+        public GameObject BackButtonTemplate
+        {
+            get
+            {
+                if (stepPanel == null) return null;
+                Transform t = stepPanel.transform.Find("BackButton");
+                return t != null ? t.gameObject : null;
+            }
+        }
+
         /// <summary>Raised when the participant presses Start.</summary>
         public event Action OnStarted;
 
@@ -128,10 +142,12 @@ namespace AdaptiveAR.UI
             if (completeBody != null && session != null)
             {
                 int steps = stepRunner != null ? stepRunner.StepCount : 0;
+                int totalSec = Mathf.Max(0, Mathf.FloorToInt(session.OverallElapsedMs / 1000f));
                 completeBody.text =
-                    $"{steps} steps finished in {session.OverallElapsedMs / 60000f:F1} min.\n" +
-                    $"{session.ErrorsTotal} placement error{(session.ErrorsTotal == 1 ? "" : "s")}.\n\n" +
-                    "Thank you. You can remove the headset.";
+                    $"Total Errors: {session.ErrorsTotal}\n" +
+                    $"Total Attempts: {session.AttemptsTotal}\n" +
+                    $"Completion Time: {totalSec / 60:00}:{totalSec % 60:00}  ({steps} steps)\n\n" +
+                    "Thank you. Restart Assembly starts a new session; Quit closes the app.";
             }
         }
 

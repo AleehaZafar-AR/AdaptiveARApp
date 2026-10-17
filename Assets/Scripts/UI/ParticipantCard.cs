@@ -439,7 +439,9 @@ namespace AdaptiveAR.UI
             switch (validator.CurrentProximity)
             {
                 case StepValidator.Proximity.Far:
-                    SetFeedback(FeedbackKind.Cue, farMessage, farColour); return;
+                    // Exploring with the part in hand is not feedback-worthy: nothing is shown.
+                    if (_feedbackKind == FeedbackKind.Cue) ClearFeedback();
+                    return;
                 case StepValidator.Proximity.Near:
                     SetFeedback(FeedbackKind.Cue, validator.InsertionBlocked ? insertionMessage : nearMessage, MrTheme.Warning); return;
                 case StepValidator.Proximity.Valid:

@@ -2763,3 +2763,158 @@ mod  Step_06_Camshaft.asset       holder texts + clips;  add 2 clips
 5. A full knowledgeable run ends with an error count equal to the number of deliberate failed releases + wrong grabs only.
 6. Rotate/Reset View buttons under the card; whole workspace turns; targets still validate.
 7. Completion panel: Restart Assembly → fresh session, new log file; Quit → app exits.
+
+
+---
+
+## Claude → Reviewer — 2026-10-17 — Regression-fix pass (no new features)
+
+Base: `d23c7df`. Workflow, action sequence, authored piston interactions, captured head
+target, UI layout, ghosts, arrow, auto-complete untouched; no tolerance widened except
+bolt/nut POSITION (+0.8 cm, see 3). Your uncommitted scene / build-profile /
+render-texture edits are left alone. Both assemblies compile with the csc harness.
+Nothing has run on a headset: everything is [QV].
+
+### 1. Wrong-component detection (runtime path) [QV]
+Two concrete holes closed on the device path itself, plus the trace you asked for:
+- **Stale-episode skip.** `OnRuntimeSelected` returned without dispatching whenever the
+  part was still marked "held" from an earlier episode - it only logged. A part whose
+  release was ever missed therefore never produced a warning again, while a part whose
+  episodes always closed cleanly (the camshaft, picked up and put back in one clean
+  motion) kept working. Now: a selection on a part marked held WITHOUT a dispatched
+  episode closes the stale episode and dispatches; `firedThisEpisode` is the gate, not
+  the held flag.
+- **Per-candidate isolation** of the poll loop was already in `d23c7df`; the interactor
+  path is now the primary dispatcher and does not depend on that loop at all.
+- Joined subassembly children are *tolerated* grabs (never wrong); intentional
+  forwarding (child interactable → kit-handle Grabbable, see 7) is no longer reported
+  or "repaired" as a miswire.
+Every actual grab logs `[GrabRuntime] selectedObject= rigidbody= pointable= grabbable=
+interactable= interactor= currentAction=` then `[EligibilityRuntime] selected=
+acceptedObjects=[…] eligible=` then (if wrong) `[WrongPart] FIRING` and the feedback
+line. Please grab, at a wrong moment, a rod, a pin, a head, a bolt, a nut, a holder and
+the camshaft and send the logcat; the three lines decide event source / dispatch /
+feedback for each.
+
+### 2. Colours [QV]
+FAR → authored material, no message (exploring is not an error). NEAR → amber +
+"Almost there — adjust the alignment." (or "… insert the part along its axis."). Moving
+away again → authored material. VALID → green pulse, then authored. Red is now used for
+exactly one thing: a counted failed placement (release near the target without fitting).
+
+### 3. Orientation rules - what actually broke, and the fix [QV]
+Root cause of the "regression": `d23c7df` kept comparing **pivot** positions. A bolt, a
+nut and the cap have their pivot off their symmetry axis, so a free roll (bolt/nut) or
+the equivalent 180° flip (cap) moved the pivot and failed the POSITION test even though
+the orientation rule accepted the pose - which read as "demands near-exact rotation".
+The pin failed for a different reason: the insertion gate needed ≥ 2 cm of motion in
+0.3 s inside the zone to decide, so a careful (slow) approach stayed "undecided" and
+was never accepted. The rod shares the pivot issue on its half-turn variant.
+Fixes (table revision 5):
+- positions are compared at the **geometric centre** (mesh bounds centre on part and
+  target - same mesh), and the snap aligns centres after setting the rotation; the
+  centre does not move under a roll or an equivalent flip;
+- **bolts/nuts**: axis = bolt → its nut (nut → its bolt) read from the assembled piston
+  ghost, roll about it ignored, either direction; position 2.0→2.8 cm (bolts),
+  2.8→3.6 cm (nuts) - the only tolerance change;
+- **cap**: accepted at the authored orientation or turned 180° about its axis towards
+  the head (from the assembled ghost); snaps to the nearer variant;
+- **pin**: axis either way, roll ignored (unchanged rule) - accepted again because the
+  gate no longer stalls (5);
+- **rod**: half-turn rule unchanged; centre comparison makes its variant placeable.
+Diagnostics at 4 Hz near the target: `[…Validation] positionError= rotationError=
+axisError= rollIgnored= roll= symmetryVariant=A(authored)|B(180deg)|flipped|authored
+sym= axisLocal= …`.
+
+### 4. Holder equivalence [QV] - root cause and fix
+`d23c7df` expanded the accepted PARTS for holders (any holder could be picked up) but
+the TARGET expansion only ran for the bolt/nut role groups, so a holder action still had
+exactly one target - the authored slot - while the ghost logic offered the same single
+slot: "any holder, but each still belongs to a specific location". Now every unoccupied
+holder target is offered, all free holder ghosts are shown, the nearest free one is the
+measured and snap target (`[StepValidator] nearest free target is now …`), success
+occupies it and consumes the holder. Ghost, validator target and snap target are the
+same transform by construction.
+
+### 5. Insertion check [QV]
+Replaced the motion-window test with the final-approach vector: from the part centre's
+**zone-entry point** to its current position (falling back to the last 0.5 s of travel
+when it entered at the target). Evaluated whenever the pose is otherwise valid; within
+55° of the insertion axis (either direction) → accepted; across → not accepted yet, no
+error, one `[InsertionCheck] part= approachAngle= allowed=false …` line per 0.5 s until
+the part backs out and comes in along the axis. Bolt/nut axis from the assembled ghost
+(3); pin/camshaft from their length.
+
+### 6. Rotate / Reset View [QV] - root cause and fix
+The floating panel was a clone of the Overview canvas parented under the main card: as
+a nested canvas its input is routed through the card's pointable surface, whose clipper
+covers the card's rectangle only - the panel sat below it and never received a ray. The
+three buttons now live **inside the card** (bottom centre, between Back and Continue,
+cloned from the authored Back button with a fresh Button component): `↺ Rotate`,
+`Reset View`, `Rotate ↻` - one of each, created once, no scene-authored duplicates.
+They turn CalibrationOffset (engine, trays, ghosts, targets, mat, installed parts) about
+the vertical axis through the engine centre; Reset restores the authored pose.
+
+### 7. Loose subassembly grab [QV] - root cause and fix
+A joined rod/pin was locked with its Interaction SDK components disabled, so the only
+grabbable object was the head, and on the mat the head's lock still disabled its own
+grab until `Repositionable` was set - which happened only when the NEXT action armed.
+Now, when a part joins a LOOSE subassembly (handle unlocked or repositionable on the
+mat), its grab interactables stay enabled but are pointed at the **handle's** Grabbable:
+grabbing the rod, the pin or the head moves the whole head+rod+pin as one, child
+transforms unchanged (their locks hold them rigid to the handle), and the pin target
+follows the handle. Installed on the crankshaft, the head's final lock disables every
+interactable underneath it (the lock now re-scans its children instead of using the
+list cached at first lock); a cap/bolt/nut joined after installation is never forwarded.
+
+### 8. Startup panel [QV] - root cause and fix
+The scene serialises `PanelRig.prePlacementHeightOffset = +0.30` (30 cm ABOVE eye
+level). Revision 1 replaces it at start: 0.75 m ahead, 0.10 m below eye level, and the
+panel is parked only after the head has been still for 0.4 s (re-parked for 1.5 s while
+it stays still). Surface feedback: until the participant is actually placing (looking
+down ≥ 10°, or a valid candidate exists) the status reads "When you are ready, look
+down at the table…" - no steepness warnings while reading.
+
+### 9. Install ghost [QV]
+When the assembled-piston ghost group is shown for the INSTALL action, the cap, both
+bolts and both nuts are hidden; head, rod and pin only. Later actions show their single
+child ghosts (unchanged). Audit of the rest: crankshaft, camshaft, holders and mat kit
+ghosts are single objects or isolated children; the auto-complete clones depict
+completed pistons by design.
+
+### 10. Status panel [QV] - root cause and fix
+`StatusHud.errorValueText` was never wired in the scene (fileID 0) - "Placement
+Retries" could not update. Fields are now resolved by name under the panel; labels:
+CURRENT STEP (stage), PROGRESS, ELAPSED TIME (total / step), TOTAL ERRORS (discrete),
+plus two cloned rows SUPPORT LEVEL (L1/L2/L3) and ATTEMPTS THIS STEP. Zone presence
+unchanged (Performance: L1 Full, L2 Reduced, L3 Hidden). No HR/HRV.
+
+### 11. Completion screen [QV]
+Body now reads: Total Errors / Total Attempts / Completion Time (mm:ss, steps), above
+Restart Assembly / Quit. Restart still reloads the scene into a new session file.
+
+### Files
+```
+mod  StepValidator.cs             stale-episode dispatch, firedThisEpisode, centre-based position/snap, assembly-axis for bolts/nuts/cap,
+                                  rev 5 table, holder targets, zone-entry insertion check + [InsertionCheck], diagnostics, subassembly forwarding
+mod  PlacementLock.cs             ForwardedToHandle, child re-scan on (un)lock
+mod  StepPresenter.cs             install ghost hides cap/bolts/nuts
+mod  WorkspaceViewRotation.cs     buttons inside the card; RotateLeft/RotateRight/ResetView
+mod  AssemblySessionController.cs FAR = authored colour, red only on counted failure, AttemptsTotal, card buttons
+mod  AppFlowController.cs         StepPanel / BackButtonTemplate, run summary
+mod  ParticipantCard.cs           FAR shows nothing
+mod  PanelRig.cs                  pre-placement revision 1, stable-head park
+mod  WorkspacePlacement.cs        engaged-only surface feedback
+mod  StatusHud.cs                 fields by name, discrete model, extra rows
+```
+
+### [QV]
+1. Wrong grabs of rod/pin/head/bolt/nut/holder/camshaft → the three lines + feedback.
+2. Carry a part: authored colour far, amber near, green on fit; red only after a release-near miss.
+3. Nut/bolt at any roll, cap either way, rod/pin as before; `symmetryVariant` in the log.
+4. Holders in any order into any free slot; all free ghosts shown; snap = shown target.
+5. Sideways bolt/camshaft entry: not accepted, `[InsertionCheck] … allowed=false`; along the axis: accepted.
+6. Rotate/Reset buttons at the bottom centre of the card respond; workspace turns.
+7. Head+rod+pin liftable by any of its parts before installation.
+8. Start panel 0.75 m ahead, slightly below eye level, no steepness warning while reading.
+9. Install ghost = head+rod+pin only. 10. Status rows update. 11. Summary on completion.

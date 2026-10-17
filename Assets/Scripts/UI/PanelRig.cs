@@ -46,7 +46,18 @@ namespace AdaptiveAR.UI
         [SerializeField] private float prePlacementDistance = 0.75f;
 
         [Tooltip("Vertical offset of the parked panel from eye height, metres. Slightly below is comfortable.")]
-        [SerializeField] private float prePlacementHeightOffset = -0.08f;
+        [SerializeField] private float prePlacementHeightOffset = -0.10f;
+
+        [Tooltip("Revision of the two values above; an older serialized pair (e.g. +0.30 m, above the eyes) is replaced at start.")]
+        [SerializeField] private int prePlacementRevision = 0;
+        private const int CurrentPrePlacementRevision = 1;
+
+        [Tooltip("The head must have moved less than this (metres) and turned less than 5 deg over 0.4 s before the panel is parked.")]
+        [SerializeField] private float stableHeadMovement = 0.03f;
+
+        private Vector3 _stableProbePos;
+        private Quaternion _stableProbeRot;
+        private float _stableProbeAt = -1f;
 
         [Header("Comfort")]
         [Tooltip("Degrees of head turn tolerated before the panels re-aim. Stops them chasing you.")]
@@ -142,15 +153,39 @@ namespace AdaptiveAR.UI
             return head != null && head.position.y > 0.4f && head.position.sqrMagnitude > 1e-4f;
         }
 
+        /// <summary>Tracking is live AND the head has been still for 0.4 s: a pose worth parking against.</summary>
+        private bool HeadPoseStable()
+        {
+            if (!HeadPoseValid()) { _stableProbeAt = -1f; return false; }
+            if (_stableProbeAt < 0f)
+            {
+                _stableProbeAt = Time.time; _stableProbePos = head.position; _stableProbeRot = head.rotation;
+                return false;
+            }
+            bool still = Vector3.Distance(head.position, _stableProbePos) < stableHeadMovement
+                         && Quaternion.Angle(head.rotation, _stableProbeRot) < 5f;
+            if (!still) { _stableProbeAt = Time.time; _stableProbePos = head.position; _stableProbeRot = head.rotation; return false; }
+            return Time.time - _stableProbeAt >= 0.4f;
+        }
+
         private void EnterPrePlacement()
         {
             IsPrePlacement = true;
             Detach(freezeMarker: false);
             _parked = false;
 
-            // Never park from a dead head pose: on the first frames the camera sits at the
-            // origin, which is the floor. Park as soon as tracking reports a real pose.
-            if (HeadPoseValid()) { ParkInFrontOfHead(); _parked = true; _parkedAt = Time.time; }
+            if (prePlacementRevision < CurrentPrePlacementRevision)
+            {
+                prePlacementDistance = 0.75f;
+                prePlacementHeightOffset = -0.10f;
+                prePlacementRevision = CurrentPrePlacementRevision;
+                Debug.Log("[PanelRig] pre-placement park reset to revision 1: 0.75 m ahead, 0.10 m below eye level, after the head is still.");
+            }
+
+            // Never park from a dead or moving head pose: on the first frames the camera sits
+            // at the origin (the floor) and then swings as the headset is put on. Park once
+            // tracking is live AND the head has been still for a moment.
+            if (HeadPoseStable()) { ParkInFrontOfHead(); _parked = true; _parkedAt = Time.time; }
         }
 
         /// <summary>Offset of the main panel inside the rig (the rig has unit scale).</summary>
@@ -196,10 +231,10 @@ namespace AdaptiveAR.UI
                 // Park once tracking is live, and re-park briefly while it settles; then stay.
                 if (!_parked)
                 {
-                    if (HeadPoseValid()) { ParkInFrontOfHead(); _parked = true; _parkedAt = Time.time; }
+                    if (HeadPoseStable()) { ParkInFrontOfHead(); _parked = true; _parkedAt = Time.time; Debug.Log($"[PanelRig] parked in front of the head at {transform.position} (head {head.position}, {prePlacementDistance} m ahead, {prePlacementHeightOffset} m from eye level)."); }
                     return;
                 }
-                if (Time.time - _parkedAt < 0.75f) ParkInFrontOfHead();
+                if (Time.time - _parkedAt < 1.5f && HeadPoseStable()) ParkInFrontOfHead();
 
                 if (stepManager != null && stepManager.AnchorLocked)
                 {

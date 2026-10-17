@@ -649,9 +649,38 @@ namespace AdaptiveAR.Steps
                 target.SetActive(true);
                 into.Add(target);
                 any = true;
+
+                if (into == _activatedGhosts) HideFutureParts(target);
             }
 
             return any;
+        }
+
+        private static readonly string[] SubassemblyRoles = { "PistonHead", "ConnectingRod", "ConnectingPin" };
+        private static readonly string[] AllKitRoles = { "PistonHead", "ConnectingRod", "ConnectingPin", "PistonEnd", "pistonBolt", "pistonBoltOther", "PistonNut", "PistonNutOther" };
+
+        /// <summary>
+        /// A ghost must never reveal future assembly state. When the whole assembled-piston
+        /// ghost group is shown for the INSTALL action (the loose head+rod+pin going into the
+        /// bore), only those three parts are shown; cap, bolts and nuts stay hidden until
+        /// their own actions, which show their single child ghosts. Hidden children are
+        /// restored with the rest of the isolation state.
+        /// </summary>
+        private void HideFutureParts(GameObject ghostGroup)
+        {
+            if (_currentAction == null || !GuidanceRegistry.IsKitHandleKey(_currentAction.partKey)) return;
+            int hidden = 0;
+            foreach (string role in AllKitRoles)
+            {
+                if (System.Array.IndexOf(SubassemblyRoles, role) >= 0) continue;
+                Transform child = ghostGroup.transform.Find(role);
+                if (child == null || !child.gameObject.activeSelf) continue;
+                child.gameObject.SetActive(false);
+                _hiddenSiblings.Add(child.gameObject);
+                hidden++;
+            }
+            if (hidden > 0 && logPresentation)
+                Debug.Log($"[StepPresenter] install ghost '{ghostGroup.name}': {hidden} future part(s) (cap/bolts/nuts) hidden; head, rod and pin shown.");
         }
 
         private void ActivateIsolated(GameObject target)

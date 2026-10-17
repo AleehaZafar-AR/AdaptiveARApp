@@ -81,7 +81,9 @@ namespace AdaptiveAR.Steps
             /// <summary>Shortest extent (a nut's insertion axis is its thickness, not its width).</summary>
             Shortest = 1,
             /// <summary>Direction from the part to the piston head in the assembled piston (rod end cap).</summary>
-            TowardsHeadInAssembly = 2
+            TowardsHeadInAssembly = 2,
+            /// <summary>Direction from the part to its paired part in the assembled piston (bolt -> its nut, nut -> its bolt): the insertion axis.</summary>
+            TowardsPairedPart = 3
         }
 
         [Serializable]
@@ -139,7 +141,7 @@ namespace AdaptiveAR.Steps
         [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
                  "the values serialized in the scene, the table is reset to the defaults at start.")]
         [SerializeField] private int roleToleranceRevision = 0;
-        private const int CurrentRoleToleranceRevision = 4;
+        private const int CurrentRoleToleranceRevision = 5;
 
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
@@ -273,6 +275,8 @@ namespace AdaptiveAR.Steps
             public bool moved;
             public float radius;
             public Vector3 axisLocal;
+            public Vector3 centreLocal;          // mesh bounds centre: positions are compared here, not at the pivot
+            public bool firedThisEpisode;        // eligibility/wrong-part dispatched for the current grab episode
 
             // grab event source
             public Action<Oculus.Interaction.PointerEvent> handler;
@@ -387,10 +391,14 @@ namespace AdaptiveAR.Steps
                 new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.AxialHalfTurn },
                 new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
                 new RoleTolerance { role = "PistonEnd",       positionMeters = 0.025f, rotationDegrees = 25f, symmetry = AxisSymmetry.HalfTurnAboutAxis, axis = AxisSelect.TowardsHeadInAssembly },
-                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
-                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
-                new RoleTolerance { role = "PistonNut",       positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.Shortest, insertionAxis = true },
-                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.Shortest, insertionAxis = true },
+                // Revision 5: the bolt/nut axis is read from the assembled piston (bolt -> its nut),
+                // not guessed from mesh extents; positions are compared at the geometric centre so
+                // a free roll can never fail the position test; bolt/nut position +0.8 cm (small
+                // hardware in the hand). Every other number unchanged.
+                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.028f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.028f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "PistonNut",       positionMeters = 0.036f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.036f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
                 new RoleTolerance { role = "crankshaft",      positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
                 new RoleTolerance { role = "camshaft",        positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree, insertionAxis = true },
             };
@@ -564,6 +572,7 @@ namespace AdaptiveAR.Steps
             _hasCapAxis = false;
             _approachOk = !_insertion;
             _approachDecided = !_insertion;
+            _hasEntry = false;
             _trail.Clear();
             InsertionBlocked = false;
             CurrentProximity = Proximity.None;
@@ -605,7 +614,9 @@ namespace AdaptiveAR.Steps
             // nearest free one (chosen live). Once a target is occupied it is no longer offered.
             _targets.Clear();
             string[] group = GroupOf(RoleNameOf(action.partKey));
-            if (group != null)
+            bool equivalent = group != null || GuidanceAudit.IsEquivalent(action.partKey);
+            if (group == null && equivalent) group = new[] { RoleNameOf(action.partKey), "equivalent" };
+            if (equivalent)
             {
                 foreach (string tk in GuidanceAudit.ExpandEquivalent(action.targetKey))
                 {
@@ -686,8 +697,9 @@ namespace AdaptiveAR.Steps
 
             // Mechanical axes per candidate under the role's rule (longest / shortest / towards
             // the head in the assembled piston for the cap).
+            if (_axisSelect == AxisSelect.TowardsHeadInAssembly || _symmetry == AxisSymmetry.HalfTurnAboutAxis) ResolveAssemblyAxis(action, "PistonHead");
+            else if (_axisSelect == AxisSelect.TowardsPairedPart) ResolveAssemblyAxis(action, PairedRole(RoleNameOf(action.partKey)));
             foreach (Candidate c in _candidates) c.axisLocal = AxisFor(c.tf);
-            if (_symmetry == AxisSymmetry.HalfTurnAboutAxis) ResolveCapAxis(action);
 
             // Building the loose subassembly on the mat: the kit handle (head) may be picked up
             // to turn the subassembly; it is tolerated (never a wrong part) and the kit's
@@ -699,6 +711,8 @@ namespace AdaptiveAR.Steps
                 && guidanceRegistry.TryGetKitHandle(kitOfAction, out Transform kitHandle) && kitHandle != null)
             {
                 _toleratedObjects.Add(kitHandle.gameObject);
+                foreach (Transform joined in kitHandle.GetComponentsInChildren<Transform>(true))
+                    if (joined != kitHandle && joined.GetComponent<Rigidbody>() != null) _toleratedObjects.Add(joined.gameObject);
                 var hl = kitHandle.GetComponent<PlacementLock>();
                 bool onMat = !string.IsNullOrEmpty(action.targetKey) && action.targetKey.StartsWith("ghost.PistonKit");
                 if (hl != null && onMat) hl.Repositionable = true;
@@ -759,7 +773,7 @@ namespace AdaptiveAR.Steps
         private Vector3 AxisFor(Transform t)
         {
             if (t == null) return Vector3.forward;
-            if (_symmetry == AxisSymmetry.HalfTurnAboutAxis && _hasCapAxis) return _capAxisLocal;
+            if (_hasCapAxis && (_symmetry == AxisSymmetry.HalfTurnAboutAxis || _axisSelect == AxisSelect.TowardsPairedPart || _axisSelect == AxisSelect.TowardsHeadInAssembly)) return _capAxisLocal;
             var mf = t.GetComponent<MeshFilter>();
             if (mf == null || mf.sharedMesh == null) return Vector3.forward;
             Vector3 s = Vector3.Scale(mf.sharedMesh.bounds.size, t.localScale);
@@ -780,25 +794,48 @@ namespace AdaptiveAR.Steps
         /// the axis from the cap towards the piston head in the assembled piston. Read from the
         /// assembled ghost (ghost.piston00N) so no mechanical detail is invented.
         /// </summary>
-        private void ResolveCapAxis(AssemblyAction action)
+        private static string PairedRole(string role)
         {
+            switch (role)
+            {
+                case "pistonBolt": return "PistonNut";
+                case "pistonBoltOther": return "PistonNutOther";
+                case "PistonNut": return "pistonBolt";
+                case "PistonNutOther": return "pistonBoltOther";
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// The part's mechanical axis read from the ASSEMBLED piston ghost (ghost.piston00N):
+        /// the direction from this part's ghost to the named other part's ghost, in this
+        /// part's local space. Cap -> head gives the cap's symmetry axis; bolt -> its nut (and
+        /// nut -> its bolt) gives the insertion axis. Nothing mechanical is invented.
+        /// </summary>
+        private void ResolveAssemblyAxis(AssemblyAction action, string towardsRole)
+        {
+            _hasCapAxis = false;
+            string role = RoleNameOf(action.partKey);
             string kit = GuidanceRegistry.KitOf(action.partKey);
             string n = kit != null ? kit.Substring(kit.Length - 1) : null;
-            if (n != null && guidanceRegistry.TryResolveQuiet($"ghost.piston00{n}", out GameObject asm) && asm != null)
+            if (n != null && towardsRole != null && guidanceRegistry.TryResolveQuiet($"ghost.piston00{n}", out GameObject asm) && asm != null)
             {
-                Transform cap = asm.transform.Find("PistonEnd");
-                Transform head = asm.transform.Find("PistonHead");
-                if (cap != null && head != null)
+                Transform self = asm.transform.Find(role);
+                Transform other = asm.transform.Find(towardsRole);
+                if (self != null && other != null)
                 {
-                    _capAxisLocal = cap.InverseTransformDirection((head.position - cap.position).normalized);
-                    _hasCapAxis = _capAxisLocal.sqrMagnitude > 1e-6f;
-                    foreach (Candidate c in _candidates) c.axisLocal = _capAxisLocal;
-                    if (logEvaluations) Debug.Log($"[StepValidator] cap symmetry axis (towards the head) = {_capAxisLocal} in cap space; both half-turn orientations accepted.");
-                    return;
+                    Vector3 d = other.position - self.position;
+                    if (d.sqrMagnitude > 1e-8f)
+                    {
+                        _capAxisLocal = self.InverseTransformDirection(d.normalized).normalized;
+                        _hasCapAxis = true;
+                        if (logEvaluations) Debug.Log($"[StepValidator] '{role}' mechanical axis from the assembled piston: towards '{towardsRole}' = {_capAxisLocal} in part space.");
+                        return;
+                    }
                 }
             }
-            Debug.LogError("[StepValidator] cap symmetry axis could not be read from the assembled piston ghost; falling back to the longest axis.");
-            _capAxisLocal = Vector3.up; _hasCapAxis = false;
+            Debug.LogError($"[StepValidator] mechanical axis of '{role}' could not be read from the assembled piston ghost (towards '{towardsRole}'); falling back to the mesh extent rule.");
+            _capAxisLocal = Vector3.up;
         }
 
         private static Candidate MakeCandidate(string key, GameObject go)
@@ -815,8 +852,21 @@ namespace AdaptiveAR.Steps
                 wasKinematic = body != null && body.isKinematic,
                 wasHeld = pointable != null && pointable.SelectingPointsCount > 0,
                 radius = ShapeRadius(go.transform),
-                axisLocal = LongAxisLocal(go.transform)
+                axisLocal = LongAxisLocal(go.transform),
+                centreLocal = CentreLocal(go.transform)
             };
+        }
+
+        private static Vector3 CentreLocal(Transform t)
+        {
+            var mf = t != null ? t.GetComponent<MeshFilter>() : null;
+            return mf != null && mf.sharedMesh != null ? mf.sharedMesh.bounds.center : Vector3.zero;
+        }
+
+        /// <summary>World position of the part's geometric centre (same mesh on part and ghost, so it is comparable).</summary>
+        private static Vector3 CentreWorld(Transform t, Vector3 centreLocal)
+        {
+            return t.TransformPoint(centreLocal);
         }
 
         private static float ShapeRadius(Transform t)
@@ -1046,13 +1096,20 @@ namespace AdaptiveAR.Steps
             }
             if (c == null) { Debug.LogError("[GrabRuntime] could not create a watch entry for the selected object."); return; }
 
-            if (c.wasHeld)
+            if (c.wasHeld && c.firedThisEpisode)
             {
-                // Another source already opened this episode this frame (Grabbable/interactable
-                // event or poll). Report the runtime eligibility anyway; no second dispatch.
-                Debug.Log($"[GrabRuntime] episode already open for {part.name}#{part.GetInstanceID()} (reported by {c.grabSource ?? "poll"}).");
+                // Another source already opened AND dispatched this episode. Report only.
+                Debug.Log($"[GrabRuntime] episode already dispatched for {part.name}#{part.GetInstanceID()} (by {c.grabSource ?? "poll"}).");
                 LogEligibilityRuntime(c);
                 return;
+            }
+            if (c.wasHeld && !c.firedThisEpisode)
+            {
+                // Marked held but nothing was ever dispatched: a stale episode. Close it and
+                // dispatch this real selection.
+                Debug.Log($"[GrabRuntime] {part.name}#{part.GetInstanceID()} was marked held with no dispatch (stale); closing and re-dispatching.");
+                c.wasHeld = false;
+                HandleRelease(c);
             }
 
             c.pendingGrab = false;
@@ -1095,7 +1152,8 @@ namespace AdaptiveAR.Steps
                             : (interactable.transform.parent != null ? interactable.transform.parent.gameObject : interactable.gameObject);
 
             var elementComp = element as Component;
-            if (elementComp != null && elementComp.gameObject != part)
+            bool intentionalForward = elementComp != null && part.transform.IsChildOf(elementComp.transform);   // joined kit child -> its handle
+            if (elementComp != null && elementComp.gameObject != part && !intentionalForward)
             {
                 // Scene miswire: this interactable sits under one part but drives ANOTHER part's
                 // Grabbable, so grabbing it selects/moves the other part. Repaired at runtime to
@@ -1327,6 +1385,7 @@ namespace AdaptiveAR.Steps
             bool physical = IsActive && !_completed;
             bool ack = _ackArmed;
             string actionId = CurrentActionId();
+            c.firedThisEpisode = true;
 
             LogEligibilityRuntime(c);
 
@@ -1379,6 +1438,7 @@ namespace AdaptiveAR.Steps
 
         private void HandleRelease(Candidate c)
         {
+            c.firedThisEpisode = false;
             if (_wrongHeld == c)
             {
                 _wrongHeld = null;
@@ -1461,7 +1521,7 @@ namespace AdaptiveAR.Steps
             bool inZone = posErr <= _attemptZone;
 
             UpdateInsertionGate(posErr, inZone, anyHeld);
-            if (ok && _insertion && !_approachOk)
+            if (ok && _insertion && !InsertionApproachAllowed())
             {
                 ok = false;
                 InsertionBlocked = true;
@@ -1542,35 +1602,77 @@ namespace AdaptiveAR.Steps
         /// the zone but not yet in position tolerance; across the axis = blocked until the
         /// part backs out and comes in again along it.
         /// </summary>
+        private Vector3 _entryCentre;
+        private bool _hasEntry;
+        private float _nextInsertionLog;
+
+        /// <summary>
+        /// Final-approach check for insertion parts. The approach vector is from where the
+        /// part's centre ENTERED the near zone to where it is now (falling back to its travel
+        /// over the last 0.5 s when it entered at the target): if that vector is within 55 deg
+        /// of the insertion axis (either direction) the part may be accepted; across the axis
+        /// it is simply not accepted yet - no error, no spam - until it backs out of the zone
+        /// and comes in along the axis. Evaluated whenever the pose is otherwise valid.
+        /// </summary>
         private void UpdateInsertionGate(float posErr, bool inZone, bool anyHeld)
         {
             if (!_insertion || _active == null || _active.tf == null || CurrentTarget == null) return;
 
             float now = Time.time;
-            _trail.Add(new KeyValuePair<float, Vector3>(now, _active.tf.position));
-            while (_trail.Count > 0 && now - _trail[0].Key > 0.3f) _trail.RemoveAt(0);
+            Vector3 centre = CentreWorld(_active.tf, _active.centreLocal);
+            _trail.Add(new KeyValuePair<float, Vector3>(now, centre));
+            while (_trail.Count > 0 && now - _trail[0].Key > 0.5f) _trail.RemoveAt(0);
 
             if (!inZone)
             {
-                // Out of the zone: the next entry decides again.
-                _approachDecided = false;
+                _hasEntry = false;
                 _approachOk = false;
+                _approachDecided = false;
                 return;
             }
-            if (_approachDecided) return;
-            if (_trail.Count < 2) return;
+            if (!_hasEntry) { _hasEntry = true; _entryCentre = centre; }
+        }
 
-            Vector3 travel = _active.tf.position - _trail[0].Value;
-            if (travel.magnitude < 0.02f) return;                       // not enough motion to judge yet
+        /// <summary>Evaluates (and logs) the insertion approach for a pose that is otherwise valid. True = may be accepted.</summary>
+        private bool InsertionApproachAllowed()
+        {
+            if (!_insertion) return true;
+            if (_active == null || _active.tf == null || CurrentTarget == null) return true;
 
+            Vector3 centre = CentreWorld(_active.tf, _active.centreLocal);
+            Vector3 approach = _hasEntry ? centre - _entryCentre : Vector3.zero;
+            string basis = "zone entry";
+            if (approach.magnitude < 0.015f && _trail.Count > 1)
+            {
+                approach = centre - _trail[0].Value;
+                basis = $"travel over {Time.time - _trail[0].Key:F2} s";
+            }
             Vector3 axis = (CurrentTarget.rotation * _active.axisLocal).normalized;
-            float angle = Vector3.Angle(travel.normalized, axis);
-            angle = Mathf.Min(angle, 180f - angle);                      // either direction along the axis
+            bool allowed;
+            float angle;
+            if (approach.magnitude < 0.015f)
+            {
+                angle = -1f;
+                allowed = true;               // it did not come from anywhere measurable: nothing to judge
+                basis = "no measurable approach";
+            }
+            else
+            {
+                angle = Vector3.Angle(approach.normalized, axis);
+                angle = Mathf.Min(angle, 180f - angle);
+                allowed = angle <= 55f;
+            }
             _lastApproachAngle = angle;
-            _approachOk = angle <= 55f;
+            _approachOk = allowed;
             _approachDecided = true;
-            Debug.Log($"[Insertion] '{_active.key}' approach {(_approachOk ? "ALONG" : "ACROSS")} the axis: {angle:F0} deg off (limit 55), travel {travel.magnitude * 100f:F1} cm over {now - _trail[0].Key:F2} s" +
-                      (_approachOk ? "." : " - blocked until it backs out of the zone and comes in along the axis."));
+
+            if (allowed || Time.time >= _nextInsertionLog)
+            {
+                _nextInsertionLog = Time.time + 0.5f;
+                Debug.Log($"[InsertionCheck] part={_active.tf.name}#{_active.tf.GetInstanceID()} approachAngle={(angle < 0 ? "n/a" : angle.ToString("F0"))} allowed={allowed} " +
+                          $"basis={basis} approach={approach.magnitude * 100f:F1}cm axis={axis} limit=55");
+            }
+            return allowed;
         }
 
         /// <summary>
@@ -1605,11 +1707,16 @@ namespace AdaptiveAR.Steps
             Quaternion alignAxes = Quaternion.FromToRotation(partAxis, targetAxis);
             float roll = Quaternion.Angle(Quaternion.Inverse(CurrentTarget.rotation) * (alignAxes * _active.tf.rotation), Quaternion.identity);
 
+            bool rollIgnored = _symmetry == AxisSymmetry.AxialFree || _symmetry == AxisSymmetry.AxialFreeFlip;
+            string variant = _symmetry == AxisSymmetry.HalfTurnAboutAxis
+                ? (Quaternion.Angle(EffectiveTargetRotation(_active), CurrentTarget.rotation) < 0.5f ? "A(authored)" : "B(180deg)")
+                : (_symmetry == AxisSymmetry.AxialFreeFlip && Vector3.Dot(partAxis, targetAxis) < 0f ? "flipped" : "authored");
             Debug.Log($"{Tag("Validation")} part={Describe(_active.tf)} target={Describe(CurrentTarget)} " +
-                      $"distance={posErr:F4} angle={rotErr:F1} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol} " +
-                      $"armed={IsActive} held={anyHeld} inZone={inZone} tol={_posTol:F3}m/{_rotTol:F0}deg sym={_symmetry} " +
-                      $"axisOff={axisAngle:F1} roll={roll:F1} proximity={CurrentProximity} insertion={(_insertion ? (_approachDecided ? (_approachOk ? "along" : "ACROSS") : "undecided") : "n/a")} " +
-                      $"attempt={AttemptId} partPos={_active.tf.position} targetPos={CurrentTarget.position}");
+                      $"positionError={posErr:F4} rotationError={rotErr:F1} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol} " +
+                      $"axisError={axisAngle:F1} rollIgnored={rollIgnored} roll={roll:F1} symmetryVariant={variant} sym={_symmetry} axisLocal={_active.axisLocal} " +
+                      $"armed={IsActive} held={anyHeld} inZone={inZone} tol={_posTol:F3}m/{_rotTol:F0}deg " +
+                      $"proximity={CurrentProximity} insertion={(_insertion ? (_approachDecided ? (_approachOk ? "along" : "ACROSS") : "undecided") : "n/a")} " +
+                      $"attempt={AttemptId} partCentre={CentreWorld(_active.tf, _active.centreLocal)} targetCentre={CentreWorld(CurrentTarget, _active.centreLocal)}");
         }
 
         /// <summary>Either-side actions: the active part is judged against the nearest FREE target.</summary>
@@ -1621,7 +1728,7 @@ namespace AdaptiveAR.Steps
             foreach (TargetOption t in _targets)
             {
                 if (t.tf == null || _occupiedTargets.Contains(t.tf)) continue;
-                float d = Vector3.Distance(_active.tf.position, t.tf.position);
+                float d = Vector3.Distance(CentreWorld(_active.tf, _active.centreLocal), CentreWorld(t.tf, _active.centreLocal));
                 if (d < bestD) { bestD = d; best = t; }
             }
             if (best == null || best.tf == CurrentTarget) return;
@@ -1649,7 +1756,7 @@ namespace AdaptiveAR.Steps
             foreach (Candidate c in _candidates)
             {
                 if (c.tf == null) continue;
-                float d = Vector3.Distance(c.tf.position, CurrentTarget.position);
+                float d = Vector3.Distance(CentreWorld(c.tf, c.centreLocal), CentreWorld(CurrentTarget, c.centreLocal));
                 float score = c.moved ? d : d + 1000f;
                 if (IsHeld(c)) score -= 2000f;            // the one in the hand always wins
                 if (score < bestScore) { bestScore = score; best = c; }
@@ -1664,9 +1771,19 @@ namespace AdaptiveAR.Steps
 
         private bool WithinTolerance(Candidate c, out float positionError, out float rotationError)
         {
-            positionError = Vector3.Distance(c.tf.position, CurrentTarget.position);
+            positionError = PositionError(c);
             rotationError = OrientationError(c);
             return positionError <= _posTol && rotationError <= _rotTol;
+        }
+
+        /// <summary>
+        /// Distance between the part's geometric centre and where that centre is on the
+        /// target. The pivot of a bolt, nut or cap is not on its symmetry axis, so comparing
+        /// pivots made a free roll or an equivalent flip fail on POSITION; the centre does not move.
+        /// </summary>
+        private float PositionError(Candidate c)
+        {
+            return Vector3.Distance(CentreWorld(c.tf, c.centreLocal), CentreWorld(CurrentTarget, c.centreLocal));
         }
 
         /// <summary>
@@ -1798,7 +1915,7 @@ namespace AdaptiveAR.Steps
             try
             {
                 SnapToTarget(_active);
-                snapped = Vector3.Distance(_active.tf.position, CurrentTarget.position) < 0.002f
+                snapped = PositionError(_active) < 0.002f
                           && Quaternion.Angle(_active.tf.rotation, EffectiveTargetRotation(_active)) < 1f;
             }
             catch (Exception e) { Debug.LogError($"{tag} snap threw: {e}"); }
@@ -1900,7 +2017,10 @@ namespace AdaptiveAR.Steps
                 c.body.isKinematic = true;
             }
 
-            c.tf.SetPositionAndRotation(CurrentTarget.position, EffectiveTargetRotation(c));
+            c.tf.rotation = EffectiveTargetRotation(c);
+            // Rotation first, then align the geometric centres (identical to the pivot snap when
+            // the rotations match; keeps the equivalent flip/roll in place when they do not).
+            c.tf.position += CentreWorld(CurrentTarget, c.centreLocal) - CentreWorld(c.tf, c.centreLocal);
         }
 
         private void BindAndJoin(Candidate c)
@@ -1922,6 +2042,7 @@ namespace AdaptiveAR.Steps
             if (handle == c.tf || c.tf.IsChildOf(handle)) return;
 
             c.tf.SetParent(handle, true);
+            ForwardGrabsToHandle(c.tf, handle);
             if (!c.tf.gameObject.activeSelf)
             {
                 c.tf.gameObject.SetActive(true);
@@ -1930,6 +2051,38 @@ namespace AdaptiveAR.Steps
             if (!handle.gameObject.activeInHierarchy)
                 Debug.LogError($"[StepValidator] kit handle '{handle.name}' of {kit} is not active in the hierarchy: the joined part would be invisible.");
             if (logEvaluations) Debug.Log($"[StepValidator] '{c.key}' joined {kit} under '{handle.name}'#{handle.GetInstanceID()}.");
+        }
+
+        /// <summary>
+        /// A part joined to the loose subassembly stays grabbable, but grabbing it moves the
+        /// WHOLE subassembly: its grab interactables are pointed at the kit handle's
+        /// Grabbable. Its own lock keeps it rigid relative to the handle. The handle's final
+        /// lock (installation) disables everything underneath it again.
+        /// </summary>
+        private void ForwardGrabsToHandle(Transform child, Transform handle)
+        {
+            var handleGrabbable = handle != null ? handle.GetComponent<Oculus.Interaction.Grabbable>() : null;
+            if (handleGrabbable == null) return;
+
+            // Only while the subassembly is LOOSE (handle unlocked or repositionable on the mat).
+            // A cap, bolt or nut joined after the piston is installed must stay fully locked:
+            // forwarding then would let a bolt move the installed piston.
+            var handleLock = handle.GetComponent<PlacementLock>();
+            if (handleLock != null && handleLock.IsLocked && !handleLock.Repositionable)
+            {
+                if (logEvaluations) Debug.Log($"[StepValidator] '{child.name}' joined an INSTALLED piston: stays locked (no subassembly grab).");
+                return;
+            }
+
+            int n = 0;
+            foreach (var hgi in child.GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
+            { hgi.InjectOptionalPointableElement(handleGrabbable); hgi.enabled = true; n++; }
+            foreach (var gi in child.GetComponentsInChildren<Oculus.Interaction.GrabInteractable>(true))
+            { gi.InjectOptionalPointableElement(handleGrabbable); gi.enabled = true; n++; }
+
+            var padlock = child.GetComponent<PlacementLock>();
+            if (padlock != null) padlock.ForwardedToHandle = true;
+            if (logEvaluations) Debug.Log($"[StepValidator] '{child.name}' joined: {n} grab interactable(s) now move the subassembly via '{handle.name}'.");
         }
 
         // =====================================================================
@@ -2025,7 +2178,7 @@ namespace AdaptiveAR.Steps
 
             if (!IsActive || _active == null || _active.tf == null || CurrentTarget == null) return;
 
-            positionError = Vector3.Distance(_active.tf.position, CurrentTarget.position);
+            positionError = PositionError(_active);
             rotationError = OrientationError(_active);
         }
     }

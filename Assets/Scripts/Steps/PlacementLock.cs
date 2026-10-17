@@ -60,6 +60,13 @@ namespace AdaptiveAR.Steps
         private bool _repositionable;
         private bool _wasHeld;
 
+        /// <summary>
+        /// Set on a part joined to a loose subassembly: its grab interactables drive the kit
+        /// handle, so this lock must not switch them off. The handle's own lock does that
+        /// for the whole subassembly once it is installed.
+        /// </summary>
+        public bool ForwardedToHandle { get; set; }
+
         private bool IsHeldNow()
         {
             var pe = GetComponent<Oculus.Interaction.PointableElement>();
@@ -98,7 +105,7 @@ namespace AdaptiveAR.Steps
                     c.isTrigger = true;
             }
 
-            if (disableInteraction && !_repositionable)
+            if (disableInteraction && !_repositionable && !ForwardedToHandle)
                 SetInteractionEnabled(false);
 
             PartWatch.Log("PlacementLock.Lock", transform);
@@ -198,11 +205,14 @@ namespace AdaptiveAR.Steps
                           $"{(moved ? "pose had moved; " : "")}restored. (#{_corrections})");
             }
 
-            if (disableInteraction && (fixedBody || moved) && !_repositionable) SetInteractionEnabled(false);
+            if (disableInteraction && (fixedBody || moved) && !_repositionable && !ForwardedToHandle) SetInteractionEnabled(false);
         }
 
         private void SetInteractionEnabled(bool enabled)
         {
+            // Always re-scan: parts join (and leave) this hierarchy during the session, and a
+            // cached list from the first lock would miss the children joined since.
+            _interactionComponents = null;
             if (_interactionComponents == null)
             {
                 var found = new System.Collections.Generic.List<MonoBehaviour>();
