@@ -252,6 +252,29 @@ namespace AdaptiveAR.Steps
         }
 
         /// <summary>
+        /// Viewing convenience: the whole placed workspace can be turned about its vertical
+        /// axis from a small floating panel. Never an assembly action or error (log note only).
+        /// </summary>
+        private void EnsureViewRotation()
+        {
+            try
+            {
+                Transform engine = stepManager != null && stepManager.oilPan != null ? stepManager.oilPan.transform : null;
+                if (engine == null || engine.parent == null) { Debug.LogError("[ViewRotation] EngineAnchor not found: no view rotation."); return; }
+                Transform workspaceRoot = engine.parent;                    // CalibrationOffset
+                var card = FindAnyObjectByType<AdaptiveAR.UI.ParticipantCard>(FindObjectsInactive.Include);
+                var hud = FindAnyObjectByType<AdaptiveAR.UI.TaskListHud>(FindObjectsInactive.Include);
+                var flow = FindAnyObjectByType<AdaptiveAR.UI.AppFlowController>(FindObjectsInactive.Include);
+                AdaptiveAR.MR.WorkspaceViewRotation.Ensure(workspaceRoot, engine,
+                    hud != null ? hud.gameObject : null,
+                    card != null ? card.transform : null,
+                    flow != null ? flow.ButtonTemplate : null,
+                    note => { if (logger != null) logger.LogNote(note); });
+            }
+            catch (Exception e) { Debug.LogError("[ViewRotation] setup threw: " + e); }
+        }
+
+        /// <summary>
         /// Latest physiological reading, or null when nothing is attached.
         /// A future BLE source sets this; nothing today writes to it, and the logger
         /// records every field as null rather than inventing a value.
@@ -283,6 +306,7 @@ namespace AdaptiveAR.Steps
                 validator.OnWrongPartReleased += HandleWrongPartReleased;
                 validator.OnComponentDropped += HandleComponentDropped;
                 validator.OnAcknowledgedByGrab += HandleAcknowledgedByGrab;
+                validator.OnProximityChanged += HandleProximityChanged;
             }
 
             if (toolInteraction != null)
@@ -320,6 +344,7 @@ namespace AdaptiveAR.Steps
                 validator.OnWrongPartReleased -= HandleWrongPartReleased;
                 validator.OnComponentDropped -= HandleComponentDropped;
                 validator.OnAcknowledgedByGrab -= HandleAcknowledgedByGrab;
+                validator.OnProximityChanged -= HandleProximityChanged;
             }
 
             if (toolInteraction != null)
@@ -328,6 +353,29 @@ namespace AdaptiveAR.Steps
             if (stepManager != null && stepManager.Placement != null)
                 stepManager.Placement.OnPlaced -= HandleWorkspacePlaced;
             _placementSubscribed = false;
+        }
+
+        private static readonly Color FarRed = new Color(0.93f, 0.3f, 0.26f);
+        private static readonly Color NearAmber = new Color(0.96f, 0.62f, 0.14f);
+
+        /// <summary>
+        /// FAR: red tint on the held part. NEAR (in the zone, not yet valid): amber. VALID:
+        /// the green success pulse (HandleAttempt). Nothing held: authored colour.
+        /// </summary>
+        private void HandleProximityChanged(StepValidator.Proximity state, Transform part)
+        {
+            if (!spatialPulses || part == null) return;
+            try
+            {
+                switch (state)
+                {
+                    case StepValidator.Proximity.Far: AdaptiveAR.UI.FeedbackPulse.Hold(part, FarRed); break;
+                    case StepValidator.Proximity.Near: AdaptiveAR.UI.FeedbackPulse.Hold(part, NearAmber); break;
+                    default: AdaptiveAR.UI.FeedbackPulse.Release(part); break;
+                }
+            }
+            catch (Exception e) { Debug.LogError("[Session] proximity tint threw: " + e); }
+            RaiseStateChanged();
         }
 
         private void HandlePartGrabbed(string partKey, Transform part)
@@ -827,7 +875,7 @@ namespace AdaptiveAR.Steps
                                     step.taskComplexity, ExpectedMsOrNull(step));
             }
 
-            if (!_selfCheckDone) { _selfCheckDone = true; RunSelfCheck(); }
+            if (!_selfCheckDone) { _selfCheckDone = true; RunSelfCheck(); EnsureViewRotation(); }
 
             // Enter the stage in the authoritative model, then its first real action.
             if (workflow != null)
@@ -868,7 +916,11 @@ namespace AdaptiveAR.Steps
         {
             _attemptsOnStep++;
 
-            if (!success)
+            // Discrete error model: one counted error at most per deliberate placement attempt
+            // (released near the target without fitting). Carrying the part in and out of the
+            // zone, holding it, or adjusting it during the same attempt is never an error.
+            bool counted = !success && validator != null && validator.LastAttemptCounted;
+            if (counted)
             {
                 _errorsOnStep++;
                 _errorsTotal++;
@@ -895,7 +947,9 @@ namespace AdaptiveAR.Steps
                                             validator != null ? validator.ActiveInstanceKey : null,
                                             validator != null && validator.CurrentPart != null ? validator.CurrentPart.name : null,
                                             validator != null ? validator.LastAttemptPositionOk : (bool?)null,
-                                            validator != null ? validator.LastAttemptOrientationOk : (bool?)null);
+                                            validator != null ? validator.LastAttemptOrientationOk : (bool?)null,
+                                            validator != null ? validator.AttemptId : 0,
+                                            success ? false : counted);
 
                 if (success)
                     logger.LogComponentLocked(validator != null ? validator.ActiveInstanceKey : null, posErr, rotErr,
@@ -918,17 +972,12 @@ namespace AdaptiveAR.Steps
                 }
                 if (speech != null) speech.PlayCue(ProceduralTones.Kind.Success);
             }
-            else
+            else if (counted)
             {
-                // One genuine failed attempt (zone left or released inside it): one brief tone,
-                // warning haptic, red (clearly off) or amber (close) pulse. Never speech.
-                bool far = validator != null && validator.LastAttemptFar;
+                // One deliberate failed placement: one brief tone, warning haptic, amber pulse.
+                // Never speech. Abandoned attempts (carried out of the zone) get nothing.
                 if (haptics && part != null) HapticFeedback.Pulse(HapticFeedback.Kind.WrongPart, part.position);
-                if (spatialPulses && part != null)
-                {
-                    if (far) AdaptiveAR.UI.FeedbackPulse.Pulse(part, new Color(0.93f, 0.3f, 0.26f), 0.45f);
-                    else AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.4f);
-                }
+                if (spatialPulses && part != null) AdaptiveAR.UI.FeedbackPulse.Invalid(part, 0.4f);
                 if (speech != null) speech.PlayCue(ProceduralTones.Kind.Invalid);
             }
 

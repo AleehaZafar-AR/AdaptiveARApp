@@ -290,9 +290,12 @@ namespace AdaptiveAR.Logging
                                          string rejectReason = null,
                                          string actionId = null, string requestedKey = null,
                                          string instanceKey = null, string instanceName = null,
-                                         bool? positionOk = null, bool? orientationOk = null)
+                                         bool? positionOk = null, bool? orientationOk = null,
+                                         int attemptId = 0, bool? errorCounted = null)
         {
             var w = NewLine(Events.ValidationAttempt);
+            w.Num("attempt_id", attemptId);
+            if (errorCounted.HasValue) w.Bool("error_counted", errorCounted.Value); else w.Str("error_counted", null);
             w.Str("error_type", rejectReason);
             w.Str("action_id", actionId);
             w.Str("requested_key", requestedKey);

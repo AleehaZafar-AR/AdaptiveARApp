@@ -68,7 +68,20 @@ namespace AdaptiveAR.Steps
             /// <summary>Long axis may point either way; rotation about it is free (pins, bolts).</summary>
             AxialFreeFlip = 2,
             /// <summary>Long axis must point the same way; roll about it matches modulo 180 degrees.</summary>
-            AxialHalfTurn = 3
+            AxialHalfTurn = 3,
+            /// <summary>Full orientation must match the target OR the target turned 180 degrees about the part's symmetry axis (rod end cap).</summary>
+            HalfTurnAboutAxis = 4
+        }
+
+        /// <summary>Which mesh axis is the part's mechanical axis.</summary>
+        public enum AxisSelect
+        {
+            /// <summary>Longest extent (shafts, pins, rods).</summary>
+            Longest = 0,
+            /// <summary>Shortest extent (a nut's insertion axis is its thickness, not its width).</summary>
+            Shortest = 1,
+            /// <summary>Direction from the part to the piston head in the assembled piston (rod end cap).</summary>
+            TowardsHeadInAssembly = 2
         }
 
         [Serializable]
@@ -81,7 +94,14 @@ namespace AdaptiveAR.Steps
             [Tooltip("Orientation tolerance, degrees, under the symmetry rule.")]
             public float rotationDegrees = 30f;
             public AxisSymmetry symmetry = AxisSymmetry.None;
+            [Tooltip("Which mesh axis is the mechanical axis the symmetry rule refers to.")]
+            public AxisSelect axis = AxisSelect.Longest;
+            [Tooltip("Insertion part: must approach along its axis (not across it) before it can be accepted.")]
+            public bool insertionAxis;
         }
+
+        /// <summary>Where the held part is relative to its target, for the participant feedback.</summary>
+        public enum Proximity { None = 0, Far = 1, Near = 2, Valid = 3 }
 
         /// <summary>What the participant should do right now, derived from live validation state.</summary>
         public enum Cue { None = 0, MoveCloser = 1, TurnToMatch = 2, AlmostThere = 3 }
@@ -119,7 +139,7 @@ namespace AdaptiveAR.Steps
         [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
                  "the values serialized in the scene, the table is reset to the defaults at start.")]
         [SerializeField] private int roleToleranceRevision = 0;
-        private const int CurrentRoleToleranceRevision = 3;
+        private const int CurrentRoleToleranceRevision = 4;
 
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
@@ -221,6 +241,21 @@ namespace AdaptiveAR.Steps
         /// <summary>Live participant cue derived from the current state.</summary>
         public Cue CurrentCue { get; private set; }
 
+        /// <summary>Far / Near / Valid for the held accepted part (None when nothing is held).</summary>
+        public Proximity CurrentProximity { get; private set; }
+
+        /// <summary>True while the part is in tolerance but came in across its insertion axis.</summary>
+        public bool InsertionBlocked { get; private set; }
+
+        /// <summary>Session-wide id of the current/last attempt; one counted error at most per attempt.</summary>
+        public int AttemptId { get; private set; }
+
+        /// <summary>True when the last failed attempt was a deliberate placement (release near the target) and counts as an error.</summary>
+        public bool LastAttemptCounted { get; private set; }
+
+        /// <summary>Raised when the held part's proximity state changes. (state, part)</summary>
+        public event Action<Proximity, Transform> OnProximityChanged;
+
         /// <summary>Effective tolerances for the current action.</summary>
         public float PositionTolerance { get { return _posTol; } }
         public float RotationTolerance { get { return _rotTol; } }
@@ -300,7 +335,26 @@ namespace AdaptiveAR.Steps
         private float _targetRadius;
         private float _posTol, _rotTol, _attemptZone;
         private AxisSymmetry _symmetry;
+        private AxisSelect _axisSelect;
+        private bool _insertion;
+        private Vector3 _capAxisLocal = Vector3.up;
+        private bool _hasCapAxis;
         private float _nextLiveLog;
+
+        // Grab/repositioning of the kit handle while building the loose subassembly on the mat.
+        private readonly HashSet<GameObject> _toleratedObjects = new HashSet<GameObject>();
+        private Transform _followHandle;
+        private Transform _followKitRoot;
+
+        // insertion-path gate: recent positions of the active part
+        private readonly List<KeyValuePair<float, Vector3>> _trail = new List<KeyValuePair<float, Vector3>>();
+        private bool _approachOk;
+        private bool _approachDecided;
+        private float _lastApproachAngle = -1f;
+
+        // interactor-side truth
+        private bool _interactorsHooked;
+        private readonly Dictionary<MonoBehaviour, MonoBehaviour> _interactorSelection = new Dictionary<MonoBehaviour, MonoBehaviour>();
 
         // attempt tracking
         private bool _inAttempt;
@@ -325,17 +379,20 @@ namespace AdaptiveAR.Steps
             {
                 // Revision 2: middle ground between the first (too strict) and second (too
                 // forgiving) builds. Starting calibration values, tune on the bench.
+                // Revision 4: same numbers as rev 3; symmetry rules made mechanical. Bolts/nuts
+                // are free to roll about their INSERTION axis (a nut's is its shortest extent),
+                // the rod end cap is accepted in either of its two equivalent orientations,
+                // and insertion parts must approach along their axis.
                 new RoleTolerance { role = "PistonHead",      positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.None },
                 new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.AxialHalfTurn },
-                new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonEnd",       positionMeters = 0.025f, rotationDegrees = 25f, symmetry = AxisSymmetry.AxialHalfTurn },
-                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip },
-                // Revision 3: nuts loosened specifically (tiny objects); everything else as rev 2.
-                new RoleTolerance { role = "PistonNut",       positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip },
-                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip },
+                new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
+                new RoleTolerance { role = "PistonEnd",       positionMeters = 0.025f, rotationDegrees = 25f, symmetry = AxisSymmetry.HalfTurnAboutAxis, axis = AxisSelect.TowardsHeadInAssembly },
+                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
+                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
+                new RoleTolerance { role = "PistonNut",       positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.Shortest, insertionAxis = true },
+                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.028f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.Shortest, insertionAxis = true },
                 new RoleTolerance { role = "crankshaft",      positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
-                new RoleTolerance { role = "camshaft",        positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
+                new RoleTolerance { role = "camshaft",        positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree, insertionAxis = true },
             };
         }
 
@@ -501,7 +558,15 @@ namespace AdaptiveAR.Steps
             _posTol = rt != null ? rt.positionMeters : action.positionToleranceMeters;
             _rotTol = rt != null ? rt.rotationDegrees : action.rotationToleranceDegrees;
             _symmetry = rt != null ? rt.symmetry : AxisSymmetry.None;
+            _axisSelect = rt != null ? rt.axis : AxisSelect.Longest;
+            _insertion = rt != null && rt.insertionAxis;
             _attemptZone = Mathf.Max(attemptZoneMinMeters, _posTol * attemptZoneMultiplier);
+            _hasCapAxis = false;
+            _approachOk = !_insertion;
+            _approachDecided = !_insertion;
+            _trail.Clear();
+            InsertionBlocked = false;
+            CurrentProximity = Proximity.None;
 
             if (guidanceRegistry == null)
             {
@@ -619,6 +684,33 @@ namespace AdaptiveAR.Steps
                 if (c.tf == CurrentTarget)
                     Debug.LogError($"[StepValidator] Action '{action.Id}': part '{c.key}' and target '{TargetKey}' are the SAME object.", this);
 
+            // Mechanical axes per candidate under the role's rule (longest / shortest / towards
+            // the head in the assembled piston for the cap).
+            foreach (Candidate c in _candidates) c.axisLocal = AxisFor(c.tf);
+            if (_symmetry == AxisSymmetry.HalfTurnAboutAxis) ResolveCapAxis(action);
+
+            // Building the loose subassembly on the mat: the kit handle (head) may be picked up
+            // to turn the subassembly; it is tolerated (never a wrong part) and the kit's
+            // ghosts/targets follow it.
+            _toleratedObjects.Clear();
+            _followHandle = null; _followKitRoot = null;
+            string kitOfAction = GuidanceRegistry.KitOf(PartKey);
+            if (kitOfAction != null && GuidanceRegistry.RoleOf(PartKey) != guidanceRegistry.KitHandleRole
+                && guidanceRegistry.TryGetKitHandle(kitOfAction, out Transform kitHandle) && kitHandle != null)
+            {
+                _toleratedObjects.Add(kitHandle.gameObject);
+                var hl = kitHandle.GetComponent<PlacementLock>();
+                bool onMat = !string.IsNullOrEmpty(action.targetKey) && action.targetKey.StartsWith("ghost.PistonKit");
+                if (hl != null && onMat) hl.Repositionable = true;
+                if (onMat && CurrentTarget != null && CurrentTarget.parent != null && CurrentTarget.parent.Find("PistonHead") != null)
+                {
+                    _followHandle = kitHandle;
+                    _followKitRoot = CurrentTarget.parent;
+                }
+                if (logEvaluations)
+                    Debug.Log($"[StepValidator] '{action.Id}': kit handle '{kitHandle.name}' may be picked up to turn the subassembly (tolerated grab); ghosts follow it: {_followKitRoot != null}.");
+            }
+
             _active = _candidates[0];
             CurrentPart = _active.tf;
             IsActive = true;
@@ -661,6 +753,52 @@ namespace AdaptiveAR.Steps
             }
 
             return true;
+        }
+
+        /// <summary>The part's mechanical axis in its own local space, under the role's axis rule.</summary>
+        private Vector3 AxisFor(Transform t)
+        {
+            if (t == null) return Vector3.forward;
+            if (_symmetry == AxisSymmetry.HalfTurnAboutAxis && _hasCapAxis) return _capAxisLocal;
+            var mf = t.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) return Vector3.forward;
+            Vector3 s = Vector3.Scale(mf.sharedMesh.bounds.size, t.localScale);
+            s = new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), Mathf.Abs(s.z));
+            if (_axisSelect == AxisSelect.Shortest)
+            {
+                if (s.x <= s.y && s.x <= s.z) return Vector3.right;
+                if (s.y <= s.x && s.y <= s.z) return Vector3.up;
+                return Vector3.forward;
+            }
+            if (s.x >= s.y && s.x >= s.z) return Vector3.right;
+            if (s.y >= s.x && s.y >= s.z) return Vector3.up;
+            return Vector3.forward;
+        }
+
+        /// <summary>
+        /// Rod end cap: its two physically equivalent orientations differ by a half turn about
+        /// the axis from the cap towards the piston head in the assembled piston. Read from the
+        /// assembled ghost (ghost.piston00N) so no mechanical detail is invented.
+        /// </summary>
+        private void ResolveCapAxis(AssemblyAction action)
+        {
+            string kit = GuidanceRegistry.KitOf(action.partKey);
+            string n = kit != null ? kit.Substring(kit.Length - 1) : null;
+            if (n != null && guidanceRegistry.TryResolveQuiet($"ghost.piston00{n}", out GameObject asm) && asm != null)
+            {
+                Transform cap = asm.transform.Find("PistonEnd");
+                Transform head = asm.transform.Find("PistonHead");
+                if (cap != null && head != null)
+                {
+                    _capAxisLocal = cap.InverseTransformDirection((head.position - cap.position).normalized);
+                    _hasCapAxis = _capAxisLocal.sqrMagnitude > 1e-6f;
+                    foreach (Candidate c in _candidates) c.axisLocal = _capAxisLocal;
+                    if (logEvaluations) Debug.Log($"[StepValidator] cap symmetry axis (towards the head) = {_capAxisLocal} in cap space; both half-turn orientations accepted.");
+                    return;
+                }
+            }
+            Debug.LogError("[StepValidator] cap symmetry axis could not be read from the assembled piston ghost; falling back to the longest axis.");
+            _capAxisLocal = Vector3.up; _hasCapAxis = false;
         }
 
         private static Candidate MakeCandidate(string key, GameObject go)
@@ -724,6 +862,15 @@ namespace AdaptiveAR.Steps
             _candidates.Clear();
             _acceptedObjects.Clear();
             _targets.Clear();
+            _toleratedObjects.Clear();
+            _followHandle = null; _followKitRoot = null;
+            _trail.Clear();
+            InsertionBlocked = false;
+            if (CurrentProximity != Proximity.None)
+            {
+                CurrentProximity = Proximity.None;
+                try { OnProximityChanged?.Invoke(Proximity.None, _active != null ? _active.tf : null); } catch (Exception e) { Debug.LogError("[StepValidator] OnProximityChanged threw: " + e); }
+            }
             _active = null;
             _action = null;
             CurrentPart = null;
@@ -794,10 +941,151 @@ namespace AdaptiveAR.Steps
                 }
             }
 
+            HookInteractors();
+
             if (_watchedList.Count != before)
                 Debug.Log($"[GrabSource] watching {_watchedList.Count} selectable part(s) (+{_watchedList.Count - before}) " +
                           $"eventDriven={eventDrivenGrabs}");
             return _watchedList.Count;
+        }
+
+        // ---------------- interactor-side truth: what the hand ACTUALLY selected ----------------
+
+        /// <summary>
+        /// Subscribes to every grab interactor in the rig. On select, the interactable it
+        /// chose is resolved to the Rigidbody/object it grabs and reported as
+        /// [GrabRuntime] before any eligibility logic - independent of the registry and of
+        /// any per-part subscription. A part grabbed this way that was not watched is
+        /// watched from then on (and reported as an ERROR).
+        /// </summary>
+        private void HookInteractors()
+        {
+            if (_interactorsHooked) return;
+            _interactorsHooked = true;
+            int n = 0;
+
+            foreach (var it in FindObjectsByType<Oculus.Interaction.HandGrab.HandGrabInteractor>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var cap = it; n++;
+                cap.WhenStateChanged += a => OnInteractorState(cap, a, () => cap.SelectedInteractable);
+            }
+            foreach (var it in FindObjectsByType<Oculus.Interaction.HandGrab.DistanceHandGrabInteractor>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var cap = it; n++;
+                cap.WhenStateChanged += a => OnInteractorState(cap, a, () => cap.SelectedInteractable);
+            }
+            foreach (var it in FindObjectsByType<Oculus.Interaction.GrabInteractor>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var cap = it; n++;
+                cap.WhenStateChanged += a => OnInteractorState(cap, a, () => cap.SelectedInteractable);
+            }
+            foreach (var it in FindObjectsByType<Oculus.Interaction.DistanceGrabInteractor>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var cap = it; n++;
+                cap.WhenStateChanged += a => OnInteractorState(cap, a, () => cap.SelectedInteractable);
+            }
+            Debug.Log($"[GrabRuntime] hooked {n} grab interactor(s) in the rig (hand grab / distance hand grab / controller grab / distance grab).");
+            if (n == 0) Debug.LogError("[GrabRuntime] NO grab interactor found in the rig: the runtime truth path has no source.");
+        }
+
+        private void OnInteractorState(MonoBehaviour interactor, Oculus.Interaction.InteractorStateChangeArgs a, Func<MonoBehaviour> selected)
+        {
+            try
+            {
+                if (a.NewState == Oculus.Interaction.InteractorState.Select)
+                {
+                    MonoBehaviour s = selected();
+                    if (s == null) return;
+                    _interactorSelection[interactor] = s;
+                    OnRuntimeSelected(interactor, s);
+                }
+                else if (a.PreviousState == Oculus.Interaction.InteractorState.Select)
+                {
+                    if (_interactorSelection.TryGetValue(interactor, out MonoBehaviour s))
+                    {
+                        _interactorSelection.Remove(interactor);
+                        OnRuntimeUnselected(interactor, s);
+                    }
+                }
+            }
+            catch (Exception e) { Debug.LogError("[GrabRuntime] interactor handler threw: " + e); }
+        }
+
+        private static void ResolveInteractable(MonoBehaviour interactable, out Rigidbody body, out Component pointable)
+        {
+            body = null; pointable = null;
+            switch (interactable)
+            {
+                case Oculus.Interaction.HandGrab.HandGrabInteractable h: body = h.Rigidbody; pointable = h.PointableElement as Component; break;
+                case Oculus.Interaction.HandGrab.DistanceHandGrabInteractable dh: body = dh.Rigidbody; pointable = dh.PointableElement as Component; break;
+                case Oculus.Interaction.GrabInteractable g: body = g.Rigidbody; pointable = g.PointableElement as Component; break;
+                case Oculus.Interaction.DistanceGrabInteractable dg: body = dg.Rigidbody; pointable = dg.PointableElement as Component; break;
+            }
+        }
+
+        private void OnRuntimeSelected(MonoBehaviour interactor, MonoBehaviour interactable)
+        {
+            ResolveInteractable(interactable, out Rigidbody body, out Component pointable);
+            GameObject part = body != null ? body.gameObject
+                            : (pointable != null ? pointable.gameObject
+                            : (interactable.transform.parent != null ? interactable.transform.parent.gameObject : interactable.gameObject));
+            var grabbable = part.GetComponent<Oculus.Interaction.Grabbable>();
+
+            Debug.Log($"[GrabRuntime] selectedObject={part.name}#{part.GetInstanceID()} path={PathOf(part.transform)} " +
+                      $"rigidbody={(body != null ? body.name + "#" + body.GetInstanceID() : "NONE")} " +
+                      $"pointable={(pointable != null ? PathOf(pointable.transform) + "#" + pointable.GetInstanceID() : "NONE")} " +
+                      $"grabbable={(grabbable != null ? "own#" + grabbable.GetInstanceID() : "NONE")} " +
+                      $"interactable={interactable.GetType().Name}@{PathOf(interactable.transform)} interactor={interactor.GetType().Name} currentAction={CurrentActionId()}");
+
+            if (!_watched.TryGetValue(part, out Candidate c))
+            {
+                Debug.LogError($"[GrabRuntime] '{PathOf(part.transform)}' was selected on the device but was NOT in the watched set - watching it now.");
+                Watch(_watched.Count > 0 ? "unregistered:" + part.name : "unregistered:" + part.name, part, true);
+                _watched.TryGetValue(part, out c);
+                if (c != null) Link(c, interactable, interactable.GetType().Name);
+            }
+            if (c == null) { Debug.LogError("[GrabRuntime] could not create a watch entry for the selected object."); return; }
+
+            if (c.wasHeld)
+            {
+                // Another source already opened this episode this frame (Grabbable/interactable
+                // event or poll). Report the runtime eligibility anyway; no second dispatch.
+                Debug.Log($"[GrabRuntime] episode already open for {part.name}#{part.GetInstanceID()} (reported by {c.grabSource ?? "poll"}).");
+                LogEligibilityRuntime(c);
+                return;
+            }
+
+            c.pendingGrab = false;
+            c.pendingRelease = false;
+            c.wasHeld = true;
+            c.grabSource = "interactor_event";
+            HandleGrab(c, "interactor_event");
+        }
+
+        private void OnRuntimeUnselected(MonoBehaviour interactor, MonoBehaviour interactable)
+        {
+            ResolveInteractable(interactable, out Rigidbody body, out Component pointable);
+            GameObject part = body != null ? body.gameObject : (pointable != null ? pointable.gameObject : null);
+            if (part == null || !_watched.TryGetValue(part, out Candidate c)) return;
+            if (!c.wasHeld || IsSelected(c)) return;              // another hand still holds it
+            c.wasHeld = false;
+            c.pendingRelease = false;
+            Debug.Log($"[GrabEvent] RELEASED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} source=interactor_event key={c.key}");
+            HandleRelease(c);
+        }
+
+        private void LogEligibilityRuntime(Candidate c)
+        {
+            bool physical = IsActive && !_completed;
+            bool ack = _ackArmed;
+            var accepted = new List<string>();
+            if (physical) foreach (Candidate k in _candidates) { if (k.tf != null) accepted.Add($"{k.tf.name}#{k.tf.GetInstanceID()}"); }
+            else if (ack) foreach (GameObject g in _ackObjects) { if (g != null) accepted.Add($"{g.name}#{g.GetInstanceID()}"); }
+            foreach (GameObject g in _toleratedObjects) if (g != null) accepted.Add($"{g.name}#{g.GetInstanceID()}(tolerated)");
+            GameObject go = c.tf.gameObject;
+            bool eligible = (physical && _acceptedObjects.Contains(go)) || (ack && _ackObjects.Contains(go)) || _toleratedObjects.Contains(go);
+            Debug.Log($"[EligibilityRuntime] selected={go.name}#{go.GetInstanceID()} acceptedObjects=[{string.Join(", ", accepted)}] eligible={eligible} " +
+                      $"state={(physical ? "PHYSICAL" : (ack ? "READ" : "none"))} action={CurrentActionId()}");
         }
 
         private void WatchInteractable(MonoBehaviour interactable, Rigidbody body, Oculus.Interaction.IPointableElement element, string kind)
@@ -995,7 +1283,14 @@ namespace AdaptiveAR.Steps
             {
                 Candidate c = _watchedList[i];
                 if (c.tf == null) continue;
+                try { ProcessCandidate(c); }
+                catch (Exception e) { Debug.LogError($"[GrabSource] processing '{c.tf.name}' threw (the other parts are still processed): {e}"); }
+            }
+        }
 
+        private void ProcessCandidate(Candidate c)
+        {
+            {
                 bool held = IsSelected(c);
                 bool grab = c.pendingGrab || (held && !c.wasHeld);
                 bool release = c.pendingRelease || (!held && c.wasHeld);
@@ -1033,9 +1328,18 @@ namespace AdaptiveAR.Steps
             bool ack = _ackArmed;
             string actionId = CurrentActionId();
 
+            LogEligibilityRuntime(c);
+
             if (!physical && !ack)
             {
                 Debug.Log($"[Eligibility] object={go.name} requested=<none> eligible=n/a reason=\"no action armed: nothing to validate or acknowledge\"");
+                return;
+            }
+
+            if (_toleratedObjects.Contains(go))
+            {
+                Debug.Log($"[Eligibility] object={go.name} requested={RoleNameOf(physical ? PartKey : _ackPartKey) ?? "<none>"} eligible=tolerated " +
+                          $"reason=\"kit handle: the loose subassembly may be picked up and turned; not a wrong part, not an error\" key={c.key} action={actionId} source={source}");
                 return;
             }
 
@@ -1150,17 +1454,29 @@ namespace AdaptiveAR.Steps
 
             if (_active == null || _active.tf == null) return;
 
+            FollowKitHandle();
             ChooseTarget();
 
             bool ok = WithinTolerance(_active, out float posErr, out float rotErr);
             bool inZone = posErr <= _attemptZone;
 
+            UpdateInsertionGate(posErr, inZone, anyHeld);
+            if (ok && _insertion && !_approachOk)
+            {
+                ok = false;
+                InsertionBlocked = true;
+            }
+            else InsertionBlocked = false;
+
+            UpdateProximity(anyHeld, inZone, ok);
             LiveLog(posErr, rotErr, anyHeld, inZone);
 
             // --- attempt lifecycle: enter zone -> success | leave zone | release inside ---
             if (inZone && !_inAttempt && (anyHeld || HasBeenHandled))
             {
                 _inAttempt = true;
+                AttemptId++;
+                if (logEvaluations) Debug.Log($"[StepValidator] attempt {AttemptId} begins on '{_active.key}' (entered the {_attemptZone * 100f:F0} cm zone).");
                 _attemptBestPos = float.MaxValue;
                 _attemptRotAtBestPos = float.MaxValue;
                 _attemptReachedPosition = false;
@@ -1187,7 +1503,8 @@ namespace AdaptiveAR.Steps
             {
                 if (_inAttempt && inZone)
                 {
-                    FailAttempt("released_in_zone");
+                    // A deliberate placement: the part was let go near the target without fitting.
+                    FailAttempt("released_in_zone", counted: true);
                     _stickyAlmostThere = true;
                     DisengageAssist();
                 }
@@ -1199,13 +1516,75 @@ namespace AdaptiveAR.Steps
             }
             else if (_inAttempt && !inZone)
             {
-                FailAttempt("left_zone");
+                // Exploring: carried out of the zone again. Diagnostic only, never an error.
+                FailAttempt("left_zone", counted: false);
             }
 
             // --- live cue ---
             if (!inZone) CurrentCue = _stickyAlmostThere && !anyHeld ? Cue.AlmostThere : Cue.None;
             else if (posErr > _posTol) CurrentCue = Cue.MoveCloser;
             else CurrentCue = Cue.TurnToMatch;
+        }
+
+        /// <summary>Far / Near / Valid from the distance to the actual target while the part is held.</summary>
+        private void UpdateProximity(bool anyHeld, bool inZone, bool valid)
+        {
+            Proximity p = !anyHeld ? Proximity.None : (valid ? Proximity.Valid : (inZone ? Proximity.Near : Proximity.Far));
+            if (p == CurrentProximity) return;
+            CurrentProximity = p;
+            try { OnProximityChanged?.Invoke(p, _active != null ? _active.tf : null); }
+            catch (Exception e) { Debug.LogError("[StepValidator] OnProximityChanged handler threw: " + e); }
+        }
+
+        /// <summary>
+        /// Insertion parts (bolts, nuts, pin, camshaft) must come in along their axis. The
+        /// approach direction is the part's travel over the last 0.3 s, judged while it is in
+        /// the zone but not yet in position tolerance; across the axis = blocked until the
+        /// part backs out and comes in again along it.
+        /// </summary>
+        private void UpdateInsertionGate(float posErr, bool inZone, bool anyHeld)
+        {
+            if (!_insertion || _active == null || _active.tf == null || CurrentTarget == null) return;
+
+            float now = Time.time;
+            _trail.Add(new KeyValuePair<float, Vector3>(now, _active.tf.position));
+            while (_trail.Count > 0 && now - _trail[0].Key > 0.3f) _trail.RemoveAt(0);
+
+            if (!inZone)
+            {
+                // Out of the zone: the next entry decides again.
+                _approachDecided = false;
+                _approachOk = false;
+                return;
+            }
+            if (_approachDecided) return;
+            if (_trail.Count < 2) return;
+
+            Vector3 travel = _active.tf.position - _trail[0].Value;
+            if (travel.magnitude < 0.02f) return;                       // not enough motion to judge yet
+
+            Vector3 axis = (CurrentTarget.rotation * _active.axisLocal).normalized;
+            float angle = Vector3.Angle(travel.normalized, axis);
+            angle = Mathf.Min(angle, 180f - angle);                      // either direction along the axis
+            _lastApproachAngle = angle;
+            _approachOk = angle <= 55f;
+            _approachDecided = true;
+            Debug.Log($"[Insertion] '{_active.key}' approach {(_approachOk ? "ALONG" : "ACROSS")} the axis: {angle:F0} deg off (limit 55), travel {travel.magnitude * 100f:F1} cm over {now - _trail[0].Key:F2} s" +
+                      (_approachOk ? "." : " - blocked until it backs out of the zone and comes in along the axis."));
+        }
+
+        /// <summary>
+        /// Loose subassembly on the mat: when the kit handle (head) is moved by the hand, the
+        /// kit's ghosts and therefore the rod/pin targets move with it.
+        /// </summary>
+        private void FollowKitHandle()
+        {
+            if (_followHandle == null || _followKitRoot == null) return;
+            Transform headGhost = _followKitRoot.Find("PistonHead");
+            if (headGhost == null) return;
+            if (Vector3.Distance(headGhost.position, _followHandle.position) < 0.0005f && Quaternion.Angle(headGhost.rotation, _followHandle.rotation) < 0.1f) return;
+            _followKitRoot.rotation = _followHandle.rotation * Quaternion.Inverse(headGhost.localRotation);
+            _followKitRoot.position += _followHandle.position - headGhost.position;
         }
 
         /// <summary>
@@ -1229,7 +1608,8 @@ namespace AdaptiveAR.Steps
             Debug.Log($"{Tag("Validation")} part={Describe(_active.tf)} target={Describe(CurrentTarget)} " +
                       $"distance={posErr:F4} angle={rotErr:F1} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol} " +
                       $"armed={IsActive} held={anyHeld} inZone={inZone} tol={_posTol:F3}m/{_rotTol:F0}deg sym={_symmetry} " +
-                      $"axisOff={axisAngle:F1} roll={roll:F1} partPos={_active.tf.position} targetPos={CurrentTarget.position}");
+                      $"axisOff={axisAngle:F1} roll={roll:F1} proximity={CurrentProximity} insertion={(_insertion ? (_approachDecided ? (_approachOk ? "along" : "ACROSS") : "undecided") : "n/a")} " +
+                      $"attempt={AttemptId} partPos={_active.tf.position} targetPos={CurrentTarget.position}");
         }
 
         /// <summary>Either-side actions: the active part is judged against the nearest FREE target.</summary>
@@ -1294,10 +1674,22 @@ namespace AdaptiveAR.Steps
         /// long axis with the target's; roll about that axis is ignored or taken modulo a
         /// half turn as the rule says.
         /// </summary>
+        /// <summary>The target rotation the part is actually judged against (the nearer equivalent orientation for the cap).</summary>
+        private Quaternion EffectiveTargetRotation(Candidate c)
+        {
+            if (_symmetry != AxisSymmetry.HalfTurnAboutAxis || c == null) return CurrentTarget.rotation;
+            Quaternion a = CurrentTarget.rotation;
+            Quaternion b = CurrentTarget.rotation * Quaternion.AngleAxis(180f, c.axisLocal);
+            return Quaternion.Angle(c.tf.rotation, a) <= Quaternion.Angle(c.tf.rotation, b) ? a : b;
+        }
+
         private float OrientationError(Candidate c)
         {
             if (_symmetry == AxisSymmetry.None)
                 return Quaternion.Angle(c.tf.rotation, CurrentTarget.rotation);
+
+            if (_symmetry == AxisSymmetry.HalfTurnAboutAxis)
+                return Quaternion.Angle(c.tf.rotation, EffectiveTargetRotation(c));
 
             Vector3 partAxis = c.tf.rotation * c.axisLocal;
             Vector3 targetAxis = CurrentTarget.rotation * c.axisLocal;   // same mesh, same local axis
@@ -1330,11 +1722,12 @@ namespace AdaptiveAR.Steps
         // Outcomes
         // =====================================================================
 
-        private void FailAttempt(string trigger)
+        private void FailAttempt(string trigger, bool counted)
         {
             if (!_inAttempt) return;
             _inAttempt = false;
             AttemptCount++;
+            LastAttemptCounted = counted;
 
             float pos = _attemptBestPos == float.MaxValue ? 0f : _attemptBestPos;
             float rot = _attemptReachedPosition ? _attemptBestRotWhenPositioned : _attemptRotAtBestPos;
@@ -1350,8 +1743,8 @@ namespace AdaptiveAR.Steps
             LastRejectReason = LastAttemptPositionOk ? RejectReason.WrongRotation : RejectReason.TooFar;
 
             if (logEvaluations)
-                Debug.Log($"[StepValidator] Attempt {AttemptCount} FAILED ({trigger}) on '{_active.key}': {LastErrorType}; " +
-                          $"closest {pos * 100f:F1} cm, orientation {rot:F0} deg (tol {_posTol * 100f:F1} cm / {_rotTol:F0} deg).");
+                Debug.Log($"[StepValidator] Attempt {AttemptId} {(counted ? "FAILED" : "abandoned")} ({trigger}) on '{_active.key}': {LastErrorType}; " +
+                          $"closest {pos * 100f:F1} cm, orientation {rot:F0} deg (tol {_posTol * 100f:F1} cm / {_rotTol:F0} deg); error_counted={counted}.");
 
             try { OnAttemptEvaluated?.Invoke(false, pos, rot, trigger); }
             catch (Exception e) { Debug.LogError("[StepValidator] OnAttemptEvaluated handler threw: " + e); }
@@ -1370,7 +1763,11 @@ namespace AdaptiveAR.Steps
             _inAttempt = false;
             IsActive = false;
             AttemptCount++;
+            LastAttemptCounted = false;
+            if (AttemptId == 0) AttemptId++;
             Transform placedPart = _active.tf;
+            if (_insertion && logEvaluations) Debug.Log($"[Insertion] '{_active.key}' accepted after an approach along its axis ({_lastApproachAngle:F0} deg off).");
+            UpdateProximity(true, true, true);
             LastErrorType = null;
             LastAttemptPositionOk = true;
             LastAttemptOrientationOk = true;
@@ -1402,7 +1799,7 @@ namespace AdaptiveAR.Steps
             {
                 SnapToTarget(_active);
                 snapped = Vector3.Distance(_active.tf.position, CurrentTarget.position) < 0.002f
-                          && Quaternion.Angle(_active.tf.rotation, CurrentTarget.rotation) < 1f;
+                          && Quaternion.Angle(_active.tf.rotation, EffectiveTargetRotation(_active)) < 1f;
             }
             catch (Exception e) { Debug.LogError($"{tag} snap threw: {e}"); }
 
@@ -1410,6 +1807,11 @@ namespace AdaptiveAR.Steps
             {
                 padlock = _active.tf.GetComponent<PlacementLock>();
                 if (padlock == null) padlock = _active.tf.gameObject.AddComponent<PlacementLock>();
+                // The head placed on the mat stays liftable (the subassembly may be turned); a
+                // part installed on the engine is locked for good.
+                bool headOnMat = GuidanceRegistry.RoleOf(PartKey) == guidanceRegistry.KitHandleRole
+                                 && !string.IsNullOrEmpty(_action.targetKey) && _action.targetKey.StartsWith("ghost.PistonKit");
+                padlock.Repositionable = headOnMat;
                 padlock.LockAt(CurrentTarget);
                 locked = padlock.IsLocked;
             }
@@ -1498,7 +1900,7 @@ namespace AdaptiveAR.Steps
                 c.body.isKinematic = true;
             }
 
-            c.tf.SetPositionAndRotation(CurrentTarget.position, CurrentTarget.rotation);
+            c.tf.SetPositionAndRotation(CurrentTarget.position, EffectiveTargetRotation(c));
         }
 
         private void BindAndJoin(Candidate c)

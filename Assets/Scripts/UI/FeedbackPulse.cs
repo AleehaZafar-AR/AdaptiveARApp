@@ -31,6 +31,7 @@ namespace AdaptiveAR.UI
             public Renderer[] renderers;
             public MaterialPropertyBlock[] originals;
             public Coroutine routine;
+            public bool held;
         }
 
         private static readonly Dictionary<Transform, Episode> _active = new Dictionary<Transform, Episode>();
@@ -54,10 +55,11 @@ namespace AdaptiveAR.UI
             Episode ep;
             if (_active.TryGetValue(part, out ep) && ep != null)
             {
-                // Interrupting a pulse: stop it and put the authored state back FIRST, so the
-                // new pulse lerps from, and finally restores to, the real original.
+                // Interrupting a pulse or a steady tint: put the authored state back FIRST, so
+                // the new pulse lerps from, and finally restores to, the real original.
                 if (ep.routine != null) r.StopCoroutine(ep.routine);
                 Restore(ep);
+                ep.held = false;
             }
             else
             {
@@ -66,6 +68,68 @@ namespace AdaptiveAR.UI
             }
 
             ep.routine = r.StartCoroutine(PulseRoutine(part, ep, colour, seconds));
+        }
+
+        /// <summary>
+        /// Steady tint while held (FAR red / NEAR amber): the authored block is captured once,
+        /// the tint is written, and Release/Cancel/Pulse restore or replace it cleanly.
+        /// </summary>
+        public static void Hold(Transform part, Color colour)
+        {
+            if (part == null) return;
+            Runner r = EnsureRunner();
+            if (r == null) return;
+
+            Episode ep;
+            if (_active.TryGetValue(part, out ep) && ep != null)
+            {
+                if (ep.routine != null) { r.StopCoroutine(ep.routine); ep.routine = null; }
+            }
+            else
+            {
+                ep = Capture(part);
+                _active[part] = ep;
+            }
+            ep.held = true;
+            Apply(ep, colour, 0.7f);
+        }
+
+        /// <summary>Ends a steady tint (part let go, valid, or action over) and restores the authored state.</summary>
+        public static void Release(Transform part)
+        {
+            if (part == null || !_active.TryGetValue(part, out Episode ep) || ep == null || !ep.held) return;
+            if (ep.routine != null) return;           // a pulse took over; it restores when it ends
+            Restore(ep);
+            _active.Remove(part);
+        }
+
+        private static void Apply(Episode ep, Color colour, float k)
+        {
+            for (int i = 0; i < ep.renderers.Length; i++)
+            {
+                Renderer rend = ep.renderers[i];
+                if (rend == null || rend.sharedMaterial == null) continue;
+                var block = new MaterialPropertyBlock();
+                rend.GetPropertyBlock(block);
+                MaterialPropertyBlock original = ep.originals[i];
+                Material m = rend.sharedMaterial;
+                if (m.HasProperty(ColorId))
+                {
+                    Color from = original.HasColor(ColorId) ? original.GetColor(ColorId) : m.GetColor(ColorId);
+                    block.SetColor(ColorId, Color.Lerp(from, colour, k));
+                }
+                else if (m.HasProperty(BaseColorId))
+                {
+                    Color from = original.HasColor(BaseColorId) ? original.GetColor(BaseColorId) : m.GetColor(BaseColorId);
+                    block.SetColor(BaseColorId, Color.Lerp(from, colour, k));
+                }
+                if (m.HasProperty(EmissionId))
+                {
+                    Color from = original.HasColor(EmissionId) ? original.GetColor(EmissionId) : m.GetColor(EmissionId);
+                    block.SetColor(EmissionId, Color.Lerp(from, colour * 0.6f, k));
+                }
+                rend.SetPropertyBlock(block);
+            }
         }
 
         /// <summary>Ends any pulse on the part immediately and restores its authored state.</summary>

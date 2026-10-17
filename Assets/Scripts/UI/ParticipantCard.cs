@@ -99,9 +99,17 @@ namespace AdaptiveAR.UI
         [SerializeField] private string turnToMatchNoGuideMessage = "Turn the part to match its orientation";
         [SerializeField] private string almostThereNoGuideMessage = "Almost there — adjust the part's position";
 
+        [Tooltip("FAR: the held part is outside the near-target zone.")]
+        [SerializeField] private string farMessage = "Bring the part closer.";
+        [Tooltip("NEAR: inside the zone, not yet in position/orientation tolerance.")]
+        [SerializeField] private string nearMessage = "Almost there — adjust the alignment.";
+        [Tooltip("NEAR but the insertion part came in across its axis.")]
+        [SerializeField] private string insertionMessage = "Almost there — insert the part along its axis.";
+        [SerializeField] private Color farColour = new Color(0.93f, 0.3f, 0.26f);
+
         [Tooltip("Revision of the cue wording above; older serialized wording is replaced at start.")]
         [SerializeField] private int cueWordingRevision = 0;
-        private const int CurrentCueWordingRevision = 1;
+        private const int CurrentCueWordingRevision = 2;
 
         [SerializeField] private float refreshInterval = 0.12f;
 
@@ -132,6 +140,9 @@ namespace AdaptiveAR.UI
                 moveCloserNoGuideMessage = "Move the part closer to its position";
                 turnToMatchNoGuideMessage = "Turn the part to match its orientation";
                 almostThereNoGuideMessage = "Almost there — adjust the part's position";
+                farMessage = "Bring the part closer.";
+                nearMessage = "Almost there — adjust the alignment.";
+                insertionMessage = "Almost there — insert the part along its axis.";
                 cueWordingRevision = CurrentCueWordingRevision;
                 Debug.Log($"[ParticipantCard] Live cue wording reset to revision {CurrentCueWordingRevision} (ghost-aware).");
             }
@@ -387,10 +398,10 @@ namespace AdaptiveAR.UI
                 return;
             }
 
-            string msg = validator != null && validator.LastErrorType == "incorrect_orientation"
-                ? Cue(turnToMatchMessage, turnToMatchNoGuideMessage)
-                : Cue(almostThereMessage, almostThereNoGuideMessage);
-            SetFeedback(FeedbackKind.Failed, msg, MrTheme.Warning);
+            // Only a counted (deliberate) failed placement leaves a message; an abandoned
+            // attempt - carried out of the zone - is not feedback-worthy.
+            if (validator != null && !validator.LastAttemptCounted) return;
+            SetFeedback(FeedbackKind.Failed, nearMessage, MrTheme.Warning);
         }
 
         private void SetFeedback(FeedbackKind kind, string text, Color color)
@@ -423,6 +434,17 @@ namespace AdaptiveAR.UI
             // Sticky states (wrong part held, success hold) win over the live cue.
             if (_feedbackKind == FeedbackKind.WrongPart && validator.WrongPartHeld) return;
             if (_feedbackKind == FeedbackKind.Success && Time.time < _successUntil) return;
+
+            // FAR / NEAR from the distance to the actual target while the part is held.
+            switch (validator.CurrentProximity)
+            {
+                case StepValidator.Proximity.Far:
+                    SetFeedback(FeedbackKind.Cue, farMessage, farColour); return;
+                case StepValidator.Proximity.Near:
+                    SetFeedback(FeedbackKind.Cue, validator.InsertionBlocked ? insertionMessage : nearMessage, MrTheme.Warning); return;
+                case StepValidator.Proximity.Valid:
+                    return;
+            }
 
             switch (validator.CurrentCue)
             {

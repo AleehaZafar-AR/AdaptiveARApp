@@ -40,6 +40,32 @@ namespace AdaptiveAR.Steps
 
         public bool IsLocked { get { return isLocked; } }
 
+        /// <summary>
+        /// While true the locked part may still be picked up (the loose piston subassembly on
+        /// the mat): the lock yields while a hand holds it and re-freezes it wherever it was
+        /// let go. Off once the part is installed on the engine.
+        /// </summary>
+        public bool Repositionable
+        {
+            get { return _repositionable; }
+            set
+            {
+                if (_repositionable == value) return;
+                _repositionable = value;
+                if (isLocked && disableInteraction) SetInteractionEnabled(!value ? false : true);
+                if (!value && isLocked) { RefreshLockedPose(); FreezeBody(); }
+                PartWatch.Log(value ? "PlacementLock.Repositionable=ON" : "PlacementLock.Repositionable=OFF", transform);
+            }
+        }
+        private bool _repositionable;
+        private bool _wasHeld;
+
+        private bool IsHeldNow()
+        {
+            var pe = GetComponent<Oculus.Interaction.PointableElement>();
+            return pe != null && pe.SelectingPointsCount > 0;
+        }
+
         private Rigidbody _body;
         private MonoBehaviour[] _interactionComponents;
         private Vector3 _lockedLocalPosition;
@@ -72,7 +98,7 @@ namespace AdaptiveAR.Steps
                     c.isTrigger = true;
             }
 
-            if (disableInteraction)
+            if (disableInteraction && !_repositionable)
                 SetInteractionEnabled(false);
 
             PartWatch.Log("PlacementLock.Lock", transform);
@@ -127,6 +153,22 @@ namespace AdaptiveAR.Steps
         {
             if (_body == null) _body = GetComponent<Rigidbody>();
 
+            // Repositionable: the hand owns the pose while holding; on release the pose it was
+            // left at becomes the locked pose and the body is frozen again.
+            if (_repositionable)
+            {
+                bool held = IsHeldNow();
+                if (held) { _wasHeld = true; return; }
+                if (_wasHeld)
+                {
+                    _wasHeld = false;
+                    RefreshLockedPose();
+                    FreezeBody();
+                    if (logCorrections) Debug.Log($"[PlacementLock] '{name}' released by the hand: re-locked at {transform.position}.");
+                    return;
+                }
+            }
+
             bool fixedBody = false;
             if (freezePhysics && _body != null && !_body.isKinematic)
             {
@@ -156,7 +198,7 @@ namespace AdaptiveAR.Steps
                           $"{(moved ? "pose had moved; " : "")}restored. (#{_corrections})");
             }
 
-            if (disableInteraction && (fixedBody || moved)) SetInteractionEnabled(false);
+            if (disableInteraction && (fixedBody || moved) && !_repositionable) SetInteractionEnabled(false);
         }
 
         private void SetInteractionEnabled(bool enabled)

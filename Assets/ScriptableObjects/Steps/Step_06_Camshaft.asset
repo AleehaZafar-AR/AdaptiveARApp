@@ -47,8 +47,8 @@ MonoBehaviour:
     autoCompleteRemaining: 0
   - actionId: step_06_camshaft.holder1
     kind: 1
-    instruction: Fit camshaft holder 1 onto the block.
-    detail: Lower it onto the highlighted position.
+    instruction: Fit a camshaft holder onto the block.
+    detail: Any holder fits any free highlighted position.
     partKey: part.engineBlockSep001
     interchangeablePartKeys: []
     targetKey: ghost.engineBlockSep001
@@ -58,14 +58,14 @@ MonoBehaviour:
     ghostKeys:
     - ghost.engineBlockSep001
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: 36a95581347fcdc6f096c255aebad3fb, type: 3}
+    audioCue: {fileID: 8300000, guid: d5059e66460b390ae349ded9c3eec840, type: 3}
     enabled: 1
     disabledReason:
     autoCompleteRemaining: 0
   - actionId: step_06_camshaft.holder2
     kind: 1
-    instruction: Fit camshaft holder 2 onto the block.
-    detail: Lower it onto the highlighted position.
+    instruction: Fit another camshaft holder onto the block.
+    detail: Any remaining holder fits any free highlighted position.
     partKey: part.engineBlockSep002
     interchangeablePartKeys: []
     targetKey: ghost.engineBlockSep002
@@ -75,14 +75,14 @@ MonoBehaviour:
     ghostKeys:
     - ghost.engineBlockSep002
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: 322bd91ac70f96147f1f47f899da013d, type: 3}
+    audioCue: {fileID: 8300000, guid: 44d88fc45a58fe8ddd9728a2066256c5, type: 3}
     enabled: 1
     disabledReason:
     autoCompleteRemaining: 0
   - actionId: step_06_camshaft.holder3
     kind: 1
-    instruction: Fit camshaft holder 3 onto the block.
-    detail: Lower it onto the highlighted position.
+    instruction: Fit another camshaft holder onto the block.
+    detail: Any remaining holder fits any free highlighted position.
     partKey: part.engineBlockSep003
     interchangeablePartKeys: []
     targetKey: ghost.engineBlockSep003
@@ -92,14 +92,14 @@ MonoBehaviour:
     ghostKeys:
     - ghost.engineBlockSep003
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: 41f400d43fb0f3e31f0e243f27b0ebb0, type: 3}
+    audioCue: {fileID: 8300000, guid: 44d88fc45a58fe8ddd9728a2066256c5, type: 3}
     enabled: 1
     disabledReason:
     autoCompleteRemaining: 0
   - actionId: step_06_camshaft.holder4
     kind: 1
-    instruction: Fit camshaft holder 4 onto the block.
-    detail: Lower it onto the highlighted position.
+    instruction: Fit another camshaft holder onto the block.
+    detail: Any remaining holder fits any free highlighted position.
     partKey: part.engineBlockSep004
     interchangeablePartKeys: []
     targetKey: ghost.engineBlockSep004
@@ -109,7 +109,7 @@ MonoBehaviour:
     ghostKeys:
     - ghost.engineBlockSep004
     showArrow: 1
-    audioCue: {fileID: 8300000, guid: 4442b094917c3d19bc1a115eee5d4a50, type: 3}
+    audioCue: {fileID: 8300000, guid: 44d88fc45a58fe8ddd9728a2066256c5, type: 3}
     enabled: 1
     disabledReason:
     autoCompleteRemaining: 0

@@ -164,9 +164,30 @@ namespace AdaptiveAR.Steps
             return string.Join(", ", names);
         }
 
-        /// <summary>A bolt/nut key expands to both equivalent roles (either side is valid).</summary>
+        private static readonly Regex HolderKey = new Regex(@"^(part|ghost)\.engineBlockSep00[1-4]$", RegexOptions.Compiled);
+
+        /// <summary>True when the key names one of a set of interchangeable parts/targets.</summary>
+        public static bool IsEquivalent(string key)
+        {
+            int n = 0;
+            foreach (string _ in ExpandEquivalent(key)) n++;
+            return n > 1;
+        }
+
+        /// <summary>
+        /// A bolt/nut key expands to both equivalent roles (either side); a camshaft-holder key
+        /// expands to all four holders (any loose holder fits any free holder position).
+        /// </summary>
         public static IEnumerable<string> ExpandEquivalent(string key)
         {
+            if (string.IsNullOrEmpty(key)) yield break;
+            if (HolderKey.IsMatch(key))
+            {
+                string prefix = key.Substring(0, key.Length - 1);
+                for (int n = 1; n <= 4; n++) yield return prefix + n;
+                yield break;
+            }
+
             string role = StepValidator.RoleNameOf(key);
             foreach (string[] group in EquivalentRoles)
             {

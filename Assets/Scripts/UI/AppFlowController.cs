@@ -14,6 +14,7 @@ using System;
 using AdaptiveAR.Steps;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace AdaptiveAR.UI
 {
@@ -59,6 +60,19 @@ namespace AdaptiveAR.UI
         [SerializeField] private TextMeshProUGUI stepLabel;
 
         public Screen Current { get; private set; } = Screen.Home;
+
+        /// <summary>The authored Start button, cloned for runtime buttons so they match the UI.</summary>
+        public GameObject ButtonTemplate
+        {
+            get
+            {
+                if (homePanel == null) return null;
+                Transform t = homePanel.transform.Find("StartButton");
+                return t != null ? t.gameObject : homePanel.GetComponentInChildren<Button>(true)?.gameObject;
+            }
+        }
+
+        private bool _endButtonsBuilt;
 
         /// <summary>Raised when the participant presses Start.</summary>
         public event Action OnStarted;
@@ -106,6 +120,7 @@ namespace AdaptiveAR.UI
         private void HandleSessionComplete()
         {
             Show(Screen.Complete);
+            BuildEndButtons();
 
             if (completeHeadline != null)
                 completeHeadline.text = "Assembly complete";
@@ -118,6 +133,75 @@ namespace AdaptiveAR.UI
                     $"{session.ErrorsTotal} placement error{(session.ErrorsTotal == 1 ? "" : "s")}.\n\n" +
                     "Thank you. You can remove the headset.";
             }
+        }
+
+        /// <summary>
+        /// Restart Assembly: a clean reset of the whole session - every component pose, lock,
+        /// consumed part, occupied target, support/action state and the log - by reloading the
+        /// scene. The current log was closed on completion; the new run opens a NEW session
+        /// file with a new session id. Quit: exits the application normally.
+        /// </summary>
+        private void BuildEndButtons()
+        {
+            if (_endButtonsBuilt || completePanel == null) return;
+            _endButtonsBuilt = true;
+            GameObject template = ButtonTemplate;
+
+            MakeButton(template, "RestartButton", "Restart Assembly", new Vector2(-150f, 36f), new Vector2(270f, 70f), RestartAssembly);
+            MakeButton(template, "QuitButton", "Quit", new Vector2(150f, 36f), new Vector2(200f, 70f), QuitApplication);
+        }
+
+        private void MakeButton(GameObject template, string name, string label, Vector2 pos, Vector2 size, UnityEngine.Events.UnityAction onClick)
+        {
+            GameObject go;
+            if (template != null)
+            {
+                go = Instantiate(template, completePanel.transform);
+                foreach (Transform extra in go.transform)
+                    if (extra.GetComponent<TextMeshProUGUI>() == null) Destroy(extra.gameObject);
+            }
+            else
+            {
+                go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+                go.transform.SetParent(completePanel.transform, false);
+                var l = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+                l.transform.SetParent(go.transform, false);
+                var lrt = l.GetComponent<RectTransform>(); lrt.anchorMin = Vector2.zero; lrt.anchorMax = Vector2.one; lrt.offsetMin = Vector2.zero; lrt.offsetMax = Vector2.zero;
+            }
+            go.name = name;
+            go.SetActive(true);
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+            rt.localScale = Vector3.one;
+
+            var text = go.GetComponentInChildren<TextMeshProUGUI>(true);
+            if (text != null) { text.text = label; text.enableAutoSizing = false; text.fontSize = 22f; text.alignment = TextAlignmentOptions.Center; }
+
+            var button = go.GetComponent<Button>();
+            if (button == null) button = go.AddComponent<Button>();
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(onClick);
+        }
+
+        public void RestartAssembly()
+        {
+            Debug.Log("[Session] Restart Assembly: reloading the scene for a clean new session (new log file).");
+            var logger = FindAnyObjectByType<AdaptiveAR.Logging.SessionLogger>(FindObjectsInactive.Include);
+            if (logger != null) { logger.LogNote("restart_assembly"); logger.EndSession("restart"); }
+            FeedbackPulse.CancelAll();
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            UnityEngine.SceneManagement.SceneManager.LoadScene(scene.buildIndex >= 0 ? scene.buildIndex : 0);
+        }
+
+        public void QuitApplication()
+        {
+            Debug.Log("[Session] Quit requested by the participant.");
+            var logger = FindAnyObjectByType<AdaptiveAR.Logging.SessionLogger>(FindObjectsInactive.Include);
+            if (logger != null) { logger.LogNote("quit"); logger.EndSession("quit"); }
+            Application.Quit();
         }
 
         public void Show(Screen screen)

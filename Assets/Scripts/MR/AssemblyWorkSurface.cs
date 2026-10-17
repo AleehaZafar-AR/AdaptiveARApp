@@ -154,11 +154,9 @@ namespace AdaptiveAR.MR
 
             if (placementMode == PlacementMode.Authored)
             {
-                // The authored transform is the mat. Nothing here moves it, now or later.
-                Vector3 headWorld = transform.TransformPoint(authoredHeadLocalPosition);
-                _ringWorld = hasAuthoredHeadPose
-                    ? new Vector3(headWorld.x, SurfaceCenter.y, headWorld.z)
-                    : transform.position + transform.forward * (matSize * 0.5f - headRingFromEngineEdge);
+                // The authored transform is the mat; the ring marks ITS centre. The head target
+                // keeps whatever pose was captured, independently.
+                _ringWorld = transform.position;
                 ApplyVisualScale();
                 IsPlaced = true;
                 if (logChanges)
@@ -336,7 +334,7 @@ namespace AdaptiveAR.MR
             HeadTargetValid = true;
 
             Vector3 pos = _headTarget.position;
-            _ringWorld = new Vector3(pos.x, SurfaceCenter.y, pos.z);
+            _ringWorld = transform.position;                    // ring = mat centre, always
             PlaceMarking(_ringWorld, HeadFootprint(kitRoot) * 1.3f);
 
             if (logChanges)
@@ -711,15 +709,14 @@ namespace AdaptiveAR.MR
                    $"Mat size {matSize:F2} m (true metres).";
         }
 
-        /// <summary>Keeps the ring preview under the head reference while it is being moved.</summary>
+        /// <summary>The ring preview marks the mat centre (it never follows the head reference).</summary>
         public void EditorUpdateRingPreview()
         {
             Transform head = EditorAuthoringHead;
             Transform ring = transform.Find(AuthoringPrefix + "Ring");
             if (head == null || ring == null) return;
             float k = LocalPerMetre();
-            Vector3 local = head.localPosition;
-            ring.localPosition = new Vector3(local.x, 0.002f * k, local.z);
+            ring.localPosition = new Vector3(0f, 0.002f * k, 0f);
             float d = 0.05f;
             var mf = head.GetComponent<MeshFilter>();
             if (mf != null && mf.sharedMesh != null)

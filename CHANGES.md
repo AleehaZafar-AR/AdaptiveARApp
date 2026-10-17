@@ -2617,3 +2617,149 @@ add  4 speech clips (+metas)
    at +2 s - or the ERROR that names what happened.
 6. Bolts: both ghosts shown for the first bolt; either bolt into either; second bolt →
    remaining ghost; no wrong-component on the "other" bolt; nuts likewise.
+
+
+---
+
+## Claude → Reviewer — 2026-10-16 (b) — Final calibration pass: runtime grab truth, FAR/NEAR/VALID feedback, mechanical symmetry, holder equivalence, insertion gating, discrete errors, ring, view rotation, restart/quit
+
+Base: `c1a6183`. Workflow and progression frozen: no change to the action sequence, the
+authored piston interactions, the captured head target, the UI layout, ghost material,
+arrow orientation or any tolerance NUMBER. Your uncommitted scene / build-profile /
+render-texture edits are untouched and not committed. Both assemblies compile with the
+csc harness. Nothing has run on a headset: everything is [QV].
+
+### 1. Wrong-component detection: the runtime truth path [QV]
+The earlier passes watched parts from the part side (Grabbable events, interactable
+events, polling) and were provably complete in the source, yet only the camshaft warned
+on the device. This pass stops reasoning from the part side: it subscribes to every
+grab **interactor** in the rig (`HandGrabInteractor`, `DistanceHandGrabInteractor`,
+`GrabInteractor`, `DistanceGrabInteractor`) and, on every selection, resolves the
+interactable the hand actually chose to the Rigidbody/object it grabs and logs, before
+any eligibility logic:
+`[GrabRuntime] selectedObject=<GO#id> path= rigidbody=<#id> pointable=<path#id>
+grabbable=own#id|NONE interactable=<type@path> interactor=<type> currentAction=`
+then `[EligibilityRuntime] selected= acceptedObjects=[…] eligible=true|false state=`.
+A selected object that is not in the watched set is watched from that moment (ERROR
+line) and dispatched anyway, so no grabbable object can stay invisible to the
+wrong-part system. The per-part loop is now isolated per candidate (one bad entry can
+no longer abort the processing of the parts after it - the one source-level mechanism
+that would produce exactly "crankshaft and camshaft work, everything listed after them
+does not": they are the first two entries in the watched list). The actual device-side
+answer is in the next log: if a part shows `[GrabRuntime]` but no `[WrongPart] FIRING`,
+the `[EligibilityRuntime]` line says which accepted/tolerated object it matched; if it
+shows nothing at all, no grab interactor in the rig selected it.
+
+### 2. FAR / NEAR / VALID feedback [QV]
+`StepValidator.CurrentProximity` (`None` when nothing is held) from the distance of the
+held accepted part to the ACTUAL target: **FAR** outside the near zone (the attempt
+zone, max(10 cm, 3× position tolerance)) → steady red tint on the part + "Bring the
+part closer."; **NEAR** inside the zone but not yet valid → amber tint + "Almost there —
+adjust the alignment." (or "… insert the part along its axis." when the insertion gate
+blocks); **VALID** → green success pulse, snap, complete. Orientation alone never makes
+a part red; moving away from the zone makes it FAR again. The tint is a steady
+property-block hold (`FeedbackPulse.Hold/Release`), restored on release/success.
+
+### 3. Symmetry rules per component (table revision 4; numbers unchanged) [QV]
+| Role | Rule | Axis |
+|---|---|---|
+| crankshaft, camshaft | AxialFree: axis direction must match, roll free | longest extent |
+| ConnectingPin | AxialFreeFlip: axis either way, roll free | longest |
+| pistonBolt / pistonBoltOther | AxialFreeFlip, roll about the shaft free | longest (the shaft) |
+| PistonNut / PistonNutOther | AxialFreeFlip, roll about the insertion axis free | **shortest extent** (the nut's thickness - previously the longest, i.e. a width axis, which made the roll matter) |
+| PistonEnd (cap) | **HalfTurnAboutAxis**: accepted at the authored orientation OR turned 180° about its symmetry axis; snaps to the nearer of the two | axis from the cap towards the head, read from the assembled piston ghost |
+| ConnectingRod | AxialHalfTurn (unchanged) | longest |
+| PistonHead | full orientation (unchanged) | – |
+This is real symmetry handling (the error is computed under the rule), not a larger
+angle.
+
+### 4. Camshaft holders: any holder, any free position [QV]
+`part.engineBlockSep00N` / `ghost.engineBlockSep00N` now expand to all four (same
+mechanism as the bolts/nuts): every loose, unconsumed holder is accepted at every
+unoccupied holder target, the nearest free target is chosen live, success occupies it
+and consumes the holder, all free holder ghosts are shown. Holder 3 before holder 1 is
+not an error. Texts: "Fit a camshaft holder onto the block." / "Fit another camshaft
+holder onto the block." (details mention the free highlighted positions at L2/L3), two
+new clips.
+
+### 5. Collision / insertion [QV]
+What is physically possible without a physics-grab rewrite: a hand-held part is
+kinematic (Interaction SDK), so no collider can block it in the hand; released parts
+keep ContinuousDynamic + solid non-trigger colliders (unchanged). Plausibility is
+therefore enforced on ACCEPTANCE: insertion parts (bolts, nuts, pin, camshaft) must
+approach **along their insertion axis**. The part's travel over the last 0.3 s is judged
+as it comes through the near zone (≥ 2 cm of motion): within 55° of the axis (either
+direction) → may be accepted when in tolerance; across it → blocked
+(`[Insertion] … ACROSS … blocked`), the card says "insert the part along its axis", and
+the part must back out of the zone and come in along the axis. The final pose still
+snaps, but only after a plausible approach. The near-target collision suppression
+between the moving part and the receiving assembly is unchanged (it only matters once
+the part is dynamic again).
+
+### 6. Discrete error count [QV]
+- `attempt_id` (session-wide) starts when the accepted part enters the near zone.
+- A **counted** placement error = the part is let go inside the zone without fitting
+  (`released_in_zone`): at most ONE per attempt (`error_counted=true`).
+- Carrying the part out of the zone again (`left_zone`) ends the attempt as
+  *abandoned*: logged for diagnostics, `error_counted=false`, no tone, no pulse, no card
+  message, not counted.
+- Holding/moving, orientation adjustment inside an attempt, far distance: never errors.
+- Wrong component: one error per grab episode (unchanged). Success: no error.
+- The 4 Hz `[…Validation]` samples are diagnostics only and never enter the count.
+`validation_attempt` log records carry `attempt_id` and `error_counted`.
+
+### 7. Ring = mat centre [QV]
+The ring (runtime marking and the `~AuthoringRing` preview) sits at the mat's centre;
+the captured head target keeps its own position/rotation. The inspector no longer
+moves the ring under the head reference.
+
+### 8. View rotation [QV]
+`WorkspaceViewRotation` (new) rotates **CalibrationOffset** - the parent of
+EngineAnchor, so the engine, trays, ghosts, targets, mat, installed components and
+subassemblies all turn together and every validation transform stays correct - about
+the vertical axis through the engine's centre in 15° steps; height and scale are
+re-asserted, the oil pan is never rotated on its own. A small floating panel
+`[ ↺ Rotate ] [ Reset View ] [ Rotate ↻ ]` (a stripped clone of the pointable Overview
+canvas, parented under the main card 33 cm below it) drives it; **Reset View** restores
+the authored CalibrationOffset pose. It only writes `view_rotated:<yaw>` / `view_reset`
+notes to the log - never an action or error.
+Loose piston subassembly: while the rod/pin are being fitted on the mat the placed
+head is **repositionable** - its lock yields while a hand holds it and re-freezes it
+where it is let go (`PlacementLock.Repositionable`); grabbing it is a *tolerated* grab
+(`[Eligibility] … eligible=tolerated`, never a wrong part), and the kit's ghosts -
+hence the rod/pin targets - follow the real head every frame. On installation into the
+bore the head locks for good and normal engine rules apply.
+
+### 9. End screen [QV]
+Two buttons on the completion panel (cloned from the authored Start button):
+**Restart Assembly** - closes the current log (`restart`), cancels feedback and reloads
+the scene: every component pose/lock/consumed part/occupied target, workflow, support
+and action state start from the authored scene and a NEW session file (new session id)
+opens; nothing is appended to the previous run. **Quit** - closes the log (`quit`) and
+`Application.Quit()`.
+
+### Files
+```
+mod  StepValidator.cs             interactor-side [GrabRuntime]/[EligibilityRuntime], isolated per-candidate loop, Proximity + tint event,
+                                  symmetry rev 4 (axis select, HalfTurnAboutAxis, cap axis from the assembled ghost), insertion gate,
+                                  attempt_id + counted errors, tolerated kit-handle grabs + ghost follow, holder equivalence
+new  WorkspaceViewRotation.cs     workspace yaw + floating Reset View panel
+mod  PlacementLock.cs             Repositionable
+mod  FeedbackPulse.cs             Hold/Release steady tint
+mod  ParticipantCard.cs           FAR/NEAR/insertion messages (wording revision 2)
+mod  AssemblySessionController.cs proximity tint, counted errors, attempt ids in the log, view rotation setup
+mod  AppFlowController.cs         Restart Assembly / Quit
+mod  SessionLogger.cs             attempt_id, error_counted
+mod  GuidanceAudit.cs             holder equivalence
+mod  AssemblyWorkSurface.cs       ring at the mat centre
+mod  Step_06_Camshaft.asset       holder texts + clips;  add 2 clips
+```
+
+### [QV]
+1. Any wrong part at any time → `[GrabRuntime]` → `[EligibilityRuntime] eligible=false` → `[WrongPart] FIRING` → feedback.
+2. Carry a correct part: red + "Bring the part closer." far away; amber + "Almost there…" near; green on fit.
+3. Nut/bolt fit at any roll; cap fits either way round; `[Insertion] ALONG` on a straight approach, `ACROSS … blocked` sideways.
+4. Holders in any order; both/all free holder ghosts shown.
+5. A full knowledgeable run ends with an error count equal to the number of deliberate failed releases + wrong grabs only.
+6. Rotate/Reset View buttons under the card; whole workspace turns; targets still validate.
+7. Completion panel: Restart Assembly → fresh session, new log file; Quit → app exits.
