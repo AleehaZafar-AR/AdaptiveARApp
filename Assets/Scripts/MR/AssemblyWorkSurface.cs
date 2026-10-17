@@ -131,12 +131,13 @@ namespace AdaptiveAR.MR
             // EditorOnly and stripped from builds; this covers Play Mode in the Editor).
             if (Application.isPlaying)
             {
-                var stale = new List<GameObject>();
+                // Deactivated, not destroyed: destroying a GameObject that is selected in the
+                // Inspector when Play starts throws from Unity's and the SDK's inspectors.
+                int n = 0;
                 foreach (Transform t in transform)
-                    if (t != null && t.name.StartsWith(AuthoringPrefix)) stale.Add(t.gameObject);
-                foreach (GameObject g in stale) Destroy(g);
-                if (stale.Count > 0 && logChanges)
-                    Debug.Log($"[WorkSurface] {stale.Count} authoring reference object(s) removed for Play Mode.");
+                    if (t != null && t.name.StartsWith(AuthoringPrefix) && t.gameObject.activeSelf) { t.gameObject.SetActive(false); n++; }
+                if (n > 0 && logChanges)
+                    Debug.Log($"[WorkSurface] {n} authoring reference object(s) hidden for Play Mode (EditorOnly; never in a build).");
             }
         }
 

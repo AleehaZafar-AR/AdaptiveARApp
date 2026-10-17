@@ -3089,3 +3089,6 @@ moving with the action. This is the in-source proof; the device proof is one
 1. Piston head on the mat: `[PistonHeadAction] … centreDistance` small when aligned → validates, snaps, advances.
 2. `[WrongGrabBinding]` table: every part `callbackBound=true`; `[WrongGrabDryRun]` as above.
 3. Wrong grab of each listed part → `[GrabCallback]` → `[EligibilityRuntime] eligible=false` → `[WrongPart] FIRING` → feedback; release → `episode closed`; again → fires again.
+
+### Addendum 2026-10-17 — Inspector exceptions on Play
+The five Console errors (`HandGrabInteractableEditor.OnEnable/OnDisable`, `GameObjectInspector`, `TransformInspector`: null target / "m_Targets doesn't exist") are Unity Inspector exceptions raised when the object selected in the Inspector is destroyed, not compiler errors (Unity's Editor.log shows the scripts compiling). `AssemblyWorkSurface.Awake` destroyed the `~Authoring*` reference objects when Play started; they are now deactivated instead. Deselect a runtime-created object before stopping Play to avoid the same message from Unity itself. [QV]
