@@ -2918,3 +2918,115 @@ mod  StatusHud.cs                 fields by name, discrete model, extra rows
 7. Head+rod+pin liftable by any of its parts before installation.
 8. Start panel 0.75 m ahead, slightly below eye level, no steepness warning while reading.
 9. Install ghost = head+rod+pin only. 10. Status rows update. 11. Summary on completion.
+
+
+---
+
+## Claude → Reviewer — 2026-10-17 (b) — Interaction correctness + UX calibration: central wrong-part decision, position-vs-symmetry, sequential holders, turntable, completion/timer audio, completion cleanup
+
+Base: `dba5360`. Progression and workflow untouched; the frozen list (authored colours
+while moving, amber near, rod/pin/cap symmetry, either bolt/nut, loose subassembly
+manipulation, startup placement UI, partial-piston install ghost, Restart, authored UI
+and head target) is preserved. Your uncommitted scene / build-profile / render-texture
+edits are left alone. Both assemblies compile. Everything is [QV].
+
+### 1. Centralised wrong-component decision [QV]
+Exactly the rule you wrote, in one function, called from the device's selection event:
+`EvaluateGrab(selectedObject)`:
+- `currentlyAcceptedParts` = the PHYSICAL action's accepted instances (either bolt /
+  nut, any unused holder, …) or the READ instruction's named part, plus the tolerated
+  objects (the loose subassembly's handle and joined children, and the turntable);
+- `selected ∈ accepted` → fine (a READ instruction is acknowledged); otherwise, while an
+  action is armed → **one** `[WrongPart] FIRING` for that grab episode;
+- episodes are keyed by the selected object with a per-object refcount (two hands =
+  one episode) and end when the last hand lets go (`[GrabEvent] RELEASED` …
+  `[WrongPart] episode closed`); grabbing again starts a new episode.
+The decision no longer reads the watch list, its held flags or the poll loop; those
+remain diagnostics (`[GrabRuntime]`, `[EligibilityRuntime]` with the accepted set
+printed, `[GrabCoverage]`). The poll path only decides if no grab interactor could be
+hooked (`[GrabRuntime] hooked N … FALLBACK` would say so).
+
+### 2. Position deliberately, symmetry ignored (table revision 6) [QV]
+Positions (geometric centre vs target centre): head 2.5→**2.0** cm, rod 2.5→**2.0**,
+pin 2.0→**1.5**, cap 2.5→**2.0**, bolts 2.8→**2.0**, nuts 3.6→**2.4**, crankshaft /
+camshaft 3.0→**2.2**, holders 3.0→**2.0** (new family entry). No angle changed, no
+symmetry rule changed: bolt/nut axis = bolt→its nut from the assembled piston, roll
+about it ignored, either direction; cap either way round; rod half-turn; pin either
+way. `[ValidationPose] part= positionError= axisError= ignoredRoll= rotationError=
+tolPos= tolRot=` at 4 Hz inside the near zone, to tune position and orientation apart.
+
+### 3. Holders: any holder, slots in order [QV]
+Accepted parts = any unused holder (identity irrelevant); accepted target = this
+action's slot only (holder1 → slot 1, … holder4 → slot 4): one ghost, the validator
+measures and snaps to that same transform, success occupies the slot and consumes the
+holder, the next action shows the next slot. (The either-side TARGET logic is now
+bolt/nut only, which also removes the slot-1/slot-4 ghost inconsistency.)
+
+### 4. Turntable [QV]
+`EngineTurntable` (new; the Rotate Left/Right buttons are gone):
+- created at task start under `EngineAnchor/Offset` at the oil pan's base centre; a
+  subtle flat grey ring (oil-pan footprint + 5 cm) with a thin slab collider for the
+  rim; grabbed with a copy of the authored ISDK hand/controller grab interaction
+  re-pointed at it, driven by a `OneGrabRotateTransformer` about its up axis = world
+  up; height and tilt re-asserted every frame → yaw only, no translation, no scale;
+- **turns**: `Ghosties` (oil pan + every engine target/ghost) is re-parented under it
+  at setup, and every part that locks onto the engine (crankshaft, holders, camshaft,
+  installed pistons with their joined rod/pin/cap/bolts/nuts, the auto-completed
+  visual pistons) is adopted under it on success - their locks hold local poses, so
+  they simply ride along and keep validating;
+- **does not turn**: trays, loose parts (`Components`), the piston mat and its kit
+  ghosts (`Ghosties/PistonKits` is moved out next to the mat), all UI;
+- **Reset View**: one button on the card, visible only while the engine is turned
+  (> 2°), restores the authored yaw; releases log `engine_turned:<yaw>` notes only.
+This is what exposes the far side of an installed piston for the cap/bolts/nuts (5);
+the installed piston itself is never independently rotatable.
+
+### 5. Insertion check [QV]
+Secondary to pose: with position and axis passing, the part snaps only if some recent
+stretch of travel (≥ 1.5 cm in the last 0.4 s, judged continuously while in the near
+zone) ran within 55° of the insertion axis - latched until the part leaves the zone.
+Otherwise it is simply not snapped yet; `[InsertionCheck] part= approachAngle=
+allowed=` (false lines throttled to 2 Hz), no error, no flash. Bolts, nuts, pin,
+camshaft.
+
+### 6. Completion + timer audio [QV]
+Two new procedural tones on the existing feedback source (`ProceduralTones.Complete`:
+rising major arpeggio; `ProceduralTones.Timer`: alternating 880/660 Hz pattern,
+clearly different). Completion plays once when the final step succeeds; the timer
+plays once when the assembly (from first stage entry) reaches `timerMinutes` (10) and
+logs `timer_elapsed:10min` - nothing is terminated by it.
+
+### 7. Completion cleanup [QV]
+On completion: guidance cleared, mat hidden, turntable ring/grab disabled, Reset View
+hidden, `tray`, `tray (1)`, `Plane`, `PistonKits` (mat ghosts) and `Worksurface` under
+Offset deactivated, every loose never-installed part deactivated. The oil pan and the
+finished engine (everything under the turntable) remain. All by SetActive - the scene
+reload on Restart restores everything.
+
+### 8–11.
+Back button: Continue's dimensions (236×66), font size, weight, sprite/corner treatment
+and material; charcoal fill, primary text colour. Auto-complete label: "Finish Pistons →".
+Completion body (Completion Time / Total Attempts / Total Errors) is built from the
+session counters at the moment of completion and a `run_summary:` note is written to
+the log before Restart can reset anything; the Status panel is unchanged.
+
+### Files
+```
+new  EngineTurntable.cs           turntable (ring, grab, yaw-only), Ghosties adoption, installed-part adoption, Reset
+del  WorkspaceViewRotation.cs     rotate buttons removed
+mod  StepValidator.cs             EvaluateGrab on the selection event, per-object episodes, rev 6 positions + holder family,
+                                  holders single sequential target, approach latch + [InsertionCheck], [ValidationPose], turntable adoption
+mod  AssemblySessionController.cs turntable + Reset View button, timer tone, completion tone/cleanup/run_summary
+mod  SpeechLibrary.cs             Complete / Timer tones
+mod  ParticipantCard.cs           Back styled like Continue (charcoal), "Finish Pistons"
+mod  GuidanceRegistry.cs          loose-parts container lookup survives the crankshaft's adoption
+mod  AssemblyWorkSurface.cs       oil pan lookup by name
+```
+
+### [QV]
+1. Wrong grab of any part during any action → one `[WrongPart] FIRING` + feedback; release closes; again warns again.
+2. Parts need closer alignment; bolt at any roll, nut at any roll, cap either way still fit.
+3. Holders: any holder, slot 1 ghost only, then 2, 3, 4.
+4. Grab the grey ring: engine turns, trays/mat/UI stay; Reset View appears on the card only while turned.
+5. Sideways bolt/camshaft: no snap, `[InsertionCheck] allowed=false`; along the axis: snap.
+6. Completion chime once; timer signal once at 10 min. 7. Only the engine and the result UI remain at the end.

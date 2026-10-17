@@ -300,9 +300,20 @@ namespace AdaptiveAR.Steps
             // (Components/<name>), e.g. part.engineBlockSep001.
             if (found == null && key.StartsWith("part.") && !KitChildKey.IsMatch(key) && !KitHandleKey.IsMatch(key) && !ChildKey.IsMatch(key))
             {
-                if (_lookup.TryGetValue("part.crankshaft", out GameObject crank) && crank != null && crank.transform.parent != null)
+                // The loose-parts container: the parent of a registered part that is still loose.
+                // (An installed crankshaft has been adopted by the turntable, so try several.)
+                Transform container = null;
+                foreach (string probe in new[] { "part.camshaft", "part.crankshaft", "part.piston001" })
                 {
-                    Transform hit = crank.transform.parent.Find(key.Substring(5));
+                    if (!_lookup.TryGetValue(probe, out GameObject pg) || pg == null || pg.transform.parent == null) continue;
+                    Transform cand = pg.transform.parent;
+                    if (cand.name == "PistonKits" && cand.parent != null) cand = cand.parent;
+                    if (cand.name == "Components") { container = cand; break; }
+                    if (container == null) container = cand;
+                }
+                if (container != null)
+                {
+                    Transform hit = container.Find(key.Substring(5));
                     if (hit != null) found = hit.gameObject;
                 }
             }

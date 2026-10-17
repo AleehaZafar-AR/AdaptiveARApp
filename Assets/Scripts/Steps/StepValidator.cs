@@ -141,7 +141,7 @@ namespace AdaptiveAR.Steps
         [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
                  "the values serialized in the scene, the table is reset to the defaults at start.")]
         [SerializeField] private int roleToleranceRevision = 0;
-        private const int CurrentRoleToleranceRevision = 5;
+        private const int CurrentRoleToleranceRevision = 6;
 
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
@@ -200,7 +200,7 @@ namespace AdaptiveAR.Steps
         public Transform CurrentTarget { get; private set; }
         public bool HasBeenHandled { get; private set; }
         public bool IsAssisting { get; private set; }
-        public bool WrongPartHeld { get { return _wrongHeld != null; } }
+        public bool WrongPartHeld { get { return _wrongHeld != null || _wrongEpisodeObject != null; } }
 
         /// <summary>
         /// Why the last attempt failed: "incorrect_position", "incorrect_orientation" or
@@ -387,20 +387,20 @@ namespace AdaptiveAR.Steps
                 // are free to roll about their INSERTION axis (a nut's is its shortest extent),
                 // the rod end cap is accepted in either of its two equivalent orientations,
                 // and insertion parts must approach along their axis.
-                new RoleTolerance { role = "PistonHead",      positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.None },
-                new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.025f, rotationDegrees = 22f, symmetry = AxisSymmetry.AxialHalfTurn },
-                new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
-                new RoleTolerance { role = "PistonEnd",       positionMeters = 0.025f, rotationDegrees = 25f, symmetry = AxisSymmetry.HalfTurnAboutAxis, axis = AxisSelect.TowardsHeadInAssembly },
-                // Revision 5: the bolt/nut axis is read from the assembled piston (bolt -> its nut),
-                // not guessed from mesh extents; positions are compared at the geometric centre so
-                // a free roll can never fail the position test; bolt/nut position +0.8 cm (small
-                // hardware in the hand). Every other number unchanged.
-                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.028f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
-                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.028f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
-                new RoleTolerance { role = "PistonNut",       positionMeters = 0.036f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
-                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.036f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
-                new RoleTolerance { role = "crankshaft",      positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
-                new RoleTolerance { role = "camshaft",        positionMeters = 0.030f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree, insertionAxis = true },
+                // Revision 6: POSITION tightened across the assembly (deliberate alignment with the
+                // guide); every angle and every symmetry rule unchanged. Small hardware is tuned
+                // on its own line. Holders get their own entry (any holder, slot in sequence).
+                new RoleTolerance { role = "PistonHead",      positionMeters = 0.020f, rotationDegrees = 22f, symmetry = AxisSymmetry.None },
+                new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.020f, rotationDegrees = 22f, symmetry = AxisSymmetry.AxialHalfTurn },
+                new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.015f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
+                new RoleTolerance { role = "PistonEnd",       positionMeters = 0.020f, rotationDegrees = 25f, symmetry = AxisSymmetry.HalfTurnAboutAxis, axis = AxisSelect.TowardsHeadInAssembly },
+                new RoleTolerance { role = "pistonBolt",      positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "pistonBoltOther", positionMeters = 0.020f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "PistonNut",       positionMeters = 0.024f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.024f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
+                new RoleTolerance { role = "crankshaft",      positionMeters = 0.022f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
+                new RoleTolerance { role = "camshaft",        positionMeters = 0.022f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree, insertionAxis = true },
+                new RoleTolerance { role = "engineBlockSep",  positionMeters = 0.020f, rotationDegrees = 25f, symmetry = AxisSymmetry.None },
             };
         }
 
@@ -420,6 +420,11 @@ namespace AdaptiveAR.Steps
             if (role == null || roleTolerances == null) return null;
             foreach (RoleTolerance r in roleTolerances)
                 if (r != null && r.role == role) return r;
+            // Numbered family (engineBlockSep001..004) -> the family entry.
+            string family = role.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+            if (family != role)
+                foreach (RoleTolerance r in roleTolerances)
+                    if (r != null && r.role == family) return r;
             return null;
         }
 
@@ -613,9 +618,11 @@ namespace AdaptiveAR.Steps
             // Equivalent bolt/nut targets: both free positions are valid; the part goes to the
             // nearest free one (chosen live). Once a target is occupied it is no longer offered.
             _targets.Clear();
+            // Either-side TARGETS exist only for the bolt/nut pairs. Holders are interchangeable
+            // PARTS (any unused holder is accepted - expanded above) but their slots are guided
+            // in sequence: this action's authored target only, one ghost.
             string[] group = GroupOf(RoleNameOf(action.partKey));
-            bool equivalent = group != null || GuidanceAudit.IsEquivalent(action.partKey);
-            if (group == null && equivalent) group = new[] { RoleNameOf(action.partKey), "equivalent" };
+            bool equivalent = group != null;
             if (equivalent)
             {
                 foreach (string tk in GuidanceAudit.ExpandEquivalent(action.targetKey))
@@ -1034,7 +1041,9 @@ namespace AdaptiveAR.Steps
                 var cap = it; n++;
                 cap.WhenStateChanged += a => OnInteractorState(cap, a, () => cap.SelectedInteractable);
             }
-            Debug.Log($"[GrabRuntime] hooked {n} grab interactor(s) in the rig (hand grab / distance hand grab / controller grab / distance grab).");
+            _interactorCount = n;
+            Debug.Log($"[GrabRuntime] hooked {n} grab interactor(s) in the rig (hand grab / distance hand grab / controller grab / distance grab); " +
+                      (n > 0 ? "selection events are the wrong-component decision path." : "FALLBACK: polling decides."));
             if (n == 0) Debug.LogError("[GrabRuntime] NO grab interactor found in the rig: the runtime truth path has no source.");
         }
 
@@ -1073,6 +1082,89 @@ namespace AdaptiveAR.Steps
             }
         }
 
+        // Grab episodes keyed by the selected object itself, independent of any watch list:
+        // refcount per object (two hands = one episode), cleared when the last hand lets go.
+        private readonly Dictionary<GameObject, int> _episodes = new Dictionary<GameObject, int>();
+        private GameObject _wrongEpisodeObject;
+        private int _interactorCount;
+
+        /// <summary>The objects a grab is allowed on right now: accepted parts of the action, plus tolerated ones.</summary>
+        private List<string> DescribeCurrentlyAccepted(out bool anyArmed)
+        {
+            bool physical = IsActive && !_completed;
+            bool ack = _ackArmed;
+            anyArmed = physical || ack;
+            var names = new List<string>();
+            if (physical) foreach (GameObject g in _acceptedObjects) { if (g != null) names.Add($"{g.name}#{g.GetInstanceID()}"); }
+            else if (ack) foreach (GameObject g in _ackObjects) { if (g != null) names.Add($"{g.name}#{g.GetInstanceID()}"); }
+            foreach (GameObject g in _toleratedObjects) if (g != null) names.Add($"{g.name}#{g.GetInstanceID()}(tolerated)");
+            return names;
+        }
+
+        /// <summary>
+        /// THE wrong-component decision. Called directly from the device's selection event with
+        /// the assembly object that was grabbed:
+        ///     grabbed in currentlyAcceptedParts (or tolerated)  -> fine
+        ///     otherwise, while an action is armed                -> ONE wrong-component event
+        /// One event per grab episode; the episode ends when the last hand lets go.
+        /// </summary>
+        private void EvaluateGrab(GameObject part, string key, string source)
+        {
+            if (part == null) return;
+            if (_episodes.TryGetValue(part, out int refs) && refs > 0)
+            {
+                _episodes[part] = refs + 1;
+                Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} already in an open grab episode (second hand) - no new decision.");
+                return;
+            }
+            _episodes[part] = 1;
+
+            bool physical = IsActive && !_completed;
+            bool ack = _ackArmed;
+            List<string> accepted = DescribeCurrentlyAccepted(out bool armed);
+            bool tolerated = _toleratedObjects.Contains(part) || part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null;
+            bool eligible = tolerated || (physical && _acceptedObjects.Contains(part)) || (ack && _ackObjects.Contains(part));
+
+            Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} acceptedObjects=[{string.Join(", ", accepted)}] eligible={eligible}" +
+                      $"{(tolerated ? "(tolerated)" : "")} state={(physical ? "PHYSICAL" : (ack ? "READ" : "none"))} action={CurrentActionId()} source={source}");
+
+            if (!armed) return;                                   // nothing to validate or acknowledge (AUTO / between actions)
+            if (eligible)
+            {
+                if (ack && _ackObjects.Contains(part))
+                {
+                    _ackArmed = false;
+                    if (logEvaluations) Debug.Log($"[StepValidator] instruction '{CurrentActionId()}' acknowledged by picking up '{part.name}'.");
+                    try { OnAcknowledgedByGrab?.Invoke(key, part.transform); }
+                    catch (Exception e) { Debug.LogError("[StepValidator] OnAcknowledgedByGrab handler threw: " + e); }
+                }
+                return;
+            }
+            if (!monitorWrongParts) return;
+
+            _wrongEpisodeObject = part;
+            if (_watched.TryGetValue(part, out Candidate wc)) _wrongHeld = wc;
+            Debug.Log($"[WrongPart] FIRING object={part.name} action={CurrentActionId()} key={key}");
+            try { OnWrongPartGrabbed?.Invoke(key, part.transform); }
+            catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartGrabbed handler threw: " + e); }
+        }
+
+        private void EndGrabEpisode(GameObject part, string key, string source)
+        {
+            if (part == null || !_episodes.TryGetValue(part, out int refs)) return;
+            if (refs > 1) { _episodes[part] = refs - 1; return; }
+            _episodes.Remove(part);
+            Debug.Log($"[GrabEvent] RELEASED object={part.name} id={part.GetInstanceID()} action={CurrentActionId()} source={source} key={key}");
+            if (_wrongEpisodeObject == part)
+            {
+                _wrongEpisodeObject = null;
+                _wrongHeld = null;
+                Debug.Log($"[WrongPart] episode closed object={part.name} id={part.GetInstanceID()} (the next grab is a new episode)");
+                try { OnWrongPartReleased?.Invoke(key, part.transform); }
+                catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartReleased handler threw: " + e); }
+            }
+        }
+
         private void OnRuntimeSelected(MonoBehaviour interactor, MonoBehaviour interactable)
         {
             ResolveInteractable(interactable, out Rigidbody body, out Component pointable);
@@ -1087,48 +1179,28 @@ namespace AdaptiveAR.Steps
                       $"grabbable={(grabbable != null ? "own#" + grabbable.GetInstanceID() : "NONE")} " +
                       $"interactable={interactable.GetType().Name}@{PathOf(interactable.transform)} interactor={interactor.GetType().Name} currentAction={CurrentActionId()}");
 
-            if (!_watched.TryGetValue(part, out Candidate c))
+            // Diagnostics only: the watch entry (grab-source coverage). The DECISION below does
+            // not depend on it.
+            string key = _watched.TryGetValue(part, out Candidate c) ? c.key : "unregistered:" + part.name;
+            if (c == null && part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() == null)
             {
                 Debug.LogError($"[GrabRuntime] '{PathOf(part.transform)}' was selected on the device but was NOT in the watched set - watching it now.");
-                Watch(_watched.Count > 0 ? "unregistered:" + part.name : "unregistered:" + part.name, part, true);
-                _watched.TryGetValue(part, out c);
-                if (c != null) Link(c, interactable, interactable.GetType().Name);
+                Watch(key, part, true);
+                if (_watched.TryGetValue(part, out c)) Link(c, interactable, interactable.GetType().Name);
             }
-            if (c == null) { Debug.LogError("[GrabRuntime] could not create a watch entry for the selected object."); return; }
+            if (c != null) { c.wasHeld = true; c.firedThisEpisode = true; c.pendingGrab = false; c.pendingRelease = false; c.grabSource = "interactor_event"; }
 
-            if (c.wasHeld && c.firedThisEpisode)
-            {
-                // Another source already opened AND dispatched this episode. Report only.
-                Debug.Log($"[GrabRuntime] episode already dispatched for {part.name}#{part.GetInstanceID()} (by {c.grabSource ?? "poll"}).");
-                LogEligibilityRuntime(c);
-                return;
-            }
-            if (c.wasHeld && !c.firedThisEpisode)
-            {
-                // Marked held but nothing was ever dispatched: a stale episode. Close it and
-                // dispatch this real selection.
-                Debug.Log($"[GrabRuntime] {part.name}#{part.GetInstanceID()} was marked held with no dispatch (stale); closing and re-dispatching.");
-                c.wasHeld = false;
-                HandleRelease(c);
-            }
-
-            c.pendingGrab = false;
-            c.pendingRelease = false;
-            c.wasHeld = true;
-            c.grabSource = "interactor_event";
-            HandleGrab(c, "interactor_event");
+            EvaluateGrab(part, key, "interactor_event");
         }
 
         private void OnRuntimeUnselected(MonoBehaviour interactor, MonoBehaviour interactable)
         {
             ResolveInteractable(interactable, out Rigidbody body, out Component pointable);
             GameObject part = body != null ? body.gameObject : (pointable != null ? pointable.gameObject : null);
-            if (part == null || !_watched.TryGetValue(part, out Candidate c)) return;
-            if (!c.wasHeld || IsSelected(c)) return;              // another hand still holds it
-            c.wasHeld = false;
-            c.pendingRelease = false;
-            Debug.Log($"[GrabEvent] RELEASED object={c.tf.name} id={c.tf.GetInstanceID()} action={CurrentActionId()} source=interactor_event key={c.key}");
-            HandleRelease(c);
+            if (part == null) return;
+            string key = _watched.TryGetValue(part, out Candidate c) ? c.key : "unregistered:" + part.name;
+            EndGrabEpisode(part, key, "interactor_event");
+            if (c != null && !IsSelected(c)) { c.wasHeld = false; c.firedThisEpisode = false; c.pendingRelease = false; }
         }
 
         private void LogEligibilityRuntime(Candidate c)
@@ -1387,6 +1459,10 @@ namespace AdaptiveAR.Steps
             string actionId = CurrentActionId();
             c.firedThisEpisode = true;
 
+            // With interactors hooked, the selection event decides (EvaluateGrab); this path is
+            // then diagnostics only. Without interactors it is the fallback decision path.
+            if (_interactorCount > 0) { EvaluateGrab(go, c.key, source); return; }
+
             LogEligibilityRuntime(c);
 
             if (!physical && !ack)
@@ -1439,6 +1515,7 @@ namespace AdaptiveAR.Steps
         private void HandleRelease(Candidate c)
         {
             c.firedThisEpisode = false;
+            if (_interactorCount > 0) { EndGrabEpisode(c.tf != null ? c.tf.gameObject : null, c.key, "poll"); return; }
             if (_wrongHeld == c)
             {
                 _wrongHeld = null;
@@ -1621,7 +1698,7 @@ namespace AdaptiveAR.Steps
             float now = Time.time;
             Vector3 centre = CentreWorld(_active.tf, _active.centreLocal);
             _trail.Add(new KeyValuePair<float, Vector3>(now, centre));
-            while (_trail.Count > 0 && now - _trail[0].Key > 0.5f) _trail.RemoveAt(0);
+            while (_trail.Count > 0 && now - _trail[0].Key > 0.4f) _trail.RemoveAt(0);
 
             if (!inZone)
             {
@@ -1631,48 +1708,45 @@ namespace AdaptiveAR.Steps
                 return;
             }
             if (!_hasEntry) { _hasEntry = true; _entryCentre = centre; }
+            JudgeRecentApproach();
         }
 
-        /// <summary>Evaluates (and logs) the insertion approach for a pose that is otherwise valid. True = may be accepted.</summary>
+        /// <summary>
+        /// Secondary to pose validation. While the part is in the near zone, every stretch of
+        /// recent travel (>= 1.5 cm over the last 0.4 s) is judged against the insertion axis;
+        /// one stretch within 55 deg of it (either way) latches "along" until the part leaves
+        /// the zone. Position and axis must pass anyway; if the approach never ran along the
+        /// axis the part is simply not snapped yet - no error, no flash.
+        /// </summary>
+        private void JudgeRecentApproach()
+        {
+            if (_approachOk || _trail.Count < 2 || _active == null || CurrentTarget == null) return;
+            Vector3 travel = CentreWorld(_active.tf, _active.centreLocal) - _trail[0].Value;
+            if (travel.magnitude < 0.015f) return;
+            Vector3 axis = (CurrentTarget.rotation * _active.axisLocal).normalized;
+            float angle = Vector3.Angle(travel.normalized, axis);
+            angle = Mathf.Min(angle, 180f - angle);
+            _lastApproachAngle = angle;
+            _approachDecided = true;
+            if (angle <= 55f)
+            {
+                _approachOk = true;
+                Debug.Log($"[InsertionCheck] part={_active.tf.name}#{_active.tf.GetInstanceID()} approachAngle={angle:F0} allowed=true (travel {travel.magnitude * 100f:F1} cm along the axis; latched until the part leaves the zone)");
+            }
+        }
+
         private bool InsertionApproachAllowed()
         {
             if (!_insertion) return true;
             if (_active == null || _active.tf == null || CurrentTarget == null) return true;
-
-            Vector3 centre = CentreWorld(_active.tf, _active.centreLocal);
-            Vector3 approach = _hasEntry ? centre - _entryCentre : Vector3.zero;
-            string basis = "zone entry";
-            if (approach.magnitude < 0.015f && _trail.Count > 1)
-            {
-                approach = centre - _trail[0].Value;
-                basis = $"travel over {Time.time - _trail[0].Key:F2} s";
-            }
-            Vector3 axis = (CurrentTarget.rotation * _active.axisLocal).normalized;
-            bool allowed;
-            float angle;
-            if (approach.magnitude < 0.015f)
-            {
-                angle = -1f;
-                allowed = true;               // it did not come from anywhere measurable: nothing to judge
-                basis = "no measurable approach";
-            }
-            else
-            {
-                angle = Vector3.Angle(approach.normalized, axis);
-                angle = Mathf.Min(angle, 180f - angle);
-                allowed = angle <= 55f;
-            }
-            _lastApproachAngle = angle;
-            _approachOk = allowed;
-            _approachDecided = true;
-
-            if (allowed || Time.time >= _nextInsertionLog)
+            if (_approachOk) return true;
+            if (Time.time >= _nextInsertionLog)
             {
                 _nextInsertionLog = Time.time + 0.5f;
-                Debug.Log($"[InsertionCheck] part={_active.tf.name}#{_active.tf.GetInstanceID()} approachAngle={(angle < 0 ? "n/a" : angle.ToString("F0"))} allowed={allowed} " +
-                          $"basis={basis} approach={approach.magnitude * 100f:F1}cm axis={axis} limit=55");
+                Debug.Log($"[InsertionCheck] part={_active.tf.name}#{_active.tf.GetInstanceID()} approachAngle={(_approachDecided ? _lastApproachAngle.ToString("F0") : "n/a")} allowed=false " +
+                          "(pose valid but the recent approach was not along the insertion axis; back out and come in along it)");
             }
-            return allowed;
+            return false;
         }
 
         /// <summary>
@@ -1708,6 +1782,9 @@ namespace AdaptiveAR.Steps
             float roll = Quaternion.Angle(Quaternion.Inverse(CurrentTarget.rotation) * (alignAxes * _active.tf.rotation), Quaternion.identity);
 
             bool rollIgnored = _symmetry == AxisSymmetry.AxialFree || _symmetry == AxisSymmetry.AxialFreeFlip;
+            if (inZone)
+                Debug.Log($"[ValidationPose] part={_active.tf.name}#{_active.tf.GetInstanceID()} positionError={posErr * 100f:F1}cm axisError={axisAngle:F1} ignoredRoll={(rollIgnored ? roll.ToString("F1") : "n/a")} " +
+                          $"rotationError={rotErr:F1} tolPos={_posTol * 100f:F1}cm tolRot={_rotTol:F0} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol}");
             string variant = _symmetry == AxisSymmetry.HalfTurnAboutAxis
                 ? (Quaternion.Angle(EffectiveTargetRotation(_active), CurrentTarget.rotation) < 0.5f ? "A(authored)" : "B(180deg)")
                 : (_symmetry == AxisSymmetry.AxialFreeFlip && Vector3.Dot(partAxis, targetAxis) < 0f ? "flipped" : "authored");
@@ -1938,6 +2015,11 @@ namespace AdaptiveAR.Steps
             try
             {
                 BindAndJoin(_active);
+                // Locked onto the ENGINE (target under the turntable) and not joined to a kit
+                // handle: the engine's turntable adopts it so it turns with the engine.
+                var turntable = AdaptiveAR.MR.EngineTurntable.Current;
+                if (turntable != null && CurrentTarget.IsChildOf(turntable.transform) && !_active.tf.IsChildOf(turntable.transform))
+                    turntable.AdoptInstalled(_active.tf);
                 if (padlock != null) padlock.RefreshLockedPose();
             }
             catch (Exception e) { Debug.LogError($"{tag} join threw: {e}"); }

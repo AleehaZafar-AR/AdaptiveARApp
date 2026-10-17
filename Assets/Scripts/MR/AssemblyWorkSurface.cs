@@ -171,7 +171,10 @@ namespace AdaptiveAR.MR
                 return;
             }
 
-            Transform block = engineRoot != null ? engineRoot.Find("Offset/Ghosties/oilPan") : null;
+            Transform block = null;
+            if (engineRoot != null)
+                foreach (Transform t in engineRoot.GetComponentsInChildren<Transform>(true))
+                    if (t.name == "oilPan" && t.parent != null && t.parent.name == "Ghosties") { block = t; break; }
             Bounds engine = BoundsOf(block != null ? block : engineRoot, out bool hasEngine);
 
             Vector3 centre = hasEngine ? engine.center : (engineRoot != null ? engineRoot.position : Vector3.zero);

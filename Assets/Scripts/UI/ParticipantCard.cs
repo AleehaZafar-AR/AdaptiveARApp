@@ -339,19 +339,32 @@ namespace AdaptiveAR.UI
             {
                 _backImage = backButton.GetComponent<Image>();
                 var rt = backButton.transform as RectTransform;
-                if (rt != null) rt.sizeDelta = backSize;
+                // Same dimensions, typography, corner treatment and spacing as Continue; only
+                // the colour differs (charcoal vs the accent blue).
+                if (rt != null) rt.sizeDelta = continueSize;
 
                 if (_backLabel != null)
                 {
                     _backLabel.text = backLabel;
                     _backLabel.enableAutoSizing = false;
-                    _backLabel.fontSize = backFontSize;
-                    _backLabel.fontStyle = FontStyles.Normal;
+                    _backLabel.fontSize = continueFontSize;
+                    _backLabel.fontStyle = FontStyles.Bold;
                     _backLabel.alignment = TextAlignmentOptions.Center;
-                    _backLabel.color = MrTheme.TextSecondary;
+                    _backLabel.color = MrTheme.TextPrimary;
+                    if (nextLabel != null) { _backLabel.font = nextLabel.font; _backLabel.fontSharedMaterial = nextLabel.fontSharedMaterial; _backLabel.characterSpacing = nextLabel.characterSpacing; }
                 }
 
-                if (_backImage != null) _backImage.color = MrTheme.WithAlpha(MrTheme.PanelFillRaised, 0.9f);
+                if (_backImage != null)
+                {
+                    if (_nextImage != null)
+                    {
+                        _backImage.sprite = _nextImage.sprite;
+                        _backImage.type = _nextImage.type;
+                        _backImage.pixelsPerUnitMultiplier = _nextImage.pixelsPerUnitMultiplier;
+                        _backImage.material = _nextImage.material;
+                    }
+                    _backImage.color = new Color(0.22f, 0.24f, 0.27f, 0.92f);     // charcoal
+                }
 
                 backButton.onClick.RemoveListener(OnBackPressed);
                 backButton.onClick.AddListener(OnBackPressed);
@@ -615,7 +628,7 @@ namespace AdaptiveAR.UI
                 {
                     nextLabel.color = can ? MrTheme.TextPrimary : MrTheme.TextMuted;
                     nextLabel.text = session != null && session.IsAutoCompleteAction
-                        ? "Complete Remaining Pistons  \u2192"
+                        ? "Finish Pistons  \u2192"
                         : continueLabel;
                 }
             }

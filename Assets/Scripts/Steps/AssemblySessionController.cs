@@ -253,24 +253,126 @@ namespace AdaptiveAR.Steps
             if (!grabSourceOk) Debug.LogError("[Step1Check] ERROR grabEventSource=false: " + (!validatorOk ? "no validator" : (watched == 0 ? "no selectable part could be watched" : "the real crankshaft is not in the watched set")));
         }
 
+        [Header("Turntable / timer / completion")]
+        [Tooltip("Minutes of assembly time after which the timer signal sounds once (elapsed-time notification only).")]
+        [SerializeField] private float timerMinutes = 10f;
+
+        private float _assemblyStartMs = -1f;
+        private bool _timerFired;
+        private GameObject _resetViewButton;
+        private AdaptiveAR.MR.EngineTurntable _turntable;
+
         /// <summary>
-        /// Viewing convenience: the whole placed workspace can be turned about its vertical
-        /// axis from a small floating panel. Never an assembly action or error (log note only).
+        /// Viewing convenience: a subtle turntable under the oil pan turns the ENGINE (and
+        /// everything installed on it) about the world vertical axis; trays, mat and UI stay.
+        /// A single Reset View button appears on the card only while the engine is turned.
         /// </summary>
-        private void EnsureViewRotation()
+        private void EnsureTurntable()
         {
             try
             {
                 Transform engine = stepManager != null && stepManager.oilPan != null ? stepManager.oilPan.transform : null;
-                if (engine == null || engine.parent == null) { Debug.LogError("[ViewRotation] EngineAnchor not found: no view rotation."); return; }
-                Transform workspaceRoot = engine.parent;                    // CalibrationOffset
+                if (engine == null) { Debug.LogError("[Turntable] EngineAnchor not found."); return; }
+
+                GameObject template = null;
+                if (registry != null && registry.TryResolveQuiet("part.crankshaft", out GameObject crank) && crank != null)
+                {
+                    foreach (Transform t in crank.transform)
+                        if (t.GetComponentInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true) != null) { template = t.gameObject; break; }
+                }
+                _turntable = AdaptiveAR.MR.EngineTurntable.Ensure(engine, template, note => { if (logger != null) logger.LogNote(note); });
+
                 var flow = FindAnyObjectByType<AdaptiveAR.UI.AppFlowController>(FindObjectsInactive.Include);
                 RectTransform panel = flow != null && flow.StepPanel != null ? flow.StepPanel.transform as RectTransform : null;
-                GameObject template = flow != null ? flow.BackButtonTemplate : null;
-                AdaptiveAR.MR.WorkspaceViewRotation.Ensure(workspaceRoot, engine, panel, template,
-                    note => { if (logger != null) logger.LogNote(note); });
+                if (_turntable != null && panel != null) _resetViewButton = MakeResetViewButton(panel, flow.BackButtonTemplate);
             }
-            catch (Exception e) { Debug.LogError("[ViewRotation] setup threw: " + e); }
+            catch (Exception e) { Debug.LogError("[Turntable] setup threw: " + e); }
+        }
+
+        private GameObject MakeResetViewButton(RectTransform panel, GameObject template)
+        {
+            Transform existing = panel.Find("ResetViewButton");
+            if (existing != null) return existing.gameObject;
+
+            GameObject go;
+            if (template != null)
+            {
+                go = Instantiate(template, panel);
+                var old = go.GetComponent<UnityEngine.UI.Button>(); if (old != null) DestroyImmediate(old);
+                foreach (Transform extra in go.transform) if (extra.GetComponent<TMPro.TextMeshProUGUI>() == null) Destroy(extra.gameObject);
+                foreach (MonoBehaviour mb in go.GetComponents<MonoBehaviour>()) if (mb != null && !(mb is UnityEngine.UI.Image)) Destroy(mb);
+            }
+            else
+            {
+                go = new GameObject("ResetViewButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(UnityEngine.UI.Image));
+                go.transform.SetParent(panel, false);
+                var l = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(TMPro.TextMeshProUGUI));
+                l.transform.SetParent(go.transform, false);
+            }
+            go.name = "ResetViewButton";
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0f); rt.pivot = new Vector2(0.5f, 0f);
+            rt.anchoredPosition = new Vector2(0f, 24f); rt.sizeDelta = new Vector2(170f, 44f); rt.localScale = Vector3.one;
+            var text = go.GetComponentInChildren<TMPro.TextMeshProUGUI>(true);
+            if (text != null)
+            {
+                text.text = "Reset View"; text.enableAutoSizing = false; text.fontSize = 16f; text.alignment = TMPro.TextAlignmentOptions.Center;
+                var trt = text.rectTransform; trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one; trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
+            }
+            var button = go.AddComponent<UnityEngine.UI.Button>();
+            button.onClick.AddListener(() => { if (_turntable != null) _turntable.ResetView(); });
+            go.SetActive(false);
+            return go;
+        }
+
+        private void LateUpdate()
+        {
+            if (_resetViewButton != null && _turntable != null)
+            {
+                bool show = _turntable.IsRotated && !SequenceFinished;
+                if (_resetViewButton.activeSelf != show) _resetViewButton.SetActive(show);
+            }
+        }
+
+        /// <summary>Completion: only the finished engine (on its oil pan) and the result UI remain.</summary>
+        private void CompletionCleanup()
+        {
+            try
+            {
+                if (presenter != null) presenter.ClearGuidance();
+                if (stepManager != null) stepManager.SetMatVisible(false, "assembly_complete", 0);
+                if (_turntable != null) _turntable.SetInteractive(false);
+                if (_resetViewButton != null) _resetViewButton.SetActive(false);
+
+                Transform engine = stepManager != null && stepManager.oilPan != null ? stepManager.oilPan.transform : null;
+                Transform offset = engine != null ? engine.Find("Offset") : null;
+                int hidden = 0;
+                if (offset != null)
+                {
+                    foreach (Transform child in offset)
+                    {
+                        if (child == null) continue;
+                        if (child.name.StartsWith("tray") || child.name.StartsWith("Plane") || child.name.StartsWith("PistonKits") || child.name.StartsWith("Worksurface") || child.name.StartsWith("WorkSurface"))
+                        { if (child.gameObject.activeSelf) { child.gameObject.SetActive(false); hidden++; } }
+                    }
+                }
+                // Loose, never-installed parts (not locked, not on the engine) disappear with the trays.
+                if (registry != null)
+                {
+                    var seen = new System.Collections.Generic.HashSet<GameObject>();
+                    foreach (string key in registry.PartKeys())
+                    {
+                        if (GuidanceRegistry.IsKitHandleKey(key)) continue;
+                        if (!registry.TryResolveQuiet(key, out GameObject go) || go == null || !seen.Add(go)) continue;
+                        if (_turntable != null && go.transform.IsChildOf(_turntable.transform)) continue;
+                        var padlock = go.GetComponent<PlacementLock>();
+                        if (padlock != null && padlock.IsLocked) continue;
+                        if (go.activeSelf) { go.SetActive(false); hidden++; }
+                    }
+                }
+                Debug.Log($"[Session] completion cleanup: {hidden} tray/mat/loose object(s) hidden; the engine, its installed parts and the result UI remain.");
+            }
+            catch (Exception e) { Debug.LogError("[Session] completion cleanup threw: " + e); }
         }
 
         /// <summary>
@@ -532,6 +634,17 @@ namespace AdaptiveAR.Steps
 
             float dt = Time.deltaTime * 1000f;
             _overallMs += dt;
+
+            // Elapsed-time notification: one distinct signal when the assembly has run for
+            // timerMinutes. Nothing is terminated by it.
+            if (!_timerFired && _assemblyStartMs >= 0f && timerMinutes > 0f && _overallMs - _assemblyStartMs >= timerMinutes * 60000f)
+            {
+                _timerFired = true;
+                var sp = InstructionSpeech.Ensure(null);
+                if (sp != null) sp.PlayTone(ProceduralTones.Kind.Timer);
+                if (logger != null) logger.LogNote($"timer_elapsed:{timerMinutes:F0}min");
+                Debug.Log($"[Session] {timerMinutes:F0}-minute timer elapsed: signal played once; the assembly continues.");
+            }
 
             if (_stepOpen)
                 _stepMs += dt;
@@ -875,7 +988,7 @@ namespace AdaptiveAR.Steps
                                     step.taskComplexity, ExpectedMsOrNull(step));
             }
 
-            if (!_selfCheckDone) { _selfCheckDone = true; RunSelfCheck(); EnsureViewRotation(); }
+            if (!_selfCheckDone) { _selfCheckDone = true; RunSelfCheck(); EnsureTurntable(); _assemblyStartMs = _overallMs; }
 
             // Enter the stage in the authoritative model, then its first real action.
             if (workflow != null)
@@ -1102,7 +1215,15 @@ namespace AdaptiveAR.Steps
                           $"{_supportChangesTotal} support change(s).");
 
             if (logger != null)
+            {
                 logger.LogNote("sequence_complete");
+                int sec = Mathf.Max(0, Mathf.FloorToInt(_overallMs / 1000f));
+                logger.LogNote($"run_summary: completion_time={sec / 60:00}:{sec % 60:00} total_attempts={_attemptsTotal} total_errors={_errorsTotal}");
+            }
+
+            // One distinct positive completion signal, once.
+            var completionSpeech = InstructionSpeech.Ensure(null);
+            if (completionSpeech != null) completionSpeech.PlayTone(ProceduralTones.Kind.Complete);
 
             // The ParticipantCard owns the card text when present; writing here too would
             // mean two writers for one field. The completion screen shows the message.
@@ -1111,6 +1232,7 @@ namespace AdaptiveAR.Steps
 
             if (validator != null) validator.Clear();
             if (presenter != null) presenter.ClearGuidance();
+            CompletionCleanup();
 
             OnSessionComplete?.Invoke();
             RaiseStateChanged();
