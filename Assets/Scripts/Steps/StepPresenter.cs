@@ -439,16 +439,15 @@ namespace AdaptiveAR.Steps
             bool actionHasOwn = _currentAction != null && HasItems(_currentAction.ghostKeys);
             string[] keys = actionHasOwn ? _currentAction.ghostKeys : _stageGhostKeys;
 
-            bool activatedAny = ActivateByKeys(keys, _activatedGhosts);
-
-            // Either-side actions: the other free target is just as valid, so it is shown too.
-            if (actionHasOwn && _extraGhostKeys != null)
+            // Either-side actions (bolts, nuts): the validator's list of currently FREE targets
+            // REPLACES the authored key, so an occupied target is never shown green again.
+            if (_extraGhostKeys != null && _extraGhostKeys.Length > 0)
             {
-                var extra = new List<string>();
-                foreach (string k in _extraGhostKeys)
-                    if (!string.IsNullOrEmpty(k) && System.Array.IndexOf(keys, k) < 0) extra.Add(k);
-                if (extra.Count > 0 && ActivateByKeys(extra.ToArray(), _activatedGhosts)) activatedAny = true;
+                keys = _extraGhostKeys;
+                actionHasOwn = true;
             }
+
+            bool activatedAny = ActivateByKeys(keys, _activatedGhosts);
 
             bool spawnedAny = false;
             if (!actionHasOwn)

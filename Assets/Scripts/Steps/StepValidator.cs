@@ -70,7 +70,13 @@ namespace AdaptiveAR.Steps
             /// <summary>Long axis must point the same way; roll about it matches modulo 180 degrees.</summary>
             AxialHalfTurn = 3,
             /// <summary>Full orientation must match the target OR the target turned 180 degrees about the part's symmetry axis (rod end cap).</summary>
-            HalfTurnAboutAxis = 4
+            HalfTurnAboutAxis = 4,
+            /// <summary>
+            /// A flat plate (camshaft holders): its long axis and its normal must line up with the
+            /// target's, either way round each. Compared geometry-to-geometry, so a holder of one
+            /// mesh fits the target authored with another holder's mesh.
+            /// </summary>
+            PlateFlip = 5
         }
 
         /// <summary>Which mesh axis is the part's mechanical axis.</summary>
@@ -141,7 +147,7 @@ namespace AdaptiveAR.Steps
         [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
                  "the values serialized in the scene, the table is reset to the defaults at start.")]
         [SerializeField] private int roleToleranceRevision = 0;
-        private const int CurrentRoleToleranceRevision = 6;
+        private const int CurrentRoleToleranceRevision = 7;   // 7: holders use the PlateFlip rule (same numbers)
 
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
@@ -276,6 +282,7 @@ namespace AdaptiveAR.Steps
             public float radius;
             public Vector3 axisLocal;
             public Vector3 centreLocal;          // mesh bounds centre: positions are compared here, not at the pivot
+            public Vector3 normalLocal = Vector3.up;   // shortest mesh extent: a plate's normal
             public bool firedThisEpisode;        // eligibility/wrong-part dispatched for the current grab episode
 
             // grab event source
@@ -343,6 +350,16 @@ namespace AdaptiveAR.Steps
         private bool _insertion;
         private Vector3 _capAxisLocal = Vector3.up;
         private bool _hasCapAxis;
+
+        // The target's OWN geometry (holders: the slot ghost may be a different mesh than the part).
+        private bool _targetHasMesh;
+        private Vector3 _targetCentreLocal;
+        private Vector3 _targetLongLocal = Vector3.forward;
+        private Vector3 _targetNormalLocal = Vector3.up;
+        private bool _eitherSide;
+
+        /// <summary>True for an action whose free targets (not the authored key) decide what is shown.</summary>
+        public bool EitherSideTargets { get { return _eitherSide; } }
         private float _nextLiveLog;
 
         // Grab/repositioning of the kit handle while building the loose subassembly on the mat.
@@ -400,7 +417,7 @@ namespace AdaptiveAR.Steps
                 new RoleTolerance { role = "PistonNutOther",  positionMeters = 0.024f, rotationDegrees = 32f, symmetry = AxisSymmetry.AxialFreeFlip, axis = AxisSelect.TowardsPairedPart, insertionAxis = true },
                 new RoleTolerance { role = "crankshaft",      positionMeters = 0.022f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree },
                 new RoleTolerance { role = "camshaft",        positionMeters = 0.022f, rotationDegrees = 20f, symmetry = AxisSymmetry.AxialFree, insertionAxis = true },
-                new RoleTolerance { role = "engineBlockSep",  positionMeters = 0.020f, rotationDegrees = 25f, symmetry = AxisSymmetry.None },
+                new RoleTolerance { role = "engineBlockSep",  positionMeters = 0.020f, rotationDegrees = 25f, symmetry = AxisSymmetry.PlateFlip },
             };
         }
 
@@ -603,6 +620,7 @@ namespace AdaptiveAR.Steps
 
             CurrentTarget = targetGo.transform;
             _targetRadius = ShapeRadius(CurrentTarget);
+            ReadTargetGeometry(CurrentTarget);
 
             Transform matTarget = MatHeadTargetFor(action);
             if (matTarget != null)
@@ -626,6 +644,7 @@ namespace AdaptiveAR.Steps
             // in sequence: this action's authored target only, one ghost.
             string[] group = GroupOf(RoleNameOf(action.partKey));
             bool equivalent = group != null;
+            _eitherSide = equivalent;
             if (equivalent)
             {
                 foreach (string tk in GuidanceAudit.ExpandEquivalent(action.targetKey))
@@ -873,8 +892,35 @@ namespace AdaptiveAR.Steps
                 wasHeld = pointable != null && pointable.SelectingPointsCount > 0,
                 radius = ShapeRadius(go.transform),
                 axisLocal = LongAxisLocal(go.transform),
-                centreLocal = CentreLocal(go.transform)
+                centreLocal = CentreLocal(go.transform),
+                normalLocal = NormalLocal(go.transform)
             };
+        }
+
+        /// <summary>Caches the target's own mesh centre and principal axes (none for an empty transform).</summary>
+        private void ReadTargetGeometry(Transform target)
+        {
+            var mf = target != null ? target.GetComponent<MeshFilter>() : null;
+            _targetHasMesh = mf != null && mf.sharedMesh != null;
+            if (!_targetHasMesh) { _targetCentreLocal = Vector3.zero; _targetLongLocal = Vector3.forward; _targetNormalLocal = Vector3.up; return; }
+            _targetCentreLocal = mf.sharedMesh.bounds.center;
+            _targetLongLocal = ExtentAxis(mf.sharedMesh, target.localScale, true);
+            _targetNormalLocal = ExtentAxis(mf.sharedMesh, target.localScale, false);
+        }
+
+        private static Vector3 ExtentAxis(Mesh mesh, Vector3 scale, bool longest)
+        {
+            Vector3 s = Vector3.Scale(mesh.bounds.size, scale);
+            s = new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), Mathf.Abs(s.z));
+            if (longest)
+            {
+                if (s.x >= s.y && s.x >= s.z) return Vector3.right;
+                if (s.y >= s.x && s.y >= s.z) return Vector3.up;
+                return Vector3.forward;
+            }
+            if (s.x <= s.y && s.x <= s.z) return Vector3.right;
+            if (s.y <= s.x && s.y <= s.z) return Vector3.up;
+            return Vector3.forward;
         }
 
         private static Vector3 CentreLocal(Transform t)
@@ -899,7 +945,18 @@ namespace AdaptiveAR.Steps
         /// </summary>
         private static Vector3 TargetCentre(Candidate c, Transform target)
         {
+            // A target with a mesh (a ghost - possibly a DIFFERENT mesh, e.g. another holder) is
+            // compared at ITS geometric centre; an empty target transform (the mat head target)
+            // is a pose for the part's pivot, so the part's own centre offset applies.
+            var mf = target.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null) return target.TransformPoint(mf.sharedMesh.bounds.center);
             return target.position + target.rotation * Vector3.Scale(c.centreLocal, c.tf.lossyScale);
+        }
+
+        private static Vector3 NormalLocal(Transform t)
+        {
+            var mf = t != null ? t.GetComponent<MeshFilter>() : null;
+            return mf != null && mf.sharedMesh != null ? ExtentAxis(mf.sharedMesh, t.localScale, false) : Vector3.up;
         }
 
         private static float ShapeRadius(Transform t)
@@ -1278,6 +1335,8 @@ namespace AdaptiveAR.Steps
 
             Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} acceptedObjects=[{string.Join(", ", accepted)}] eligible={eligible}" +
                       $"{(tolerated ? "(tolerated)" : "")} state={(physical ? "PHYSICAL" : (ack ? "READ" : "none"))} action={CurrentActionId()} source={source}");
+            if (physical && IsHolderAction())
+                Debug.Log($"[HolderPlacement] currentSlot={CurrentSlotNumber()} selectedHolder={part.name} accepted={eligible} (any unused holder fits the current slot)");
 
             if (!armed) return;                                   // nothing to validate or acknowledge (AUTO / between actions)
             if (eligible)
@@ -2014,9 +2073,30 @@ namespace AdaptiveAR.Steps
         /// half turn as the rule says.
         /// </summary>
         /// <summary>The target rotation the part is actually judged against (the nearer equivalent orientation for the cap).</summary>
+        /// <summary>Plate rule: the target's long axis and normal in world space, signed to be nearest the part's.</summary>
+        private void PlateTargetAxes(Candidate c, out Vector3 tLong, out Vector3 tNormal)
+        {
+            Vector3 pL = c.tf.rotation * c.axisLocal;
+            Vector3 pN = c.tf.rotation * c.normalLocal;
+            tLong = CurrentTarget.rotation * (_targetHasMesh ? _targetLongLocal : c.axisLocal);
+            tNormal = CurrentTarget.rotation * (_targetHasMesh ? _targetNormalLocal : c.normalLocal);
+            if (Vector3.Dot(pL, tLong) < 0f) tLong = -tLong;
+            if (Vector3.Dot(pN, tNormal) < 0f) tNormal = -tNormal;
+        }
+
         private Quaternion EffectiveTargetRotation(Candidate c)
         {
-            if (_symmetry != AxisSymmetry.HalfTurnAboutAxis || c == null) return CurrentTarget.rotation;
+            if (c == null) return CurrentTarget.rotation;
+            if (_symmetry == AxisSymmetry.PlateFlip)
+            {
+                PlateTargetAxes(c, out Vector3 tLong, out Vector3 tNormal);
+                if (Mathf.Abs(Vector3.Dot(c.axisLocal, c.normalLocal)) > 0.99f || Mathf.Abs(Vector3.Dot(tLong.normalized, tNormal.normalized)) > 0.99f)
+                    return CurrentTarget.rotation;
+                Quaternion targetFrame = Quaternion.LookRotation(tLong, tNormal);
+                Quaternion partFrame = Quaternion.LookRotation(c.axisLocal, c.normalLocal);
+                return targetFrame * Quaternion.Inverse(partFrame);        // maps the part's long/normal onto the target's
+            }
+            if (_symmetry != AxisSymmetry.HalfTurnAboutAxis) return CurrentTarget.rotation;
             Quaternion a = CurrentTarget.rotation;
             Quaternion b = CurrentTarget.rotation * Quaternion.AngleAxis(180f, c.axisLocal);
             return Quaternion.Angle(c.tf.rotation, a) <= Quaternion.Angle(c.tf.rotation, b) ? a : b;
@@ -2029,6 +2109,14 @@ namespace AdaptiveAR.Steps
 
             if (_symmetry == AxisSymmetry.HalfTurnAboutAxis)
                 return Quaternion.Angle(c.tf.rotation, EffectiveTargetRotation(c));
+
+            if (_symmetry == AxisSymmetry.PlateFlip)
+            {
+                PlateTargetAxes(c, out Vector3 tLong, out Vector3 tNormal);
+                float aLong = Vector3.Angle(c.tf.rotation * c.axisLocal, tLong);
+                float aNormal = Vector3.Angle(c.tf.rotation * c.normalLocal, tNormal);
+                return Mathf.Max(aLong, aNormal);
+            }
 
             Vector3 partAxis = c.tf.rotation * c.axisLocal;
             Vector3 targetAxis = CurrentTarget.rotation * c.axisLocal;   // same mesh, same local axis
@@ -2151,7 +2239,7 @@ namespace AdaptiveAR.Steps
                 bool headOnMat = GuidanceRegistry.RoleOf(PartKey) == guidanceRegistry.KitHandleRole
                                  && !string.IsNullOrEmpty(_action.targetKey) && _action.targetKey.StartsWith("ghost.PistonKit");
                 padlock.Repositionable = headOnMat;
-                padlock.LockAt(CurrentTarget);
+                padlock.Lock();                       // at the snapped pose: the equivalent flip/roll the part was accepted in
                 locked = padlock.IsLocked;
             }
             catch (Exception e) { Debug.LogError($"{tag} lock threw: {e}"); }
@@ -2194,7 +2282,21 @@ namespace AdaptiveAR.Steps
             Transform handle = null;
             string kitName = GuidanceRegistry.KitOf(PartKey);
             if (kitName != null && guidanceRegistry != null) guidanceRegistry.TryGetKitHandle(kitName, out handle);
+            if (IsHolderAction())
+                Debug.Log($"[HolderPlacement] occupiedSlot={CurrentSlotNumber()} installedHolder={placedPart.name} nextSlot={Mathf.Min(4, CurrentSlotNumber() + 1)} (slot ghost, validation target and snap target were the same transform {Describe(CurrentTarget)})");
             StartCoroutine(WatchPlacedPart(placedPart, placedTag, parentBefore, snapPos, handle, kitName));
+        }
+
+        private bool IsHolderAction()
+        {
+            string role = RoleNameOf(PartKey);
+            return role != null && role.StartsWith("engineBlockSep");
+        }
+
+        private int CurrentSlotNumber()
+        {
+            string k = TargetKey ?? "";
+            return k.Length > 0 && char.IsDigit(k[k.Length - 1]) ? k[k.Length - 1] - '0' : 0;
         }
 
         /// <summary>[Piston2RodSuccess] for kit 2's rod, [Piston1HeadSuccess] ..., else the role tag.</summary>
@@ -2208,30 +2310,74 @@ namespace AdaptiveAR.Steps
             return "[Piston" + kit.Substring(kit.Length - 1) + shortRole + "Success]";
         }
 
+        /// <summary>
+        /// For two seconds after a success the REAL placed part is watched every frame and,
+        /// whatever else happens (an SDK release, a tray recovery, a stray SetActive), kept
+        /// active, visible, under its parent and at its snapped local pose. Every correction is
+        /// an ERROR naming what was found; state lines at +0, +0.5 and +2 s.
+        /// </summary>
         private System.Collections.IEnumerator WatchPlacedPart(Transform part, string tag, string parentBefore, Vector3 snapPos, Transform handle, string kit)
         {
-            float[] delays = { 0f, 0.5f, 2f };
-            foreach (float d in delays)
-            {
-                if (d > 0f) yield return new WaitForSeconds(d); else yield return null;
-                if (part == null) { Debug.LogError($"{tag} the placed part was DESTROYED."); yield break; }
+            if (part == null) yield break;
+            yield return new WaitForEndOfFrame();
+            Transform expectedParent = part.parent;
+            Vector3 lockedLocalPos = part.localPosition;
+            Quaternion lockedLocalRot = part.localRotation;
+            Vector3 lockedLocalScale = part.localScale;
+            var renderers = part.GetComponentsInChildren<Renderer>(true);
+            float start = Time.time;
+            float nextReport = 0f;
+            int reports = 0;
+            float[] reportAt = { 0f, 0.5f, 2f };
 
-                var r = part.GetComponentInChildren<Renderer>(true);
+            while (Time.time - start <= 2.05f)
+            {
+                if (part == null) { Debug.LogError($"{tag} the placed part was DESTROYED."); yield break; }
                 var padlock = part.GetComponent<PlacementLock>();
                 var body = part.GetComponent<Rigidbody>();
-                bool active = part.gameObject.activeInHierarchy;
-                bool visible = active && r != null && r.enabled;
-                float dist = Vector3.Distance(part.position, snapPos);
-                bool underHandle = handle == null || part == handle || part.IsChildOf(handle);
 
-                Debug.Log($"{tag} +{d:F1}s real={part.name}#{part.GetInstanceID()} visible={visible} active={active} " +
-                          $"parent={(part.parent != null ? part.parent.name + "#" + part.parent.GetInstanceID() : "<root>")} (before: {parentBefore}) " +
-                          $"position={part.position} distanceFromSnap={dist * 1000f:F0}mm locked={(padlock != null && padlock.IsLocked)} " +
-                          $"kinematic={(body != null ? body.isKinematic.ToString() : "n/a")} kit={kit ?? "-"} handle={(handle != null ? handle.name + "#" + handle.GetInstanceID() : "-")} underKitHandle={underHandle}");
+                // --- guard ---
+                if (!part.gameObject.activeSelf)
+                {
+                    Debug.LogError($"{tag} the placed part had been DEACTIVATED (SetActive(false) by someone) - re-activated.");
+                    part.gameObject.SetActive(true);
+                }
+                foreach (Renderer rr in renderers)
+                    if (rr != null && !rr.enabled) { Debug.LogError($"{tag} renderer '{rr.name}' had been DISABLED - re-enabled."); rr.enabled = true; }
+                if (expectedParent != null && part.parent != expectedParent && part.parent != null && !part.IsChildOf(expectedParent))
+                {
+                    Debug.LogError($"{tag} the placed part had been RE-PARENTED to '{part.parent.name}' - returned under '{expectedParent.name}'.");
+                    part.SetParent(expectedParent, false);
+                }
+                if (part.parent == expectedParent)
+                {
+                    float drift = Vector3.Distance(part.localPosition, lockedLocalPos);
+                    if (drift > 0.02f / Mathf.Max(0.001f, part.parent != null ? part.parent.lossyScale.x : 1f) || Quaternion.Angle(part.localRotation, lockedLocalRot) > 3f)
+                    {
+                        Debug.LogError($"{tag} the placed part had MOVED {Vector3.Distance(part.position, snapPos) * 100f:F1} cm from its snap pose (kinematic={(body != null ? body.isKinematic.ToString() : "n/a")}) - restored.");
+                        part.localPosition = lockedLocalPos; part.localRotation = lockedLocalRot; part.localScale = lockedLocalScale;
+                        if (body != null) { body.isKinematic = true; body.linearVelocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
+                        if (padlock != null) padlock.RefreshLockedPose();
+                    }
+                }
 
-                if (!visible) Debug.LogError($"{tag} the placed part is NOT visible (active={active}, renderer={(r != null ? r.enabled.ToString() : "none")}).");
-                if (dist > 0.05f) Debug.LogError($"{tag} the placed part is {dist * 100f:F1} cm away from its snap pose.");
-                if (!underHandle) Debug.LogError($"{tag} the placed part is not under its kit handle '{handle.name}' (parent is '{(part.parent != null ? part.parent.name : "<root>")}').");
+                // --- report ---
+                if (reports < reportAt.Length && Time.time - start >= reportAt[reports])
+                {
+                    float d = reportAt[reports]; reports++;
+                    var r = part.GetComponentInChildren<Renderer>(true);
+                    bool active = part.gameObject.activeInHierarchy;
+                    bool visible = active && r != null && r.enabled;
+                    float dist = Vector3.Distance(part.position, snapPos);
+                    bool underHandle = handle == null || part == handle || part.IsChildOf(handle);
+                    Debug.Log($"{tag} +{d:F1}s real={part.name}#{part.GetInstanceID()} active={active} visible={visible} " +
+                              $"parent={(part.parent != null ? part.parent.name + "#" + part.parent.GetInstanceID() : "<root>")} (before: {parentBefore}) " +
+                              $"position={part.position} distanceFromSnap={dist * 1000f:F0}mm locked={(padlock != null && padlock.IsLocked)} " +
+                              $"kinematic={(body != null ? body.isKinematic.ToString() : "n/a")} kit={kit ?? "-"} handle={(handle != null ? handle.name + "#" + handle.GetInstanceID() : "-")} underKitHandle={underHandle}");
+                    if (!visible) Debug.LogError($"{tag} the placed part is NOT visible (active={active}, renderer={(r != null ? r.enabled.ToString() : "none")}).");
+                    if (!underHandle) Debug.LogError($"{tag} the placed part is not under its kit handle '{handle.name}' (parent is '{(part.parent != null ? part.parent.name : "<root>")}').");
+                }
+                yield return new WaitForEndOfFrame();
             }
         }
 
@@ -2301,6 +2447,28 @@ namespace AdaptiveAR.Steps
                 return;
             }
 
+            // The hand that placed this part is still closed around it. Re-enabling its grab
+            // now would let that closed hand re-select it, grab the HANDLE through it and carry
+            // the whole subassembly away as the hand withdraws. Forward only once every hand
+            // is open, and keep the handle from yielding to any hand until then.
+            if (handleLock != null) handleLock.RepositionSuspended = true;
+            StartCoroutine(ForwardWhenHandsOpen(child, handle, handleGrabbable, handleLock));
+        }
+
+        private System.Collections.IEnumerator ForwardWhenHandsOpen(Transform child, Transform handle, Oculus.Interaction.Grabbable handleGrabbable, PlacementLock handleLock)
+        {
+            float start = Time.time;
+            while (Time.time - start < 5f)
+            {
+                bool anySelecting = _interactorSelection.Count > 0 || (handleGrabbable != null && handleGrabbable.SelectingPointsCount > 0);
+                var childGrabbable = child != null ? child.GetComponent<Oculus.Interaction.Grabbable>() : null;
+                if (childGrabbable != null && childGrabbable.SelectingPointsCount > 0) anySelecting = true;
+                if (!anySelecting) break;
+                yield return null;
+            }
+            yield return new WaitForSeconds(0.25f);
+            if (child == null || handle == null || handleGrabbable == null) yield break;
+
             int n = 0;
             foreach (var hgi in child.GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
             { hgi.InjectOptionalPointableElement(handleGrabbable); hgi.enabled = true; n++; }
@@ -2309,7 +2477,8 @@ namespace AdaptiveAR.Steps
 
             var padlock = child.GetComponent<PlacementLock>();
             if (padlock != null) padlock.ForwardedToHandle = true;
-            if (logEvaluations) Debug.Log($"[StepValidator] '{child.name}' joined: {n} grab interactable(s) now move the subassembly via '{handle.name}'.");
+            if (handleLock != null) handleLock.RepositionSuspended = false;
+            if (logEvaluations) Debug.Log($"[StepValidator] '{child.name}' joined: hands open, {n} grab interactable(s) now move the subassembly via '{handle.name}'.");
         }
 
         // =====================================================================

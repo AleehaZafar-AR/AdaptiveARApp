@@ -851,7 +851,7 @@ namespace AdaptiveAR.Steps
             {
                 // Either-side actions hand the presenter every free target so all of them show.
                 if (presenter != null)
-                    presenter.PresentAction(action, validator != null && validator.IsActive ? validator.ActiveTargetKeys : null);
+                    presenter.PresentAction(action, validator != null && validator.IsActive && validator.EitherSideTargets ? validator.ActiveTargetKeys : null);
             }
             catch (Exception e)
             {

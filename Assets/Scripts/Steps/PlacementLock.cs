@@ -67,6 +67,14 @@ namespace AdaptiveAR.Steps
         /// </summary>
         public bool ForwardedToHandle { get; set; }
 
+        /// <summary>
+        /// While true a repositionable lock does NOT yield to the hand: set for the moment
+        /// after a child part snapped onto the subassembly while the hand that placed it is
+        /// still closed, so the hand cannot carry the subassembly away. Cleared once every
+        /// hand has opened.
+        /// </summary>
+        public bool RepositionSuspended { get; set; }
+
         private bool IsHeldNow()
         {
             var pe = GetComponent<Oculus.Interaction.PointableElement>();
@@ -162,7 +170,7 @@ namespace AdaptiveAR.Steps
 
             // Repositionable: the hand owns the pose while holding; on release the pose it was
             // left at becomes the locked pose and the body is frozen again.
-            if (_repositionable)
+            if (_repositionable && !RepositionSuspended)
             {
                 bool held = IsHeldNow();
                 if (held) { _wasHeld = true; return; }

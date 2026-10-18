@@ -3092,3 +3092,69 @@ moving with the action. This is the in-source proof; the device proof is one
 
 ### Addendum 2026-10-17 — Inspector exceptions on Play
 The five Console errors (`HandGrabInteractableEditor.OnEnable/OnDisable`, `GameObjectInspector`, `TransformInspector`: null target / "m_Targets doesn't exist") are Unity Inspector exceptions raised when the object selected in the Inspector is destroyed, not compiler errors (Unity's Editor.log shows the scripts compiling). `AssemblyWorkSurface.Awake` destroyed the `~Authoring*` reference objects when Play started; they are now deactivated instead. Deselect a runtime-created object before stopping Play to avoid the same message from Unity itself. [QV]
+
+
+---
+
+## Claude → Reviewer — 2026-10-18 — Four assembly issues only: placed-part guard, bolt/nut ghost occupancy, deferred subassembly forwarding, any-holder-to-current-slot
+
+Base: `95d868e`. No UI, tolerance, wrong-part, turntable, audio, AI or HRV change.
+Files: `StepValidator.cs`, `PlacementLock.cs`, `StepPresenter.cs`,
+`AssemblySessionController.cs` (one line). Compiles; [QV].
+
+### 1 / 3. PistonEnd and piston-2 rod "disappear" after success [QV]
+Trace through the success path found one mechanism that moves a placed part away
+and one that mis-poses it:
+- **Re-grab through the hand that is still closed.** The rod joins the loose
+  subassembly and its grab interactables were re-pointed at the head's Grabbable
+  *immediately* - while the hand that placed it was still closed around it. The SDK
+  then re-selected that interactable with the closed hand, which grabbed the HEAD
+  (repositionable on the mat): the whole head+rod followed the hand as it withdrew and
+  re-locked wherever the hand opened - "disappeared" from the mat. Now the forwarding
+  waits until every grab interactor and both Grabbables report no selection (+0.25 s),
+  and the handle's lock is **suspended from yielding** (`RepositionSuspended`) until
+  then, so a closed hand cannot carry the subassembly anywhere.
+- **Lock at the ghost pivot, not at the accepted pose.** `LockAt(target)` re-posed the
+  part at the ghost's pivot/authored rotation after the snap had placed it in the
+  accepted equivalent orientation (flipped cap, rolled bolt) with centres aligned.
+  Now `Lock()` holds the snapped pose.
+- **Guard.** `WatchPlacedPart` is now a 2-second per-frame guard: if the placed part is
+  deactivated, a renderer disabled, it is re-parented away from its handle, or it drifts
+  more than 2 cm / 3° from its locked local pose, it is restored on the spot and an
+  ERROR names what was found (`DEACTIVATED`, `DISABLED`, `RE-PARENTED`, `MOVED … cm`).
+  State lines at +0 / +0.5 / +2 s:
+  `[PistonEndSuccess] real=… parentBefore=…` then `[PistonEndSuccess] +t real= active=
+  visible= parent= position= distanceFromSnap= locked= …` (and `[Piston2RodSuccess]`
+  likewise; every kit part has its own tag).
+Piston 1's rod/pin path is the same code with the same guards; nothing specific to
+piston 1 changed.
+
+### 2. Bolt/nut ghosts after the first pair [QV]
+The presenter ADDED the validator's free targets to the action's authored ghost key, so
+when the first bolt went to the "other" side the second action still showed its
+authored (now occupied) ghost. For either-side actions the validator's list of free
+targets now REPLACES the authored key: visible ghosts = unoccupied valid targets, the
+occupied one is deactivated the moment the next action presents, and the second
+action shows exactly the remaining target. Occupancy is marked on the exact target
+transform at success (unchanged).
+
+### 4. Holders: any holder → the current sequential slot [QV]
+The four holders are **different meshes** (sep001/003/004 have different sub-meshes with
+their own pivots and local frames), so a holder validated against another holder's
+slot ghost could never match pivot-to-pivot or frame-to-frame, which made it look as if
+each holder belonged to its own slot. New `PlateFlip` rule for the holder family
+(numbers unchanged: 2.0 cm / 25°): position = the part's geometric centre vs the slot
+ghost's **own** mesh centre; orientation = the part's long axis and plate normal vs
+the ghost's, either way round each; snap = that derived rotation with centres aligned.
+Accepted parts = any unused holder; target = this action's slot only (one ghost);
+success occupies it, the next action shows the next slot. Logs:
+`[HolderPlacement] currentSlot=N selectedHolder=<name> accepted=true|false` on grab and
+`[HolderPlacement] occupiedSlot=N installedHolder=<name> nextSlot=N+1 (… same transform …)`
+on success. No object-to-slot identity anywhere.
+
+### [QV]
+1. Cap / rod 2: `[…Success] +2.0s active=true visible=true parent=<head>` with no
+   ERROR between; the part stays where it snapped while the hand withdraws.
+2. First bolt on either side → its ghost gone; only the other side green; nuts likewise.
+3. Any holder at slot 1 → `[HolderPlacement] … accepted=true` → validates, snaps,
+   `occupiedSlot=1 … nextSlot=2` → slot 2 ghost only.
