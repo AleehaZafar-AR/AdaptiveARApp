@@ -205,6 +205,7 @@ namespace AdaptiveAR.UI
         public void RestartAssembly()
         {
             Debug.Log("[Session] Restart Assembly: reloading the scene for a clean new session (new log file).");
+            var sp = AdaptiveAR.Audio.InstructionSpeech.Ensure(null); if (sp != null) sp.StopAll("restart");
             var logger = FindAnyObjectByType<AdaptiveAR.Logging.SessionLogger>(FindObjectsInactive.Include);
             if (logger != null) { logger.LogNote("restart_assembly"); logger.EndSession("restart"); }
             FeedbackPulse.CancelAll();
@@ -215,6 +216,7 @@ namespace AdaptiveAR.UI
         public void QuitApplication()
         {
             Debug.Log("[Session] Quit requested by the participant.");
+            var spq = AdaptiveAR.Audio.InstructionSpeech.Ensure(null); if (spq != null) spq.StopAll("quit");
             var logger = FindAnyObjectByType<AdaptiveAR.Logging.SessionLogger>(FindObjectsInactive.Include);
             if (logger != null) { logger.LogNote("quit"); logger.EndSession("quit"); }
             Application.Quit();

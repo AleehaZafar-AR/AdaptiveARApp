@@ -20,6 +20,7 @@
 // stop the other; an instruction that follows feedback waits for it to finish; and
 // every request is logged (text -> key -> found -> load state -> source -> play).
 
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
@@ -191,6 +192,61 @@ namespace AdaptiveAR.Audio
 
         public bool SpeechEnabled { get { return enabledSpeech; } set { enabledSpeech = value; } }
 
+        /// <summary>Supplied by the session: the current action id for [AudioEvent] lines.</summary>
+        public static Func<string> CurrentActionProvider;
+
+        private string _currentClipName = "";
+        private string _currentEvent = "";
+
+        private static string CurrentAction()
+        {
+            try { return CurrentActionProvider != null ? CurrentActionProvider() ?? "<none>" : "<none>"; }
+            catch { return "<none>"; }
+        }
+
+        /// <summary>
+        /// THE arbiter rule: only one app clip plays at a time. Stops the instruction source, the
+        /// feedback source and the scene AudioSource (legacy path), and any pending start.
+        /// </summary>
+        public void StopAll(string reason) { Stop(reason, instruction: true, feedback: true); }
+
+        /// <summary>Stops narration only (instruction source, scene source, pending start); a short feedback cue finishes.</summary>
+        public void StopInstruction(string reason) { Stop(reason, instruction: true, feedback: false); }
+
+        /// <summary>Stops feedback cues only; narration continues (the timer tone).</summary>
+        public void StopFeedback(string reason) { Stop(reason, instruction: false, feedback: true); }
+
+        private void Stop(string reason, bool instruction, bool feedback)
+        {
+            var playing = new List<string>();
+            if (instruction)
+            {
+                if (_instructionSource != null && _instructionSource.isPlaying) { playing.Add(_instructionSource.clip != null ? _instructionSource.clip.name : "instruction"); _instructionSource.Stop(); }
+                if (source != null && source.isPlaying) { playing.Add(source.clip != null ? source.clip.name : "scene"); source.Stop(); }
+                if (_pending != null) { StopCoroutine(_pending); _pending = null; playing.Add("pending:" + _currentClipName); }
+            }
+            if (feedback && _feedbackSource != null && _feedbackSource.isPlaying) { playing.Add(_feedbackSource.clip != null ? _feedbackSource.clip.name : "feedback(oneshot)"); _feedbackSource.Stop(); }
+            _requestId++;                                  // any coroutine still waiting to play is cancelled
+            if (playing.Count > 0)
+                Debug.Log($"[AudioStop] reason={reason} previous={string.Join(",", playing)} event={_currentEvent}");
+            if (playing.Count > 0 || (instruction && feedback)) { _currentClipName = ""; _currentEvent = ""; }
+        }
+
+        /// <summary>A clip started by the legacy scene AudioSource path reports itself here.</summary>
+        public void NoteExternalPlay(string eventName, AudioClip clip)
+        {
+            _currentClipName = clip != null ? clip.name : "?"; _currentEvent = eventName;
+            Debug.Log($"[AudioPlay] event={eventName} clip={_currentClipName}");
+            Debug.Log($"[AudioEvent] event={eventName} clip={_currentClipName} action={CurrentAction()}");
+        }
+
+        private void NotePlay(string eventName, AudioClip clip)
+        {
+            _currentClipName = clip != null ? clip.name : "?"; _currentEvent = eventName;
+            Debug.Log($"[AudioPlay] event={eventName} clip={_currentClipName}");
+            Debug.Log($"[AudioEvent] event={eventName} clip={_currentClipName} action={CurrentAction()}");
+        }
+
         public static InstructionSpeech Ensure(AudioSource preferred)
         {
             var existing = FindAnyObjectByType<InstructionSpeech>(FindObjectsInactive.Include);
@@ -236,6 +292,7 @@ namespace AdaptiveAR.Audio
                 Debug.Log($"[Speech] instruction \"{text}\" skipped: repeat guard.");
                 return false;
             }
+            StopInstruction("new instruction");            // a playing success/warning cue finishes first (the instruction waits for it)
 
             AudioClip clip = SpeechLibrary.ClipFor(text);
             Debug.Log($"[Speech] instruction request \"{text}\" -> key '{SpeechLibrary.KeyFor(text)}' -> " +
@@ -245,6 +302,7 @@ namespace AdaptiveAR.Audio
             _lastText = text;
             _lastAt = Time.time;
             StartInstruction(clip, text);
+            NotePlay("instruction", clip);
             return true;
         }
 
@@ -252,9 +310,11 @@ namespace AdaptiveAR.Audio
         public void PlayAuthored(AudioClip clip)
         {
             if (!enabledSpeech || clip == null) return;
+            StopInstruction("new authored instruction");
             Debug.Log($"[Speech] authored clip '{clip.name}' requested, loadState={clip.loadState}");
             _lastText = null;
             StartInstruction(clip, "<authored:" + clip.name + ">");
+            NotePlay("instruction", clip);
         }
 
         /// <summary>
@@ -264,8 +324,10 @@ namespace AdaptiveAR.Audio
         public bool PlayFeedbackClip(AudioClip clip, string label)
         {
             if (!enabledSpeech || clip == null) return false;
+            StopAll("feedback: " + label);
             Debug.Log($"[Speech] feedback clip '{clip.name}' ({label}) requested, loadState={clip.loadState}, length={clip.length:F2}s");
             StartCoroutine(PlayWhenLoaded(_feedbackSource, clip, label, oneShot: true, waitForFeedback: false, id: ++_requestId));
+            NotePlay(label, clip);
             return true;
         }
 
@@ -278,7 +340,10 @@ namespace AdaptiveAR.Audio
             if (!enabledSpeech || _feedbackSource == null) return;
             AudioClip clip = ProceduralTones.Get(kind);
             if (clip == null) return;
+            if (kind == ProceduralTones.Kind.Timer) StopFeedback("tone: " + kind);   // the timer never cuts narration
+            else StopAll("tone: " + kind);
             _feedbackSource.PlayOneShot(clip, 0.8f);
+            NotePlay("tone:" + kind, clip);
             Debug.Log($"[Speech] tone {kind} played on feedback source.");
         }
 
@@ -338,7 +403,9 @@ namespace AdaptiveAR.Audio
                       (clip != null ? $"found, loadState={clip.loadState}" : "NOT FOUND"));
             if (clip == null) return false;
 
+            StopAll("feedback sentence");
             StartCoroutine(PlayWhenLoaded(_feedbackSource, clip, text, oneShot: true, waitForFeedback: false, id: ++_requestId));
+            NotePlay("feedback", clip);
             return true;
         }
 
@@ -364,6 +431,7 @@ namespace AdaptiveAR.Audio
                 Debug.LogWarning($"[Speech] \"{label}\": clip '{clip.name}' not loaded (state {clip.loadState}); not played.");
                 yield break;
             }
+            if (id != _requestId) { Debug.Log($"[AudioStop] reason=superseded-before-start previous={clip.name}"); yield break; }
 
             // Let "Correct." finish before the next instruction starts over it.
             if (waitForFeedback && _feedbackSource != null)
@@ -371,6 +439,7 @@ namespace AdaptiveAR.Audio
                 float w0 = Time.time;
                 while (_feedbackSource.isPlaying && Time.time - w0 < maxWaitForFeedbackSeconds)
                     yield return null;
+                if (id != _requestId) { Debug.Log($"[AudioStop] reason=superseded-while-waiting previous={clip.name}"); yield break; }
             }
 
             target.volume = volume;

@@ -332,6 +332,14 @@ namespace AdaptiveAR.UI
             }
         }
 
+        /// <summary>Completion: no arrow, ever again this session.</summary>
+        public void HideForGood()
+        {
+            SetVisible(false);
+            enabled = false;
+            if (_arrow != null) _arrow.SetActive(false);
+        }
+
         private void SetVisible(bool visible)
         {
             if (_arrow != null && _arrow.activeSelf != visible)

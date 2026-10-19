@@ -340,20 +340,25 @@ namespace AdaptiveAR.Steps
             try
             {
                 if (presenter != null) presenter.ClearGuidance();
+                var arrow = FindAnyObjectByType<AdaptiveAR.UI.GuidanceArrow>(FindObjectsInactive.Include);
+                if (arrow != null) arrow.HideForGood();
                 if (stepManager != null) stepManager.SetMatVisible(false, "assembly_complete", 0);
-                if (_turntable != null) _turntable.SetInteractive(false);
+                InstalledPistonPivot.LockAll("assembly complete");
                 if (_resetViewButton != null) _resetViewButton.SetActive(false);
+                // The finished engine is one inspection object: free rotation in place, two-hand zoom 0.6-1.6x.
+                if (_turntable != null) _turntable.EnterInspectionMode(0.6f, 1.6f);
 
                 Transform engine = stepManager != null && stepManager.oilPan != null ? stepManager.oilPan.transform : null;
                 Transform offset = engine != null ? engine.Find("Offset") : null;
                 int hidden = 0;
+                var names = new System.Collections.Generic.List<string>();
                 if (offset != null)
                 {
                     foreach (Transform child in offset)
                     {
                         if (child == null) continue;
                         if (child.name.StartsWith("tray") || child.name.StartsWith("Plane") || child.name.StartsWith("PistonKits") || child.name.StartsWith("Worksurface") || child.name.StartsWith("WorkSurface"))
-                        { if (child.gameObject.activeSelf) { child.gameObject.SetActive(false); hidden++; } }
+                        { if (child.gameObject.activeSelf) { child.gameObject.SetActive(false); hidden++; names.Add(child.name); } }
                     }
                 }
                 // Loose, never-installed parts (not locked, not on the engine) disappear with the trays.
@@ -367,10 +372,10 @@ namespace AdaptiveAR.Steps
                         if (_turntable != null && go.transform.IsChildOf(_turntable.transform)) continue;
                         var padlock = go.GetComponent<PlacementLock>();
                         if (padlock != null && padlock.IsLocked) continue;
-                        if (go.activeSelf) { go.SetActive(false); hidden++; }
+                        if (go.activeSelf) { go.SetActive(false); hidden++; names.Add(go.name); }
                     }
                 }
-                Debug.Log($"[Session] completion cleanup: {hidden} tray/mat/loose object(s) hidden; the engine, its installed parts and the result UI remain.");
+                Debug.Log($"[Session] completion cleanup: {hidden} tray/mat/loose object(s) hidden [{string.Join(", ", names)}]; the engine, its installed (locked) parts and the result UI remain.");
             }
             catch (Exception e) { Debug.LogError("[Session] completion cleanup threw: " + e); }
         }
@@ -937,6 +942,10 @@ namespace AdaptiveAR.Steps
         /// <summary>Marks the active action done and moves on, or finishes the stage.</summary>
         private void CompleteActionAndAdvance(string reason)
         {
+            // The action's narration is obsolete the moment the action completes.
+            var sp = InstructionSpeech.Ensure(null);
+            if (sp != null) sp.StopInstruction("action complete: " + reason);   // the success cue is kept; the next instruction waits for it
+
             if (workflow == null) { AdvanceStep(reason); return; }
 
             AssemblyAction action = workflow.CurrentAction;
@@ -989,6 +998,10 @@ namespace AdaptiveAR.Steps
             }
 
             if (!_selfCheckDone) { _selfCheckDone = true; RunSelfCheck(); EnsureTurntable(); _assemblyStartMs = _overallMs; }
+            InstructionSpeech.CurrentActionProvider = () => workflow != null && workflow.CurrentAction != null ? workflow.CurrentAction.Id : "<none>";
+
+            // A piston whose stage is over is locked for good (its one-axis pivot too).
+            InstalledPistonPivot.LockAll("stage changed");
 
             // Enter the stage in the authoritative model, then its first real action.
             if (workflow != null)
@@ -1221,9 +1234,9 @@ namespace AdaptiveAR.Steps
                 logger.LogNote($"run_summary: completion_time={sec / 60:00}:{sec % 60:00} total_attempts={_attemptsTotal} total_errors={_errorsTotal}");
             }
 
-            // One distinct positive completion signal, once.
+            // One distinct positive completion signal, once (the arbiter stops anything else first).
             var completionSpeech = InstructionSpeech.Ensure(null);
-            if (completionSpeech != null) completionSpeech.PlayTone(ProceduralTones.Kind.Complete);
+            if (completionSpeech != null) { completionSpeech.StopAll("assembly complete"); completionSpeech.PlayTone(ProceduralTones.Kind.Complete); }
 
             // The ParticipantCard owns the card text when present; writing here too would
             // mean two writers for one field. The completion screen shows the message.

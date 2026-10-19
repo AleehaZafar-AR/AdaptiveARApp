@@ -148,6 +148,9 @@ namespace AdaptiveAR.MR
                 { g.InjectRigidbody(rb); g.InjectOptionalPointableElement(_grabbable); _interactables.Add(g); }
                 interactionTemplate.SetActive(wasActive);
                 clone.SetActive(true);
+                // The toggle unregistered/re-registered the template's interactables: repair their broadcasters.
+                if (interactionTemplate.transform.parent != null)
+                    AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(interactionTemplate.transform.parent.gameObject, "turntable template toggled", false);
             }
             else Debug.LogError("[Turntable] no ISDK interaction template: the turntable cannot be grabbed.");
         }
@@ -169,8 +172,57 @@ namespace AdaptiveAR.MR
             }
         }
 
+        private bool _inspection;
+
+        /// <summary>
+        /// Completion: the finished engine becomes ONE inspection object. The ring goes, the
+        /// yaw-only rule is lifted, one hand rotates it freely in place (position locked), two
+        /// hands scale it within [minScale, maxScale] of its authored size, and every installed
+        /// part's grab interactable is pointed at this body so grabbing any part moves the whole
+        /// assembly - nothing can separate.
+        /// </summary>
+        public void EnterInspectionMode(float minScale, float maxScale)
+        {
+            if (_inspection) return;
+            _inspection = true;
+            if (_visual != null) _visual.SetActive(false);
+
+            var free = gameObject.AddComponent<Oculus.Interaction.GrabFreeTransformer>();
+            var lockPos = new Oculus.Interaction.TransformerUtils.PositionConstraints
+            {
+                ConstraintsAreRelative = true,
+                XAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = 0f, Max = 0f } },
+                YAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = 0f, Max = 0f } },
+                ZAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = 0f, Max = 0f } }
+            };
+            var scale = new Oculus.Interaction.TransformerUtils.ScaleConstraints
+            {
+                ConstraintsAreRelative = true,
+                XAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = minScale, Max = maxScale } },
+                YAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = minScale, Max = maxScale } },
+                ZAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = minScale, Max = maxScale } }
+            };
+            free.InjectOptionalPositionConstraints(lockPos);
+            free.InjectOptionalScaleConstraints(scale);
+            free.Initialize(_grabbable);
+            _grabbable.InjectOptionalOneGrabTransformer(free);
+            _grabbable.InjectOptionalTwoGrabTransformer(free);
+
+            int n = 0;
+            foreach (var h in GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
+            { if (h.transform.IsChildOf(transform)) { h.InjectOptionalPointableElement(_grabbable); h.enabled = true; n++; } }
+            foreach (var g in GetComponentsInChildren<Oculus.Interaction.GrabInteractable>(true))
+            { if (g.transform.IsChildOf(transform)) { g.InjectOptionalPointableElement(_grabbable); g.enabled = true; n++; } }
+            foreach (var padlock in GetComponentsInChildren<AdaptiveAR.Steps.PlacementLock>(true)) padlock.ForwardedToHandle = true;
+            foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
+                AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(rb.gameObject, "inspection mode", false);
+
+            if (logChanges) Debug.Log($"[Turntable] inspection mode: ring hidden, free rotation in place, two-hand scale {minScale:F1}-{maxScale:F1}x, {n} part grab(s) forwarded to the whole engine.");
+        }
+
         private void LateUpdate()
         {
+            if (_inspection) return;
             // Yaw only, whatever the SDK did: keep the authored height/position and no tilt.
             Vector3 lp = transform.localPosition;
             Vector3 euler = transform.rotation.eulerAngles;

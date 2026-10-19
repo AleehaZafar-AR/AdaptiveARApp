@@ -519,9 +519,11 @@ namespace AdaptiveAR.Steps
                 Debug.LogError($"[AudioAB] {label}: {(audioSource == null ? "scene AudioSource missing" : "clip is null")}");
                 return;
             }
+            if (_speech != null) _speech.StopAll("legacy play: " + label);
             audioSource.Stop();
             audioSource.clip = clip;
             audioSource.Play();
+            if (_speech != null) _speech.NoteExternalPlay("instruction(legacy)", clip);
             Debug.Log($"[AudioAB] {label}: played '{clip.name}' length={clip.length:F2}s loadState={clip.loadState} " +
                       $"channels={clip.channels} freq={clip.frequency} via scene AudioSource '{audioSource.gameObject.name}' " +
                       $"(spatialBlend={audioSource.spatialBlend:F1}, volume={audioSource.volume:F1}, isPlaying={audioSource.isPlaying})");
@@ -674,6 +676,7 @@ namespace AdaptiveAR.Steps
                 if (System.Array.IndexOf(SubassemblyRoles, role) >= 0) continue;
                 Transform child = ghostGroup.transform.Find(role);
                 if (child == null || !child.gameObject.activeSelf) continue;
+                if (IsRealPart(child.gameObject)) { Debug.LogError($"[StepPresenter] refused to hide REAL part '{child.name}' as a future ghost part."); continue; }
                 child.gameObject.SetActive(false);
                 _hiddenSiblings.Add(child.gameObject);
                 hidden++;
@@ -697,6 +700,7 @@ namespace AdaptiveAR.Steps
             foreach (Transform sib in parent)
             {
                 if (sib == target.transform || !sib.gameObject.activeSelf) continue;
+                if (IsRealPart(sib.gameObject)) { Debug.LogError($"[StepPresenter] refused to hide REAL part '{sib.name}' as a ghost sibling."); continue; }
                 sib.gameObject.SetActive(false);
                 _hiddenSiblings.Add(sib.gameObject);
             }
@@ -710,7 +714,7 @@ namespace AdaptiveAR.Steps
 
         private void RestoreIsolation()
         {
-            foreach (GameObject g in _activatedAncestors) if (g != null) g.SetActive(false);
+            foreach (GameObject g in _activatedAncestors) if (g != null && !IsRealPart(g)) g.SetActive(false);
             _activatedAncestors.Clear();
             foreach (GameObject g in _hiddenSiblings) if (g != null) g.SetActive(true);
             _hiddenSiblings.Clear();
@@ -795,12 +799,19 @@ namespace AdaptiveAR.Steps
                 guidanceRegistry.DeactivateAll();
         }
 
+        /// <summary>A real part (grabbable / locked) must never be switched off by a ghost path.</summary>
+        private static bool IsRealPart(GameObject go)
+        {
+            return go != null && (go.GetComponent<Oculus.Interaction.PointableElement>() != null || go.GetComponent<PlacementLock>() != null);
+        }
+
         private static void DeactivateAll(List<GameObject> list)
         {
             foreach (GameObject target in list)
             {
-                if (target != null)
-                    target.SetActive(false);
+                if (target == null) continue;
+                if (IsRealPart(target)) { Debug.LogError($"[StepPresenter] refused to deactivate REAL part '{target.name}' from a ghost list."); continue; }
+                target.SetActive(false);
             }
             list.Clear();
         }

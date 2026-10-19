@@ -238,6 +238,11 @@ namespace AdaptiveAR.Steps
 
             foreach (MonoBehaviour mb in _interactionComponents)
                 if (mb != null && mb.enabled != enabled) mb.enabled = enabled;
+
+            // The SDK's trigger broadcaster is disabled on unregister and NOT re-enabled on
+            // re-register: after any re-enable the part would be invisible to that interactor
+            // type (hand or controller). Repair it here, every time.
+            if (enabled) GrabParity.ReassertBroadcasters(gameObject, "lock interaction re-enabled", false);
         }
     }
 

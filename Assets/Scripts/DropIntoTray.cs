@@ -85,6 +85,9 @@ public class DropIntoTray : MonoBehaviour
 
     private Rigidbody rb;
 
+    private bool _wasMoving;
+    private float _stillSince = -1f;
+
     private Vector3 authoredLocalPosition;
     private Quaternion authoredLocalRotation;
     private Transform authoredParent;
@@ -133,6 +136,22 @@ public class DropIntoTray : MonoBehaviour
         // so this check is naturally skipped during a grab.
         if (!recoverIfLost || rb == null || rb.isKinematic || !authoredPoseCaptured)
             return;
+
+        // Hand/controller parity: when a loose part comes to rest after moving (dropped,
+        // fallen into a tray), re-assert both grab paths - the SDK's trigger broadcasters can
+        // be left disabled after a toggle, which makes the part grabbable by one input but
+        // not the other.
+        bool moving = rb.linearVelocity.sqrMagnitude > 0.0004f || rb.angularVelocity.sqrMagnitude > 0.01f;
+        if (moving) { _wasMoving = true; _stillSince = -1f; }
+        else if (_wasMoving)
+        {
+            if (_stillSince < 0f) _stillSince = Time.time;
+            else if (Time.time - _stillSince > 0.5f)
+            {
+                _wasMoving = false;
+                AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(gameObject, "settled after moving", true);
+            }
+        }
 
         // THE DISAPPEARING-ROD GUARD. A part joined to an assembly has a new parent; its
         // authored tray pose expressed in that parent's frame is a point metres away, so
@@ -198,6 +217,7 @@ public class DropIntoTray : MonoBehaviour
 
         recoveryCount = 0;
         ReleaseToPhysics();
+        AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(gameObject, "released loose", false);
     }
 
     private Vector3 AuthoredWorldPosition()
@@ -251,5 +271,6 @@ public class DropIntoTray : MonoBehaviour
         if (logRecovery)
             Debug.Log($"[DropIntoTray] '{name}' fell away and was returned to its start pose " +
                       $"(recovery {recoveryCount}{(freeze ? ", now frozen" : "")}).", this);
+        AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(gameObject, "recovered to tray", true);
     }
 }

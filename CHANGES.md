@@ -3158,3 +3158,143 @@ on success. No object-to-slot identity anywhere.
 2. First bolt on either side → its ghost gone; only the other side green; nuts likewise.
 3. Any holder at slot 1 → `[HolderPlacement] … accepted=true` → validates, snaps,
    `occupiedSlot=1 … nextSlot=2` → slot 2 ghost only.
+
+
+---
+
+## Claude → Reviewer — 2026-10-19 — Final checks: holder 4 guard, hand/controller parity, one-axis installed piston, audio mapping audit + arbiter, completed-engine inspection, one grab callback for wrong objects
+
+Base: `3661852`. Only the seven items; workflow, progression, tolerances, UI layout,
+ghosts, arrow, AI and HRV untouched. New files: `GrabEpisodeReporter.cs`,
+`GrabParity.cs`, `InstalledPistonPivot.cs` (all `Assets/Scripts/Steps/`). Edited:
+`StepValidator.cs`, `PlacementLock.cs`, `StepPresenter.cs`, `AssemblySessionController.cs`,
+`DropIntoTray.cs`, `EngineTurntable.cs`, `GuidanceArrow.cs`, `SpeechLibrary.cs`,
+`AppFlowController.cs`. Both assemblies compile; everything is [QV].
+
+### 1. Last camshaft holder disappears [QV] — root cause NOT found statically
+Holder 4 is not the last action (camshaft `locate` and `place` follow it), the registry
+binds `ghost.engineBlockSep004` to the Ghosties object (not the real holder), the slot
+ghosts' parent is active so the presenter never isolates them, and the completion
+cleanup skips anything locked or under the turntable. No code path treats holder 4
+differently from holders 1–3. What the build now does so the next run names the
+mechanism, and survives it:
+- `[Holder4Success] real=… parentBefore=…` at success, then `[Holder4Success] +t
+  real= active= visible= parent= position= distanceFromSnap= locked=` at +0 / +0.5 /
+  +2 s; the per-frame guard for engine-mounted parts (holders, camshaft, crankshaft)
+  now runs **6 s** (kit parts stay at 2 s). If the holder is deactivated, a renderer
+  disabled, it is re-parented or it moves, it is restored on the spot and an ERROR says
+  which (`DEACTIVATED` / `DISABLED` / `RE-PARENTED` / `MOVED`).
+- Every presenter hide path (`DeactivateAll`, isolation siblings, future-part hiding,
+  ancestor restore) refuses to switch off an object that carries a `PointableElement`
+  or a `PlacementLock`, with an ERROR naming it: a real part can never be taken for a
+  ghost.
+- The completion cleanup logs the names of everything it hides.
+Holders 1–3 go through exactly the same code.
+
+### 2. Controller cannot re-grab loose parts after a fall (hands can) [QV] — cause not confirmed
+Checked against the SDK (v83): the controller's `GrabInteractable` and the hand's
+`HandGrabInteractable` both find parts through the same trigger-based
+`CollisionInteractionRegistry`, whose `InteractableTriggerBroadcaster` lives on the
+part's Rigidbody object; on unregister the broadcaster is destroyed and a new one is
+created on re-register (so a stale disabled broadcaster — my first hypothesis — is
+not it). `PlacementLock` toggles both interactables symmetrically, and `DropIntoTray`
+treats a dropped part exactly like a freshly staged one. I did not find a code path
+that disables the controller side only. The build now makes the two sides measurable
+and re-asserts them at every point a loose part changes state:
+- `[GrabParity] part= why= hand(interactable=on|OFF) controller(interactable=on|OFF)
+  triggerBroadcasters=x/y enabled (re-enabled n) grabbable= rigidbody=dynamic|kinematic
+  [,sleeping] layer= colliders=on/total parent= active=` — logged when a loose part
+  settles after moving (dropped / fell into a tray), when it is recovered to its tray
+  pose, and on every interaction re-enable (lock release, forwarding, inspection mode);
+  ERROR lines if the two interactables differ or a broadcaster is left disabled.
+- At those points any disabled broadcaster is re-enabled and a sleeping Rigidbody is
+  woken (both harmless if they are not the cause).
+Please send the `[GrabParity]` line for a part the controller cannot re-grab; it
+contains every field the item asked to compare.
+
+### 3. Installed piston: one axis [QV]
+`InstalledPistonPivot`: when a head+rod+pin install validates, a `PistonPivot_<kit>`
+object is created under the turntable at the cap seat (the `PistonEnd` ghost's mesh
+centre) with its up axis = the crankshaft's long axis. The installed subassembly and
+the kit's ghost group (`ghost.piston00N`, i.e. cap/bolt/nut targets) are re-parented
+under it, so the targets turn with the piston. The pivot has a kinematic Rigidbody,
+a `Grabbable` and a `OneGrabRotateTransformer` about its own up axis (pivot = itself):
+rotation about the journal only, no translation, no other axis, no scale. The
+head's, rod's and pin's grab interactables are pointed at the pivot's `Grabbable`, so
+grabbing the piston anywhere turns it; a cap / bolt / nut that later joins is forwarded
+to the same pivot once the hands are open (`ForwardToPivotWhenHandsOpen`), so joined
+parts are never draggable on their own. `LockAll` runs on every stage change and at
+completion: the piston's stage ends → its pivot and forwarded grabs are disabled for
+good. Log: `[PistonPivot] <kit>: created at … axis=… (n grab interactable(s) …)`,
+`[PistonPivot] <kit>: locked permanently (reason)`.
+
+### 4. Audio mapping audit [QV]
+Mappings found (all call sites):
+| event | call | clip |
+|---|---|---|
+| instruction (new action) | `SpeakInstruction` / `PlayAuthored` | narration WAV |
+| validation success | `PlayCue(Success)` | success tone |
+| wrong component | `PlayFeedbackClipGated(wrongPartClip)` | warning clip |
+| counted failure | `PlayCue(Invalid)` | failure tone |
+| assembly complete | `PlayTone(Complete)` | completion tone |
+| timer | `PlayTone(Timer)` | timer tone |
+One incorrect mapping found: a release near the target while the **insertion gate**
+was still holding the part back was counted as a failure (`released_in_zone`) and
+played the failure tone — then the part fitted a moment later and the success tone
+followed. That is the "error sound on a correct nut". An insertion-blocked release is
+now `counted=false` (no failure tone, no error count). Every play now logs
+`[AudioEvent] event=<…> clip=<…> action=<current action id>` and `[AudioPlay]`.
+
+### 5. Completed engine as one inspection object [QV]
+At completion, after the cleanup (trays, mat, loose parts hidden, ghosts cleared), the
+arrow is hidden for the rest of the session (`HideForGood`) and the turntable enters
+**inspection mode**: ring hidden, the yaw-only rule lifted, a `GrabFreeTransformer`
+with position locked (relative 0..0 on all axes), rotation free, and two-hand scale
+constrained to **0.6–1.6×** of the authored size; every installed part's grab
+interactable is pointed at the turntable's `Grabbable`, so grabbing any part rotates /
+scales the whole engine and nothing separates. Installed piston pivots are locked
+first. Completion UI, Restart and Quit untouched.
+
+### 6. Wrong-object detection: the one callback [QV]
+`GrabEpisodeReporter` (one per grabbable part, added by `BindGrabCallbacks`) subscribes
+to **its own `Grabbable.WhenPointerEventRaised`** (Select → grab started; Unselect /
+Cancel with no selecting points left → grab ended) with a local backstop on the same
+Grabbable's `SelectingPointsCount` (`source=state`). Both raise the single static
+callback `StepValidator.OnAssemblyObjectGrabbed(part, source)` → accepted = the current
+action's accepted objects (equivalent sets included) → one `[WrongGrab]
+grabbed=<name#id> accepted=[…] wrong=true|false state= action= source=` → one warning
++ one wrong-component log if wrong; `OnAssemblyObjectReleased` closes the episode.
+The old per-candidate / per-interactable event subscriptions and the interactor
+dispatch are gone (interactor hooks remain diagnostic: `[GrabRuntime]`, and a grabbed
+part with no reporter is an ERROR and is bound on the spot). No registry order, scan
+loop, polling or camshaft path. `[WrongGrabBinding] part= callbackBound=` table at
+startup, ERROR for any registered part not bound.
+
+### 7. Audio interruption: one owner [QV]
+`InstructionSpeech` is the arbiter. `StopAll` stops instruction, feedback and the
+legacy scene source and cancels any pending start; `StopInstruction` stops narration
+only; `StopFeedback` stops cues only. Rules now wired:
+- new instruction / authored clip → `StopInstruction` (a short success/warning cue
+  finishes first; the instruction waits for it as before)
+- action complete → `StopInstruction("action complete")` (the success cue is kept)
+- wrong-object warning, failure tone, success tone, completion tone, any feedback
+  sentence → `StopAll` first (old warning cut by the new one; failure/instruction cut
+  by success)
+- timer tone → `StopFeedback` (never cuts narration)
+- Restart / Quit → `StopAll`
+- a queued play superseded before it started is dropped (`superseded-before-start`,
+  `superseded-while-waiting`)
+Logs: `[AudioStop] reason=<…> previous=<clip(s)> event=<…>`, `[AudioPlay] event=
+clip=`. The legacy A/B scene-source path reports through the same owner.
+
+### [QV] checklist
+1. Holder 4: `[Holder4Success] +2.0s active=true visible=true` with no ERROR between.
+2. Part dropped into a tray: `[GrabParity] … settled after moving` shows both sides
+   `on`, then the controller re-grabs it.
+3. After install: piston turns about the crank axis only; cap/bolt/nut ghosts follow;
+   after that piston's stage it no longer moves.
+4. A nut released while still insertion-blocked: no failure tone, `error_counted=false`.
+5. After completion: arrow gone, engine rotates freely in place, two-hand scale within
+   limits, no part separates.
+6. `[WrongGrab] … wrong=true` on grabbing any non-accepted part, once per grab.
+7. `[AudioStop]` precedes every `[AudioPlay]` that replaced something.
