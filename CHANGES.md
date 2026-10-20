@@ -3298,3 +3298,94 @@ clip=`. The legacy A/B scene-source path reports through the same owner.
    limits, no part separates.
 6. `[WrongGrab] … wrong=true` on grabbing any non-accepted part, once per grab.
 7. `[AudioStop]` precedes every `[AudioPlay]` that replaced something.
+
+
+---
+
+## Claude → Reviewer — 2026-10-20 — Three fixes: controller re-grab proof + repair, wrong-object detection from the SDK's own grab callbacks, completed piston returns to authored orientation
+
+Base: `278c21b`. Files: `StepValidator.cs`, `GrabParity.cs` (rewritten), `InstalledPistonPivot.cs`,
+`DropIntoTray.cs` (two call sites), `EngineTurntable.cs` (grab collider). `GrabEpisodeReporter.cs`
+removed (it never reached the runtime grab path). Both assemblies compile; everything is [QV].
+
+### 1. Controller re-grab [QV]
+**Runtime cause found in the SDK's candidate scoring, not in the part's state.** Hands
+and controllers discover parts through the same trigger registry, but choose
+differently:
+- `HandGrabInteractor.ComputeCandidate` only considers an interactable whose colliders
+  overlap the hand's pinch/grip volume (`OverlapsVolume`), then scores it.
+- `GrabInteractor.ComputeCandidate` (controller) scores every registered interactable
+  with `GrabPoseHelper.CollidersScore`, and a collider the grab point is **inside** of
+  always beats one it is merely near.
+The turntable's grab volume was a **full disc** (oil-pan footprint + 5 cm rim, 3 cm
+thick) under the engine. A controller reaching for a part lying on or beside the oil
+pan puts its grab point inside that disc, so the controller selects the turntable
+(nudging the engine) instead of the part; the hand never does because its finger
+volume does not overlap the thin disc. That is the "glitch" near the oil-pan tray; it
+does not happen in the far trays. Fix: the turntable's collider is now the **rim band
+only** (16 thin boxes around the ring, the outer ~20% of the radius; inspector flag
+`rimOnlyCollider`, default on). The ring is still grabbed at the rim by hand or
+controller; the area under the engine is no longer a grab target. No part state
+changed.
+Proof lines:
+- `[ControllerRegrab] part= why= GrabInteractable.enabled= HandGrabInteractable.enabled=
+  Grabbable.enabled= Rigidbody.isKinematic= Rigidbody.sleeping= layer= collider.enabled=
+  collider.isTrigger= parent= active= controllerMask= handMask= ctrlPointable=
+  handPointable= ctrlRigidbody= handRigidbody=` at the moment a loose part settles
+  (0.5 s at rest after moving) and when it is recovered to its tray pose.
+  `controllerMask`/`handMask` = the interactor rigidbody's layer and whether the physics
+  matrix lets it collide with the part's layer.
+- On every controller selection: `[ControllerRegrab] controllerSelected=<object> via
+  <interactable>` — if this names `Turntable` while reaching for a part, that is the
+  cause above, caught live.
+- Repair (controller side only, hand untouched): if the controller interactable's
+  enabled flag, PointableElement or Rigidbody differs from the hand interactable's, it is
+  set to the hand's values and re-registered, with an ERROR line listing what differed.
+
+### 2. Wrong-object detection from the SDK's own grab callbacks [QV]
+`GrabEpisodeReporter` (own-Grabbable pointer events) is gone. The callbacks now used are
+the SDK's state machines — the events that fire **because** a grab happened:
+1. `HandGrabInteractable.WhenStateChanged` / `GrabInteractable.WhenStateChanged`
+   (`IInteractableView`, `InteractableState.Select` entered / left) — hooked on every
+   such interactable under the engine root at the first action (`BindGrabCallbacks`),
+   the grabbed object = `interactable.Rigidbody.gameObject`.
+2. `HandGrabInteractor / DistanceHandGrabInteractor / GrabInteractor /
+   DistanceGrabInteractor .WhenStateChanged` (`InteractorState.Select` entered / left),
+   the grabbed object = `SelectedInteractable.Rigidbody.gameObject` (`HookInteractors`).
+Both print the unconditional `[ActualGrabStart] object=<GO#id> source=<Type>.WhenStateChanged`
+and call `StepValidator.OnAssemblyObjectGrabbed(part, source, holder)` directly;
+`[ActualGrabEnd]` and `OnAssemblyObjectReleased` on leaving Select. One episode per
+object: the first callback decides, later callbacks for the same grab (the other
+path, a second hand) log "episode already open"; the episode closes when the last
+holder releases. A source that re-selects without a release closes the stale episode
+first. Decision: `accepted = current action's accepted objects` (equivalent sets
+included), `wrong = !accepted && !tolerated` → `[WrongGrab] grabbed= accepted=[…]
+wrong=true|false` → one `[WrongPart] FIRING`, one warning. No polling, registry
+scan, candidate order, inferred selection state or synthetic layer. At every arm:
+`[WrongGrabState] action= state= accepted=[crankshaft] …` (first action). Startup table
+`[WrongGrabBinding] part= callbackBound= hand=WhenStateChanged controller=WhenStateChanged`;
+an object selected on the device whose interactable was not hooked is an ERROR and is
+hooked on the spot. If `[ActualGrabStart]` does not print for a grabbed object, the
+hook is wrong — that is the test.
+
+### 3. Completed piston returns to the authored orientation [QV]
+`InstalledPistonPivot` records its authored local rotation when created. After each
+cap / bolt / nut success the validator checks the pivot that owns that target: when
+`PistonEnd`, `pistonBolt`, `pistonBoltOther`, `PistonNut`, `PistonNutOther` of that kit
+are all occupied targets, `ReturnAndLock` runs: the piston's grabs are switched off
+at once, then over 0.4 s (`returnSeconds`, smoothstep) it slerps back about the same
+crankshaft axis with its position held — no translation, no teleport — and locks
+permanently. Independent per piston (the target → pivot link is per kit). Child
+transforms untouched (they ride the pivot). The stage-change / completion `LockAll`
+now uses the same smooth return for any pivot not yet locked. Logs: `[PistonPivot]
+<kit>: complete (…) - returning N deg … over 0.40 s`, then `locked permanently (…);
+orientation = authored (yaw error 0.00 deg)`.
+
+### [QV] checklist
+1. Reach for a part beside the oil pan with a controller: `[ControllerRegrab]
+   controllerSelected=<the part>`; never `Turntable` unless the rim was grabbed.
+2. Crankshaft action: `[WrongGrabState] … accepted=[crankshaft]`; grab a piston head:
+   `[ActualGrabStart] object=piston001#…` then `[WrongGrab] … wrong=true` once, warning
+   once; release: `[ActualGrabEnd]`.
+3. Last nut of piston 1: `[PistonPivot] PistonKit001: complete … returning … locked`;
+   piston 2 untouched until its own last nut.

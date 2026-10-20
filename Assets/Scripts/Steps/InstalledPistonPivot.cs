@@ -25,6 +25,13 @@ namespace AdaptiveAR.Steps
 
         public string Kit { get; private set; }
         public bool Locked { get; private set; }
+        public Transform GhostGroup { get; private set; }
+
+        [Tooltip("Seconds for the smooth return to the authored crankshaft orientation once the piston is complete.")]
+        public float returnSeconds = 0.4f;
+
+        private Quaternion _authoredLocalRotation;
+        private bool _returning;
 
         private Oculus.Interaction.Grabbable _grabbable;
         private readonly List<MonoBehaviour> _forwarded = new List<MonoBehaviour>();
@@ -43,6 +50,8 @@ namespace AdaptiveAR.Steps
 
             var pivot = go.AddComponent<InstalledPistonPivot>();
             pivot.Kit = kit;
+            pivot.GhostGroup = ghostGroup;
+            pivot._authoredLocalRotation = go.transform.localRotation;     // the authored crankshaft orientation
 
             var rb = go.AddComponent<Rigidbody>(); rb.isKinematic = true; rb.useGravity = false;
             pivot._grabbable = go.AddComponent<Oculus.Interaction.Grabbable>();
@@ -82,18 +91,75 @@ namespace AdaptiveAR.Steps
             return null;
         }
 
+        /// <summary>True once the cap, both bolts and both nuts of this piston occupy their targets.</summary>
+        public bool AllTargetsOccupied(HashSet<Transform> occupied)
+        {
+            if (GhostGroup == null || occupied == null) return false;
+            foreach (string role in new[] { "PistonEnd", "pistonBolt", "pistonBoltOther", "PistonNut", "PistonNutOther" })
+            {
+                Transform t = FindDeep(GhostGroup, role);
+                if (t == null || !occupied.Contains(t)) return false;
+            }
+            return true;
+        }
+
+        private static Transform FindDeep(Transform root, string name)
+        {
+            Transform direct = root.Find(name);
+            if (direct != null) return direct;
+            foreach (Transform t in root.GetComponentsInChildren<Transform>(true)) if (t != root && t.name == name) return t;
+            return null;
+        }
+
+        /// <summary>
+        /// The piston is complete: its grabs are switched off at once, it turns smoothly back
+        /// to the authored crankshaft orientation about the same axis (no translation, no
+        /// teleport), then it is locked for good. Idempotent.
+        /// </summary>
+        public void ReturnAndLock(string reason)
+        {
+            if (Locked || _returning) return;
+            _returning = true;
+            foreach (MonoBehaviour mb in _forwarded) if (mb != null) mb.enabled = false;
+            if (_grabbable != null) _grabbable.enabled = false;
+            float delta = Quaternion.Angle(transform.localRotation, _authoredLocalRotation);
+            Debug.Log($"[PistonPivot] {Kit}: complete ({reason}) - rotation interaction off, returning {delta:F1} deg to the authored orientation over {returnSeconds:F2} s.");
+            StartCoroutine(ReturnRoutine(reason));
+        }
+
+        private System.Collections.IEnumerator ReturnRoutine(string reason)
+        {
+            yield return null;                                        // let the SDK release this frame
+            Quaternion from = transform.localRotation;
+            Vector3 heldPosition = transform.localPosition;
+            float t = 0f;
+            float duration = Mathf.Max(0.05f, returnSeconds);
+            while (t < duration)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t / duration));
+                transform.localRotation = Quaternion.Slerp(from, _authoredLocalRotation, k);
+                transform.localPosition = heldPosition;
+                yield return null;
+            }
+            transform.localRotation = _authoredLocalRotation;
+            transform.localPosition = heldPosition;
+            LockPermanently(reason);
+        }
+
         public void LockPermanently(string reason)
         {
             if (Locked) return;
             Locked = true;
             foreach (MonoBehaviour mb in _forwarded) if (mb != null) mb.enabled = false;
             if (_grabbable != null) _grabbable.enabled = false;
-            Debug.Log($"[PistonPivot] {Kit}: locked permanently ({reason}).");
+            Debug.Log($"[PistonPivot] {Kit}: locked permanently ({reason}); orientation = authored (yaw error {Quaternion.Angle(transform.localRotation, _authoredLocalRotation):F2} deg).");
         }
 
+        /// <summary>Every pivot not yet locked returns smoothly and locks (stage change / completion).</summary>
         public static void LockAll(string reason)
         {
-            foreach (InstalledPistonPivot p in _all) if (p != null) p.LockPermanently(reason);
+            foreach (InstalledPistonPivot p in _all) if (p != null && !p.Locked) p.ReturnAndLock(reason);
         }
 
         private void OnDestroy()

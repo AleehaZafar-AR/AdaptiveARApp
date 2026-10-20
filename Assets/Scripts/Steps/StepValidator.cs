@@ -770,12 +770,13 @@ namespace AdaptiveAR.Steps
             // a bound part that is being held right now opens its episode against this action.
             if (monitorWrongParts)
             {
-                foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
+                foreach (GameObject held in new List<GameObject>(_episodes.Keys))
                 {
-                    if (kv.Value == null || kv.Value.SelectingPointsCount == 0) continue;
-                    if (_acceptedObjects.Contains(kv.Key) || _toleratedObjects.Contains(kv.Key)) continue;
-                    if (_episodes.ContainsKey(kv.Key)) CloseEpisode(kv.Key, _boundKeys[kv.Key], "re-armed");
-                    OpenEpisode(kv.Key, _boundKeys[kv.Key], kv.Value, "already_held_at_arm");
+                    if (held == null || _acceptedObjects.Contains(held) || _toleratedObjects.Contains(held)) continue;
+                    string heldKey = _boundKeys.TryGetValue(held, out string hk) ? hk : KeyForObject(held);
+                    CloseEpisode(held, heldKey, "re-armed");
+                    _episodes[held] = Time.frameCount;
+                    EvaluateGrab(held, heldKey, "already_held_at_arm");
                     break;
                 }
             }
@@ -1181,46 +1182,42 @@ namespace AdaptiveAR.Steps
         private readonly Dictionary<GameObject, string> _boundKeys = new Dictionary<GameObject, string>();
         private bool _bindingTablePrinted;
 
+        // The SDK callbacks that fire when a grab actually happens:
+        //   (1) HandGrabInteractable / GrabInteractable .WhenStateChanged -> InteractableState.Select
+        //       (the interactable the hand or controller selected; its Rigidbody is the part)
+        //   (2) every grab interactor's .WhenStateChanged -> InteractorState.Select
+        //       (SelectedInteractable.Rigidbody is the part)   [HookInteractors]
+        // Both log [ActualGrabStart] and call OnAssemblyObjectGrabbed; one episode per object.
+        private readonly HashSet<MonoBehaviour> _hookedInteractables = new HashSet<MonoBehaviour>();
+        private readonly Dictionary<GameObject, HashSet<object>> _holders = new Dictionary<GameObject, HashSet<object>>();
+
         /// <summary>
-        /// Puts a GrabEpisodeReporter on every real grabbable assembly part (a Grabbable with a
-        /// collider on the same object and a hand/controller grab interactable beneath it, under
-        /// the engine root; the turntable excluded). The reporter raises the ONE grab-start
-        /// callback for that part - OnAssemblyObjectGrabbed - from the part's own Grabbable, the
-        /// component the SDK moves when a grab works. Idempotent. Prints
-        /// [WrongGrabBinding] part= callbackBound= once; ERROR for a registered part not bound.
+        /// Subscribes to WhenStateChanged of every HandGrabInteractable and GrabInteractable under
+        /// the engine root (the turntable excluded). Idempotent. Prints the
+        /// [WrongGrabBinding] part= callbackBound= table once.
         /// </summary>
         public int BindGrabCallbacks()
         {
             Transform root = EngineRoot();
             if (root == null) { Debug.LogError("[WrongGrabBinding] engine root not found: nothing bound."); return 0; }
 
-            GrabEpisodeReporter.OnGrabStarted = OnAssemblyObjectGrabbed;
-            GrabEpisodeReporter.OnGrabEnded = OnAssemblyObjectReleased;
-
-            foreach (var g in root.GetComponentsInChildren<Oculus.Interaction.Grabbable>(true))
-            {
-                if (g == null) continue;
-                GameObject go = g.gameObject;
-                if (_boundParts.ContainsKey(go)) continue;
-                if (go.GetComponent<Collider>() == null) continue;                                   // kit roots / Components root
-                if (go.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null) continue;    // viewing control
-                bool hasInteractable = go.GetComponentInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true) != null
-                                       || go.GetComponentInChildren<Oculus.Interaction.GrabInteractable>(true) != null;
-                if (!hasInteractable) continue;
-
-                if (go.GetComponent<GrabEpisodeReporter>() == null) go.AddComponent<GrabEpisodeReporter>();
-                string key = _watched.TryGetValue(go, out Candidate wc) ? wc.key : KeyForObject(go);
-                _boundParts[go] = g;
-                _boundKeys[go] = key;
-            }
+            foreach (var h in root.GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
+                HookInteractable(h, h.Rigidbody);
+            foreach (var g in root.GetComponentsInChildren<Oculus.Interaction.GrabInteractable>(true))
+                HookInteractable(g, g.Rigidbody);
 
             if (!_bindingTablePrinted && _boundParts.Count > 0)
             {
                 _bindingTablePrinted = true;
                 foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
                 {
-                    bool bound = kv.Key.GetComponent<GrabEpisodeReporter>() != null && kv.Value != null;
-                    Debug.Log($"[WrongGrabBinding] part={PathOf(kv.Key.transform)} id={kv.Key.GetInstanceID()} key={_boundKeys[kv.Key]} callbackBound={bound} active={kv.Key.activeInHierarchy}");
+                    GameObject go = kv.Key;
+                    var hand = go.GetComponentInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true);
+                    var ctrl = go.GetComponentInChildren<Oculus.Interaction.GrabInteractable>(true);
+                    bool bound = (hand != null && _hookedInteractables.Contains(hand)) || (ctrl != null && _hookedInteractables.Contains(ctrl));
+                    Debug.Log($"[WrongGrabBinding] part={PathOf(go.transform)} id={go.GetInstanceID()} key={_boundKeys[go]} callbackBound={bound} " +
+                              $"hand={(hand != null ? (_hookedInteractables.Contains(hand) ? "WhenStateChanged" : "NOT HOOKED") : "none")} " +
+                              $"controller={(ctrl != null ? (_hookedInteractables.Contains(ctrl) ? "WhenStateChanged" : "NOT HOOKED") : "none")} active={go.activeInHierarchy}");
                 }
 
                 var seen = new HashSet<GameObject>();
@@ -1230,12 +1227,111 @@ namespace AdaptiveAR.Steps
                     if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null || !seen.Add(go)) continue;
                     if (go.GetComponent<Collider>() == null) continue;                               // kit root, not a part
                     if (_boundParts.ContainsKey(go)) continue;
-                    Debug.LogError($"[WrongGrabBinding] part={PathOf(go.transform)} key={key} callbackBound=false " +
-                                   $"(Grabbable={(go.GetComponent<Oculus.Interaction.Grabbable>() != null)} interactable={(go.GetComponentInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true) != null)})");
+                    Debug.LogError($"[WrongGrabBinding] part={PathOf(go.transform)} key={key} callbackBound=false (no HandGrabInteractable/GrabInteractable with a Rigidbody under it)");
                 }
-                Debug.Log($"[WrongGrabBinding] {_boundParts.Count} part(s) bound to the grab-start callback.");
+                Debug.Log($"[WrongGrabBinding] {_boundParts.Count} part(s) bound to the SDK's interactable WhenStateChanged callback.");
             }
             return _boundParts.Count;
+        }
+
+        private void HookInteractable(MonoBehaviour interactable, Rigidbody body)
+        {
+            if (interactable == null || body == null || _hookedInteractables.Contains(interactable)) return;
+            GameObject part = body.gameObject;
+            if (part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null) return;        // viewing control
+            var view = interactable as Oculus.Interaction.IInteractableView;
+            if (view == null) return;
+            MonoBehaviour cap = interactable;
+            view.WhenStateChanged += a => OnInteractableState(cap, a);
+            _hookedInteractables.Add(interactable);
+
+            if (!_boundParts.ContainsKey(part))
+            {
+                _boundParts[part] = part.GetComponent<Oculus.Interaction.Grabbable>();
+                _boundKeys[part] = _watched.TryGetValue(part, out Candidate wc) ? wc.key : KeyForObject(part);
+            }
+        }
+
+        private void OnInteractableState(MonoBehaviour interactable, Oculus.Interaction.InteractableStateChangeArgs a)
+        {
+            try
+            {
+                ResolveInteractable(interactable, out Rigidbody body, out Component pointable);
+                GameObject part = body != null ? body.gameObject : null;
+                if (part == null) return;
+                string source = interactable.GetType().Name + ".WhenStateChanged";
+                if (a.NewState == Oculus.Interaction.InteractableState.Select)
+                {
+                    Debug.Log($"[ActualGrabStart] object={part.name}#{part.GetInstanceID()} source={source} interactable={PathOf(interactable.transform)}");
+                    OnAssemblyObjectGrabbed(part, source, interactable);
+                }
+                else if (a.PreviousState == Oculus.Interaction.InteractableState.Select)
+                {
+                    Debug.Log($"[ActualGrabEnd] object={part.name}#{part.GetInstanceID()} source={source}");
+                    OnAssemblyObjectReleased(part, source, interactable);
+                }
+            }
+            catch (Exception e) { Debug.LogError("[ActualGrabStart] interactable handler threw: " + e); }
+        }
+
+        /// <summary>
+        /// THE decision entry: called directly from the SDK grab callbacks above with the actual
+        /// grabbed object. accepted = the current action's accepted parts; wrong = not accepted
+        /// (and not tolerated). One decision per object until the last holder releases it.
+        /// </summary>
+        public void OnAssemblyObjectGrabbed(GameObject part, string source, object holder)
+        {
+            if (part == null) return;
+            string key = _boundKeys.TryGetValue(part, out string k) ? k : KeyForObject(part);
+            if (!_holders.TryGetValue(part, out HashSet<object> set)) { set = new HashSet<object>(); _holders[part] = set; }
+            if (holder != null && set.Contains(holder))
+            {
+                // The same hand/interactable selecting again: its release never reached us.
+                Debug.Log($"[WrongGrab] grabbed={part.name}#{part.GetInstanceID()} re-selected by the same source without a release - closing the stale episode.");
+                set.Clear();
+                CloseEpisode(part, key, source + "(stale)");
+            }
+            if (holder != null) set.Add(holder);
+            if (_watched.TryGetValue(part, out Candidate c)) { c.wasHeld = true; c.firedThisEpisode = true; }
+
+            if (_episodes.ContainsKey(part))
+            {
+                Debug.Log($"[WrongGrab] grabbed={part.name}#{part.GetInstanceID()} episode already open ({set.Count} holder(s), source={source}) - no new decision.");
+                return;
+            }
+            _episodes[part] = Time.frameCount;
+            EvaluateGrab(part, key, source);
+        }
+
+        public void OnAssemblyObjectReleased(GameObject part, string source, object holder)
+        {
+            if (part == null) return;
+            string key = _boundKeys.TryGetValue(part, out string k) ? k : KeyForObject(part);
+            if (_holders.TryGetValue(part, out HashSet<object> set))
+            {
+                if (holder != null) set.Remove(holder);
+                if (set.Count > 0) { Debug.Log($"[WrongGrab] released={part.name}#{part.GetInstanceID()} by {source}; {set.Count} holder(s) remain - episode stays open."); return; }
+            }
+            CloseEpisode(part, key, source);
+            if (_watched.TryGetValue(part, out Candidate c)) { c.wasHeld = false; c.firedThisEpisode = false; }
+        }
+
+        /// <summary>[WrongGrabState] for the current action + a dry run of the decision for every bound part (no events fired).</summary>
+        public void LogWrongGrabDryRun()
+        {
+            bool physical = IsActive && !_completed;
+            bool ack = _ackArmed;
+            var names = new List<string>();
+            foreach (GameObject g in (physical ? _acceptedObjects : _ackObjects)) if (g != null) names.Add(g.name);
+            Debug.Log($"[WrongGrabState] action={CurrentActionId()} state={(physical ? "PHYSICAL" : (ack ? "READ" : "none"))} accepted=[{string.Join(", ", names)}] tolerated={_toleratedObjects.Count} boundParts={_boundParts.Count}");
+            foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
+            {
+                GameObject part = kv.Key;
+                bool tolerated = _toleratedObjects.Contains(part);
+                bool eligible = tolerated || (physical && _acceptedObjects.Contains(part)) || (ack && _ackObjects.Contains(part));
+                bool wouldFire = (physical || ack) && !eligible && monitorWrongParts;
+                Debug.Log($"[WrongGrabDryRun] part={part.name}#{part.GetInstanceID()} action={CurrentActionId()} acceptedNow={eligible} wouldFireWrongPart={wouldFire}");
+            }
         }
 
         private string KeyForObject(GameObject go)
@@ -1268,21 +1364,6 @@ namespace AdaptiveAR.Steps
             string key = _boundKeys.TryGetValue(part, out string k) ? k : KeyForObject(part);
             CloseEpisode(part, key, source);
             if (_watched.TryGetValue(part, out Candidate c)) { c.wasHeld = false; c.firedThisEpisode = false; }
-        }
-
-        /// <summary>Dry run of the decision for every bound part against the CURRENT action (no events fired).</summary>
-        public void LogWrongGrabDryRun()
-        {
-            bool physical = IsActive && !_completed;
-            bool ack = _ackArmed;
-            foreach (KeyValuePair<GameObject, Oculus.Interaction.Grabbable> kv in _boundParts)
-            {
-                GameObject part = kv.Key;
-                bool tolerated = _toleratedObjects.Contains(part);
-                bool eligible = tolerated || (physical && _acceptedObjects.Contains(part)) || (ack && _ackObjects.Contains(part));
-                bool wouldFire = (physical || ack) && !eligible && monitorWrongParts;
-                Debug.Log($"[WrongGrabDryRun] part={part.name}#{part.GetInstanceID()} action={CurrentActionId()} acceptedNow={eligible} wouldFireWrongPart={wouldFire}");
-            }
         }
 
         private void OpenEpisode(GameObject part, string key, Oculus.Interaction.Grabbable grabbable, string source)
@@ -1376,34 +1457,31 @@ namespace AdaptiveAR.Steps
                             : (pointable != null ? pointable.gameObject
                             : (interactable.transform.parent != null ? interactable.transform.parent.gameObject : interactable.gameObject));
             var grabbable = part.GetComponent<Oculus.Interaction.Grabbable>();
+            string source = interactor.GetType().Name + ".WhenStateChanged";
 
+            Debug.Log($"[ActualGrabStart] object={part.name}#{part.GetInstanceID()} source={source} interactable={interactable.GetType().Name}@{PathOf(interactable.transform)}");
             Debug.Log($"[GrabRuntime] selectedObject={part.name}#{part.GetInstanceID()} path={PathOf(part.transform)} " +
                       $"rigidbody={(body != null ? body.name + "#" + body.GetInstanceID() : "NONE")} " +
                       $"pointable={(pointable != null ? PathOf(pointable.transform) + "#" + pointable.GetInstanceID() : "NONE")} " +
                       $"grabbable={(grabbable != null ? "own#" + grabbable.GetInstanceID() : "NONE")} " +
                       $"interactable={interactable.GetType().Name}@{PathOf(interactable.transform)} interactor={interactor.GetType().Name} currentAction={CurrentActionId()}");
+            if (interactor is Oculus.Interaction.GrabInteractor || interactor is Oculus.Interaction.DistanceGrabInteractor)
+                Debug.Log($"[ControllerRegrab] controllerSelected={part.name}#{part.GetInstanceID()} via {interactable.GetType().Name}");
 
-            // Diagnostics only: the watch entry (grab-source coverage). The DECISION below does
-            // not depend on it.
+            if (part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null) return;        // viewing control, not a part
+
             string key = _watched.TryGetValue(part, out Candidate c) ? c.key : "unregistered:" + part.name;
-            if (c == null && part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() == null)
+            if (c == null)
             {
                 Debug.LogError($"[GrabRuntime] '{PathOf(part.transform)}' was selected on the device but was NOT in the watched set - watching it now.");
                 Watch(key, part, true);
-                if (_watched.TryGetValue(part, out c)) Link(c, interactable, interactable.GetType().Name);
             }
-            if (c != null) { c.wasHeld = true; c.firedThisEpisode = true; c.pendingGrab = false; c.pendingRelease = false; c.grabSource = "interactor_event"; }
-
-            // Diagnostics only. The decision is the part's own GrabEpisodeReporter; a grabbed
-            // part without one is the binding bug and is bound on the spot.
-            if (!_boundParts.ContainsKey(part) && part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() == null && part.GetComponentInParent<InstalledPistonPivot>() == null)
+            if (!_hookedInteractables.Contains(interactable))
             {
-                Debug.LogError($"[WrongGrabBinding] '{PathOf(part.transform)}' was grabbed on the device but has NO bound callback - binding it now.");
-                if (grabbable != null && part.GetComponent<GrabEpisodeReporter>() == null) part.AddComponent<GrabEpisodeReporter>();
-                if (grabbable != null) { _boundParts[part] = grabbable; _boundKeys[part] = key; }
+                Debug.LogError($"[WrongGrabBinding] '{PathOf(part.transform)}': its {interactable.GetType().Name} was NOT hooked at startup - hooking it now.");
+                HookInteractable(interactable, body);
             }
-            if (!_episodes.ContainsKey(part) && grabbable != null && part.GetComponent<GrabEpisodeReporter>() == null)
-                Debug.LogError($"[WrongGrab] '{part.name}' selected by an interactor but it has no reporter and no episode.");
+            OnAssemblyObjectGrabbed(part, source, interactor);
         }
 
         private void OnRuntimeUnselected(MonoBehaviour interactor, MonoBehaviour interactable)
@@ -1411,7 +1489,11 @@ namespace AdaptiveAR.Steps
             ResolveInteractable(interactable, out Rigidbody body, out Component pointable);
             GameObject part = body != null ? body.gameObject : (pointable != null ? pointable.gameObject : null);
             if (part == null) return;
-            if (_watched.TryGetValue(part, out Candidate c) && !IsSelected(c)) { c.pendingRelease = false; }
+            string source = interactor.GetType().Name + ".WhenStateChanged";
+            Debug.Log($"[ActualGrabEnd] object={part.name}#{part.GetInstanceID()} source={source}");
+            if (part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null) return;
+            OnAssemblyObjectReleased(part, source, interactor);
+            if (_watched.TryGetValue(part, out Candidate c)) { c.pendingRelease = false; }
         }
 
         private void LogEligibilityRuntime(Candidate c)
@@ -1477,7 +1559,7 @@ namespace AdaptiveAR.Steps
             if (go.GetComponent<Collider>() == null && !allowNoPointable) return;  // kit roots: not grabbable parts
 
             Candidate c = MakeCandidate(key, go);
-            // No subscription here: the decision path is the part's GrabEpisodeReporter.
+            // No subscription here: the decision path is the SDK interactable/interactor WhenStateChanged callbacks.
             _watched.Add(go, c);
             _watchedList.Add(c);
         }
@@ -2241,6 +2323,7 @@ namespace AdaptiveAR.Steps
                     turntable.AdoptInstalled(_active.tf);
                 if (padlock != null) padlock.RefreshLockedPose();
                 CreatePistonPivotIfInstalled();
+                ReturnPistonIfComplete();
             }
             catch (Exception e) { Debug.LogError($"{tag} join threw: {e}"); }
             PartWatch.Log("Succeed(after join)", _active.tf);
@@ -2310,6 +2393,19 @@ namespace AdaptiveAR.Steps
                 axis = crank.transform.rotation * (cmf != null && cmf.sharedMesh != null ? ExtentAxis(cmf.sharedMesh, crank.transform.localScale, true) : Vector3.right);
             }
             InstalledPistonPivot.Create(kit, _active.tf, ghostGroup, pivotPoint, axis);
+        }
+
+        /// <summary>
+        /// The cap / bolt / nut that just locked belongs to an installed piston: once its cap,
+        /// both bolts and both nuts occupy their targets, that piston turns back to the authored
+        /// crankshaft orientation and locks.
+        /// </summary>
+        private void ReturnPistonIfComplete()
+        {
+            if (CurrentTarget == null) return;
+            var pivot = CurrentTarget.GetComponentInParent<InstalledPistonPivot>();
+            if (pivot == null || pivot.Locked) return;
+            if (pivot.AllTargetsOccupied(_occupiedTargets)) pivot.ReturnAndLock("cap, bolts and nuts installed");
         }
 
         /// <summary>[Piston2RodSuccess] for kit 2's rod, [Piston1HeadSuccess] ..., else the role tag.</summary>

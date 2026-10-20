@@ -149,7 +149,7 @@ public class DropIntoTray : MonoBehaviour
             else if (Time.time - _stillSince > 0.5f)
             {
                 _wasMoving = false;
-                AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(gameObject, "settled after moving", true);
+                AdaptiveAR.Steps.GrabParity.OnSettled(gameObject, "settled after moving");
             }
         }
 
@@ -271,6 +271,6 @@ public class DropIntoTray : MonoBehaviour
         if (logRecovery)
             Debug.Log($"[DropIntoTray] '{name}' fell away and was returned to its start pose " +
                       $"(recovery {recoveryCount}{(freeze ? ", now frozen" : "")}).", this);
-        AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(gameObject, "recovered to tray", true);
+        AdaptiveAR.Steps.GrabParity.OnSettled(gameObject, "recovered to tray");
     }
 }

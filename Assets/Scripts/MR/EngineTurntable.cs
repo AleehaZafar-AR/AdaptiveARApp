@@ -27,6 +27,12 @@ namespace AdaptiveAR.MR
         public static EngineTurntable Current { get; private set; }
 
         [SerializeField] private float rimMargin = 0.05f;
+
+        [Tooltip("Grab collider = the rim band only (not the whole disc). A controller's grab scoring prefers " +
+                 "any collider its grab point is INSIDE, so a full disc under the engine out-competes small parts " +
+                 "lying on or beside it; hands are gated by finger-volume overlap and do not see that.")]
+        [SerializeField] private bool rimOnlyCollider = true;
+        [SerializeField] private int rimSegments = 16;
         [SerializeField] private Color ringColor = new Color(0.55f, 0.58f, 0.62f, 0.35f);
         [SerializeField] private bool logChanges = true;
 
@@ -34,6 +40,7 @@ namespace AdaptiveAR.MR
         private GameObject _visual;
         private Material _material;
         private Collider _collider;
+        private GameObject _colliderRoot;
         private Oculus.Interaction.Grabbable _grabbable;
         private readonly List<MonoBehaviour> _interactables = new List<MonoBehaviour>();
         private System.Action<string> _note;
@@ -122,10 +129,36 @@ namespace AdaptiveAR.MR
             // Body + grab volume (a thin slab the size of the ring; the rim is what the hand reaches).
             var rb = gameObject.AddComponent<Rigidbody>();
             rb.isKinematic = true; rb.useGravity = false;
-            var box = gameObject.AddComponent<BoxCollider>();
-            box.size = new Vector3(radius * 2f, 0.03f, radius * 2f);
-            box.center = new Vector3(0f, 0.015f, 0f);
-            _collider = box;
+            if (rimOnlyCollider)
+            {
+                // The ring texture is the outer ~20% of the radius: that band is the grab surface.
+                float rimWidth = Mathf.Max(0.03f, radius * 0.2f);
+                float midRadius = radius - rimWidth * 0.5f;
+                int n = Mathf.Max(8, rimSegments);
+                float chord = 2f * Mathf.PI * midRadius / n * 1.08f;
+                var rim = new GameObject("RimCollider");
+                rim.transform.SetParent(transform, false);
+                for (int i = 0; i < n; i++)
+                {
+                    float a = i * 360f / n;
+                    var seg = new GameObject("Seg" + i);
+                    seg.transform.SetParent(rim.transform, false);
+                    seg.transform.localRotation = Quaternion.Euler(0f, a, 0f);
+                    seg.transform.localPosition = seg.transform.localRotation * new Vector3(0f, 0.015f, midRadius);
+                    var b = seg.AddComponent<BoxCollider>();
+                    b.size = new Vector3(chord, 0.03f, rimWidth);
+                }
+                _collider = rim.GetComponentInChildren<BoxCollider>();
+                _colliderRoot = rim;
+                if (logChanges) Debug.Log($"[Turntable] grab collider = rim band only ({n} segments, width {rimWidth:F3} m); the disc under the engine is not a grab target.");
+            }
+            else
+            {
+                var box = gameObject.AddComponent<BoxCollider>();
+                box.size = new Vector3(radius * 2f, 0.03f, radius * 2f);
+                box.center = new Vector3(0f, 0.015f, 0f);
+                _collider = box;
+            }
 
             _grabbable = gameObject.AddComponent<Oculus.Interaction.Grabbable>();
             var rot = gameObject.AddComponent<Oculus.Interaction.OneGrabRotateTransformer>();
@@ -250,7 +283,8 @@ namespace AdaptiveAR.MR
         public void SetInteractive(bool on)
         {
             if (_visual != null) _visual.SetActive(on);
-            if (_collider != null) _collider.enabled = on;
+            if (_colliderRoot != null) foreach (Collider c in _colliderRoot.GetComponentsInChildren<Collider>(true)) c.enabled = on;
+            else if (_collider != null) _collider.enabled = on;
             foreach (MonoBehaviour mb in _interactables) if (mb != null) mb.enabled = on;
         }
 
