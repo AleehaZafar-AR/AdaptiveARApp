@@ -21,7 +21,7 @@ namespace AdaptiveAR.Steps
     public static class HideGuard
     {
         /// <summary>True when 'go' may be deactivated by a generic path; false (and a log line) when it is, or contains, a real installed part.</summary>
-        public static bool CanHide(GameObject go, string caller)
+        public static bool CanHide(GameObject go, string caller, bool allowLooseParts = false)
         {
             if (go == null) return false;
             string blockedBy = null;
@@ -30,7 +30,7 @@ namespace AdaptiveAR.Steps
             {
                 var padlock = go.GetComponent<PlacementLock>();
                 if (padlock != null && padlock.IsLocked) blockedBy = "locked part";
-                else if (go.GetComponent<Oculus.Interaction.PointableElement>() != null && go.GetComponent<Rigidbody>() != null) blockedBy = "grabbable part";
+                else if (!allowLooseParts && go.GetComponent<Oculus.Interaction.PointableElement>() != null && go.GetComponent<Rigidbody>() != null) blockedBy = "grabbable part";
                 else
                 {
                     foreach (var s in go.GetComponentsInChildren<InstalledPartSentinel>(true)) { blockedBy = "ancestor of installed part '" + s.name + "'"; break; }

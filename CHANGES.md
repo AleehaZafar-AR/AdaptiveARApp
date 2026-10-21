@@ -3662,3 +3662,61 @@ Teardown (Restart / Quit) is excluded from the sentinel's reporting.
 2/3. `[RodSuccess] kit=2 +2.0s active=true visible=true` and the same for `[PistonEndSuccess] kit=2`.
 4. Any `[HolderHideAttempt] … blocked=false` line carries the stack trace of the real culprit;
    the holder is back the next frame.
+
+
+---
+
+## Claude → Reviewer — 2026-10-21 — Any holder acknowledged, turntable rotation removed, controller grab in the oil pan, trays take their spare parts
+
+Base: `c86a169`. Files: `StepValidator.cs`, `EngineTurntable.cs`, `AssemblySessionController.cs`,
+`InstalledPartSentinel.cs`, `InstalledPistonPivot.cs`. Both assemblies compile; everything is [QV].
+
+### Holder 1: wrong-object on holders 2–4 — cause: the READ action [QV]
+`step_06_camshaft.locate_holders` is a read/acknowledge action on `part.engineBlockSep001`.
+`BeginAcknowledge` built its accepted set from `RoleCandidates(partKey)` only (kit roles), never
+from `GuidanceAudit.ExpandEquivalent`, so during "locate the holders" only holder 1
+acknowledged and the other three were wrong objects. The physical holder actions already
+expanded equivalents, which is why the complaint only showed on the first holder. Now the
+acknowledge set is built exactly like the physical one: equivalents (any unused holder,
+either bolt/nut) × interchangeable kit roles.
+
+### Turntable rotation removed; controller grab in / beside the oil pan [QV]
+`EngineTurntable.assemblyRotationEnabled` (default off): the turntable is now only the
+container that carries the installed engine, the ghosts and the oil pan — no ring, no
+rim colliders, no Grabbable, no cloned interactable, no Reset View button, no crankshaft
+template toggle. Why this is also the oil-pan grab fix: the turntable's cloned
+`HandGrabInteractable` cached its collider list at `Start`, one frame after `Ensure` had
+already re-parented Ghosties under it, so that list contained the **oil pan's
+MeshCollider** (and every ghost collider) in addition to the rim. The SDK scores a
+collider the grab point is inside as the best candidate; a controller-driven hand reaching
+into the pan put its palm point inside the pan's collider volume, so the engine container
+won over the part lying in it (a tracked hand pinches from above and its pinch point stays
+on the part). With no interactable on the container there is nothing to compete.
+Falling through the pan base: the container's kinematic Rigidbody used Discrete collision;
+a `ContinuousDynamic` part does not sweep against a Discrete kinematic body, so a fast
+part could tunnel through the thin pan floor. The container, the piston pivots and the
+inspection pivot now use `ContinuousSpeculative` collision. Final inspection is unchanged
+(it builds its own pivot and owner).
+
+### Completion: trays take the spare parts with them [QV]
+The cleanup hid only parts that resolved from registry keys; the unregistered spares were
+left in mid-air and fell when the trays vanished. It now hides every object with a
+`DropIntoTray` that is not locked, not installed and not on the engine (the hide guard
+allows loose parts for this caller only), and still lists every name it hid.
+
+### Rod 2 / PistonEnd 2 — no static difference, the culprit is named in the log [QV]
+There is no kit-specific code path (every kit resolves `part.PistonKit00N.<role>`,
+`ghost.piston00N.<role>` and `PistonPivot_PistonKit00N` by number through the same
+functions; the step assets for kits 1 and 2 are key-for-key identical). The sentinel
+shipped in `c86a169` is on every placed part: the moment anything deactivates, re-parents,
+destroys or hides rod 2 / cap 2, logcat has
+`[HolderHideAttempt] object=ConnectingRod#… caller=OnDisable … Stack:` (with the calling
+method), or `[Piston2RodSuccess] … RE-PARENTED … Stack:`, or `renderer … DISABLED`, and the
+part is put back the next frame. Please send those lines (plus the `[Piston2RodSuccess]`
+/ `[PistonEnd2Success]` +0/+0.5/+2 s lines) from one run:
+`adb logcat -s Unity | grep -E "Piston2Rod|PistonEnd2|HolderHideAttempt"`.
+
+### [QV] checklist
+1. Locate-holders: pick up any holder → acknowledged, no warning.
+2. No ring on the desk; controller picks a part lying in the oil pan; nothing falls through the pan.
+3. Completion: trays and every spare part gone together; nothing drops.

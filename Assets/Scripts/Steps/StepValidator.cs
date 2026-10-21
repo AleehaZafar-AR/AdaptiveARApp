@@ -529,7 +529,13 @@ namespace AdaptiveAR.Steps
             _ackPartKey = action != null ? action.partKey : null;
             if (action == null || string.IsNullOrEmpty(action.partKey) || guidanceRegistry == null) return false;
 
-            foreach (string key in guidanceRegistry.RoleCandidates(action.partKey))
+            // Same accepted set as the physical action: equivalent parts (any unused holder, either
+            // bolt/nut of a pair) and interchangeable kit roles.
+            var ackKeys = new List<string>();
+            foreach (string eq in GuidanceAudit.ExpandEquivalent(action.partKey))
+                foreach (string k in guidanceRegistry.RoleCandidates(eq))
+                    if (!ackKeys.Contains(k)) ackKeys.Add(k);
+            foreach (string key in ackKeys)
             {
                 if (_consumed.Contains(key)) continue;
                 if (!guidanceRegistry.TryResolveQuiet(key, out GameObject go) || go == null) continue;

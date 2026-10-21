@@ -62,6 +62,7 @@ namespace AdaptiveAR.Steps
             pivot._authoredLocalRotation = go.transform.localRotation;     // the authored crankshaft orientation
 
             var rb = go.AddComponent<Rigidbody>(); rb.isKinematic = true; rb.useGravity = false;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
             pivot._grabbable = go.AddComponent<Oculus.Interaction.Grabbable>();
             var rot = go.AddComponent<Oculus.Interaction.OneGrabRotateTransformer>();
             rot.InjectOptionalPivotTransform(go.transform);

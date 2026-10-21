@@ -284,7 +284,7 @@ namespace AdaptiveAR.Steps
 
                 var flow = FindAnyObjectByType<AdaptiveAR.UI.AppFlowController>(FindObjectsInactive.Include);
                 RectTransform panel = flow != null && flow.StepPanel != null ? flow.StepPanel.transform as RectTransform : null;
-                if (_turntable != null && panel != null) _resetViewButton = MakeResetViewButton(panel, flow.BackButtonTemplate);
+                if (_turntable != null && _turntable.AssemblyRotationEnabled && panel != null) _resetViewButton = MakeResetViewButton(panel, flow.BackButtonTemplate);
             }
             catch (Exception e) { Debug.LogError("[Turntable] setup threw: " + e); }
         }
@@ -361,19 +361,16 @@ namespace AdaptiveAR.Steps
                         { if (child.gameObject.activeSelf && HideGuard.CanHide(child.gameObject, "CompletionCleanup(container)")) { child.gameObject.SetActive(false); hidden++; names.Add(child.name); } }
                     }
                 }
-                // Loose, never-installed parts (not locked, not on the engine) disappear with the trays.
-                if (registry != null)
+                // Every loose, never-installed part (anything with a tray behaviour that is not locked,
+                // not installed and not on the engine) disappears with the trays - registered or not.
+                foreach (DropIntoTray tray in FindObjectsByType<DropIntoTray>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
                 {
-                    var seen = new System.Collections.Generic.HashSet<GameObject>();
-                    foreach (string key in registry.PartKeys())
-                    {
-                        if (GuidanceRegistry.IsKitHandleKey(key)) continue;
-                        if (!registry.TryResolveQuiet(key, out GameObject go) || go == null || !seen.Add(go)) continue;
-                        if (_turntable != null && go.transform.IsChildOf(_turntable.transform)) continue;
-                        var padlock = go.GetComponent<PlacementLock>();
-                        if (padlock != null && padlock.IsLocked) continue;
-                        if (go.activeSelf && HideGuard.CanHide(go, "CompletionCleanup(loose)")) { go.SetActive(false); hidden++; names.Add(go.name); }
-                    }
+                    GameObject go = tray.gameObject;
+                    if (_turntable != null && go.transform.IsChildOf(_turntable.transform)) continue;
+                    if (go.GetComponent<InstalledPartSentinel>() != null) continue;
+                    var padlock = go.GetComponent<PlacementLock>();
+                    if (padlock != null && padlock.IsLocked) continue;
+                    if (go.activeSelf && HideGuard.CanHide(go, "CompletionCleanup(loose)", allowLooseParts: true)) { go.SetActive(false); hidden++; names.Add(go.name); }
                 }
                 Debug.Log($"[Session] completion cleanup: {hidden} tray/mat/loose object(s) hidden [{string.Join(", ", names)}]; the engine, its installed (locked) parts and the result UI remain.");
             }

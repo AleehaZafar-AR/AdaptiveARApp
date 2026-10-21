@@ -28,6 +28,12 @@ namespace AdaptiveAR.MR
 
         [SerializeField] private float rimMargin = 0.05f;
 
+        [Tooltip("Assembly-time engine rotation (ring + grab). OFF: the turntable is only the container that holds the " +
+                 "installed engine; nothing on it is a grab candidate, so parts lying in or beside the oil pan compete " +
+                 "with nothing. Final inspection builds its own pivot and is unaffected.")]
+        [SerializeField] private bool assemblyRotationEnabled = false;
+        public bool AssemblyRotationEnabled { get { return assemblyRotationEnabled; } }
+
         [Tooltip("Grab collider = the rim band only (not the whole disc). A controller's grab scoring prefers " +
                  "any collider its grab point is INSIDE, so a full disc under the engine out-competes small parts " +
                  "lying on or beside it; hands are gated by finger-volume overlap and do not see that.")]
@@ -111,6 +117,17 @@ namespace AdaptiveAR.MR
 
         private void Build(float radius, GameObject interactionTemplate)
         {
+            if (!assemblyRotationEnabled)
+            {
+                // Container only. Kinematic body (installed parts, ghosts and the oil pan collider ride on it);
+                // speculative CCD so falling parts cannot tunnel through the oil pan's thin base.
+                var body = gameObject.AddComponent<Rigidbody>();
+                body.isKinematic = true; body.useGravity = false;
+                body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                if (logChanges) Debug.Log("[Turntable] assembly-time rotation is OFF: no ring, no grab volume, no interactable on the engine container.");
+                return;
+            }
+
             // Subtle flat ring on the desk, not an engine component.
             _visual = GameObject.CreatePrimitive(PrimitiveType.Quad);
             _visual.name = "TurntableRing";
@@ -129,6 +146,7 @@ namespace AdaptiveAR.MR
             // Body + grab volume (a thin slab the size of the ring; the rim is what the hand reaches).
             var rb = gameObject.AddComponent<Rigidbody>();
             rb.isKinematic = true; rb.useGravity = false;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
             if (rimOnlyCollider)
             {
                 // The ring texture is the outer ~20% of the radius: that band is the grab surface.
@@ -257,6 +275,7 @@ namespace AdaptiveAR.MR
             else if (_collider != null) _collider.enabled = false;
 
             var rb = pivotGo.AddComponent<Rigidbody>(); rb.isKinematic = true; rb.useGravity = false;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
             var grab = pivotGo.AddComponent<Oculus.Interaction.Grabbable>();
 
             var rotate = pivotGo.AddComponent<Oculus.Interaction.OneGrabRotateTransformer>();
