@@ -2402,6 +2402,8 @@ namespace AdaptiveAR.Steps
             var tt = AdaptiveAR.MR.EngineTurntable.Current;
             bool engineMounted = tt != null && CurrentTarget != null && CurrentTarget.IsChildOf(tt.transform);
             StartCoroutine(WatchPlacedPart(placedPart, placedTag, parentBefore, snapPos, handle, kitName, engineMounted));
+            // Installed geometry from now on: who ever hides, re-parents or destroys it is named in the log and undone.
+            InstalledPartSentinel.Attach(placedPart, placedTag, IsHolderAction() ? CurrentSlotNumber() : 0, kitName);
         }
 
         private bool IsHolderAction()
@@ -2551,7 +2553,13 @@ namespace AdaptiveAR.Steps
                               $"position={part.position} distanceFromSnap={dist * 1000f:F0}mm locked={(padlock != null && padlock.IsLocked)} " +
                               $"kinematic={(body != null ? body.isKinematic.ToString() : "n/a")} kit={kit ?? "-"} handle={(handle != null ? handle.name + "#" + handle.GetInstanceID() : "-")} underKitHandle={underHandle} " +
                               $"handleMoved={(handle != null ? (Vector3.Distance(handle.position, handleStart) * 100f).ToString("F1") + "cm" : "-")} nearestHand={nearWho}@{(float.IsInfinity(nearD) ? "-" : (nearD * 100f).ToString("F0") + "cm")} " +
-                              $"grabForwarded={(padlock != null && padlock.ForwardedToHandle)}");
+                              $"grabForwarded={(padlock != null && padlock.ForwardedToHandle)} localPos={part.localPosition} localRot={part.localRotation.eulerAngles}");
+                    // Side-by-side lines for the kit comparison (identical code path for every kit).
+                    string sideTag = tag.Contains("Rod") ? "[RodSuccess]" : tag.Contains("PistonEnd") ? "[PistonEndSuccess]" : null;
+                    if (sideTag != null)
+                        Debug.Log($"{sideTag} kit={(kit != null ? kit.Substring(kit.Length - 1) : "-")} +{d:F1}s real={part.name}#{part.GetInstanceID()} active={active} visible={visible} " +
+                                  $"parent={(part.parent != null ? part.parent.name + "#" + part.parent.GetInstanceID() : "<root>")} localPos={part.localPosition} localRot={part.localRotation.eulerAngles} " +
+                                  $"locked={(padlock != null && padlock.IsLocked)} forwarded={(padlock != null && padlock.ForwardedToHandle)} handle={(handle != null ? handle.name : "-")} handleParent={(handle != null && handle.parent != null ? handle.parent.name : "-")}");
                     if (!visible) Debug.LogError($"{tag} the placed part is NOT visible (active={active}, renderer={(r != null ? r.enabled.ToString() : "none")}).");
                     if (!underHandle) Debug.LogError($"{tag} the placed part is not under its kit handle '{handle.name}' (parent is '{(part.parent != null ? part.parent.name : "<root>")}').");
                 }
@@ -2676,6 +2684,12 @@ namespace AdaptiveAR.Steps
             }
             yield return new WaitForSeconds(0.25f);
             Debug.Log($"{tag} grab hand-over: {why ?? "part gone"}");
+            if (child != null && (tag.Contains("Rod") || tag.Contains("PistonEnd")))
+            {
+                var pl = child.GetComponent<PlacementLock>();
+                Debug.Log($"{(tag.Contains("Rod") ? "[RodSuccess]" : "[PistonEndSuccess]")} kit={(tag.Length > 7 && char.IsDigit(tag[7]) ? tag[7].ToString() : (tag.Contains("PistonEnd") ? tag.Substring(10, 1) : "?"))} hand-over real={child.name}#{child.gameObject.GetInstanceID()} " +
+                          $"active={child.gameObject.activeInHierarchy} parent={(child.parent != null ? child.parent.name : "<root>")} localPos={child.localPosition} localRot={child.localRotation.eulerAngles} locked={(pl != null && pl.IsLocked)} forwarded={(pl != null && pl.ForwardedToHandle)} why={why}");
+            }
         }
 
         private System.Collections.IEnumerator ForwardToPivotWhenHandsOpen(Transform child, InstalledPistonPivot pivot)

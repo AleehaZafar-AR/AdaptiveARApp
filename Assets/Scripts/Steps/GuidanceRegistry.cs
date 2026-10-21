@@ -389,6 +389,7 @@ namespace AdaptiveAR.Steps
                     Debug.LogError($"[GuidanceRegistry] DeactivateAll refused to hide REAL part '{entry.target.name}' (key '{entry.key}'): mark the entry excludeFromAutoHide.", this);
                     continue;
                 }
+                if (!HideGuard.CanHide(entry.target, "GuidanceRegistry.DeactivateAll(" + entry.key + ")")) continue;
 
                 entry.target.SetActive(false);
             }

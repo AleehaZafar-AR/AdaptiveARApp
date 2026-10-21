@@ -3581,3 +3581,84 @@ Completion UI, Restart and Quit untouched.
 3. Cap 2 likewise.
 4. Completion: engine turns about its centre, same direction as the hand, no jitter;
    two hands scale it in place.
+
+
+---
+
+## Claude → Reviewer — 2026-10-21 — Four failures: [GrabCompare] + controller-hand candidate filter, kit side-by-side traces, installed-part sentinel that names every hider
+
+Base: `265482b`. Files: `StepValidator.cs`, `StepPresenter.cs`, `GuidanceRegistry.cs`,
+`AssemblySessionController.cs`, `ControllerGrabDiagnostics.cs`, `AppFlowController.cs`,
+new `InstalledPartSentinel.cs`. Both assemblies compile; everything is [QV].
+
+### Editor "5 errors"
+The Editor log of the current session shows them: `Assets/Editor/AssemblyWorkSurfaceAuthoring.cs`
+could not see `AssemblyWorkSurface.Placement / HeadMode / HasAuthoredHeadPose / MatSize /
+EditorHasAuthoringPreview…` and `GuidanceAudit` — the Editor-only inspector compiled
+against an out-of-date runtime assembly (those members exist in the runtime file). They
+appear in one early batch; every later compilation in the same log succeeded (the last six
+"Tundra build success", no `error CS` after). Press Clear in the Console; if they come back
+after a recompile, paste the exact lines.
+
+### 1. Controller re-grab — the divergence the SDK source shows, and the proof lines [QV]
+Both hand types grab through `HandGrabInteractor` → `HandGrabInteractable`. The scoring is
+the same (`HandGrabInteractable.CalculateBestPose` → `GrabPoseHelper.CollidersScore`): a
+collider the grab point is **inside** always outranks one it is merely close to. Beside
+the oil pan, the assembly-time turntable's rim slab (3 cm tall, at desk level) is a
+registered interactable. A tracked hand pinches a part from above — the pinch point sits
+on the part, not in the slab. The controller-driven synthetic hand's grab point is at the
+palm, which the controller places at desk level — inside the slab — so the **turntable**
+becomes the candidate and the part is never selected. That is the first point where the
+two paths diverge: candidate generation, not select eligibility. Fix, controller-driven
+interactors only (`ControllerReachFilter`, an `IGameObjectFilter` injected into each
+controller-driven `HandGrabInteractor`, existing rig filters kept): while a loose part is
+within 8 cm of that grab point (`reachMeters`), the turntable is not a candidate for it.
+Tracked hands, collisions, layers and assembly logic untouched.
+Proof: `[GrabCompare] mode=tracked_hand|controller_hand side= when=<Normal->Hover |
+Hover->Select | attempt:grip|trigger> part=<name#id> nearestDistance= registryMember=
+interactableState= interactorState= hoverCandidate= selectCandidate= rigidbodySleeping=
+colliderOverlap= interactionMask= bodyDistance= interactableEnabled= partKinematic=
+filterActive=` — printed for every hover/select of either hand type and on every
+controller button press, for the nearest loose part. Reading it: tracked `Hover`/`Select`
+with controller never `Hover` and `hoverCandidate=Turntable` → the case above (now
+filtered, `filterActive=true`); `registryMember=false` → trigger registry
+(`rigidbodySleeping` / `colliderOverlap` say why); both hover, controller never selects →
+select eligibility (grab-type / strength), which would be rig configuration.
+
+### 2 / 3. Rod 2 and PistonEnd 2 — same code path as kit 1, now proven side by side [QV]
+There is no kit-specific branch anywhere in success, snap, join, lock, hand-over,
+forwarding, guard or parent logic: every kit resolves `part.PistonKit00N.<role>`,
+`ghost.piston00N.<role>` and `PistonPivot_PistonKit00N` by number through one function
+each. The only per-kit difference is scene data (kit 2's ghost group and targets). What
+the log now shows for both kits, from the identical code: `[RodSuccess] kit=1|2 +t real=
+active= visible= parent= localPos= localRot= locked= forwarded= handle= handleParent=` and
+`[PistonEndSuccess] kit=1|2 …` at +0 / +0.5 / +2 s and at the grab hand-over, plus the
+sentinel below, which names whoever hides or re-parents kit 2's part.
+
+### 4. Holders — the hider will be named, and it is undone [QV]
+No static hide path survives the guards (presenter, registry, completion cleanup all
+refuse real parts), so the sentinel takes it to runtime: `InstalledPartSentinel` is
+attached to every placed part at success and stays for the session.
+- `OnDisable` fires on `SetActive(false)` of the part **or any ancestor**: it logs
+  `[HolderHideAttempt] object= caller=OnDisable blocked=false … Stack:` with the full
+  stack trace of the caller and which ancestor went inactive, then re-activates the
+  chain next frame and logs what it re-activated.
+- `OnTransformParentChanged` logs any re-parent with the caller's stack.
+- Every frame: a disabled renderer or a collapsed scale is restored and reported;
+  `OnBecameInvisible` is logged; `OnDestroy` logs the caller.
+- `[HolderSuccess] slot=n … at=next-action:<id>` (and every other installed part) is
+  printed at each action presentation, with `active= activeSelf= visible= parent=
+  localPos= localRot= locked= forwarded=`.
+- `HideGuard.CanHide(go, caller)` now fronts every generic hide site (presenter
+  deactivate / isolation siblings / future parts / ancestor restore / make-inert, registry
+  DeactivateAll, completion cleanup): a real installed part — or an ancestor containing
+  one — is never hidden, and each attempt prints `[HolderHideAttempt] object= caller=
+  blocked=true|false`.
+Teardown (Restart / Quit) is excluded from the sentinel's reporting.
+
+### [QV] checklist
+1. Controller beside the oil pan: `[GrabCompare] mode=controller_hand … hoverCandidate=<part>
+   filterActive=true`, then `Hover->Select`.
+2/3. `[RodSuccess] kit=2 +2.0s active=true visible=true` and the same for `[PistonEndSuccess] kit=2`.
+4. Any `[HolderHideAttempt] … blocked=false` line carries the stack trace of the real culprit;
+   the holder is back the next frame.

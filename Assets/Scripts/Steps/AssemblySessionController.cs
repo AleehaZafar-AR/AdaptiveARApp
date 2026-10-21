@@ -358,7 +358,7 @@ namespace AdaptiveAR.Steps
                     {
                         if (child == null) continue;
                         if (child.name.StartsWith("tray") || child.name.StartsWith("Plane") || child.name.StartsWith("PistonKits") || child.name.StartsWith("Worksurface") || child.name.StartsWith("WorkSurface"))
-                        { if (child.gameObject.activeSelf) { child.gameObject.SetActive(false); hidden++; names.Add(child.name); } }
+                        { if (child.gameObject.activeSelf && HideGuard.CanHide(child.gameObject, "CompletionCleanup(container)")) { child.gameObject.SetActive(false); hidden++; names.Add(child.name); } }
                     }
                 }
                 // Loose, never-installed parts (not locked, not on the engine) disappear with the trays.
@@ -372,7 +372,7 @@ namespace AdaptiveAR.Steps
                         if (_turntable != null && go.transform.IsChildOf(_turntable.transform)) continue;
                         var padlock = go.GetComponent<PlacementLock>();
                         if (padlock != null && padlock.IsLocked) continue;
-                        if (go.activeSelf) { go.SetActive(false); hidden++; names.Add(go.name); }
+                        if (go.activeSelf && HideGuard.CanHide(go, "CompletionCleanup(loose)")) { go.SetActive(false); hidden++; names.Add(go.name); }
                     }
                 }
                 Debug.Log($"[Session] completion cleanup: {hidden} tray/mat/loose object(s) hidden [{string.Join(", ", names)}]; the engine, its installed (locked) parts and the result UI remain.");
@@ -862,6 +862,7 @@ namespace AdaptiveAR.Steps
             {
                 Debug.LogError($"[Session] presenter.PresentAction threw for '{(action != null ? action.Id : "?")}': {e}");
             }
+            InstalledPartSentinel.ReportAll("next-action:" + (action != null ? action.Id : "<none>"));
 
             if (logger != null && action != null)
                 logger.LogActionEnter(resolved, action.Id, action.kind.ToString(),

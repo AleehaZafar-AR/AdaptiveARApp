@@ -677,6 +677,7 @@ namespace AdaptiveAR.Steps
                 Transform child = ghostGroup.transform.Find(role);
                 if (child == null || !child.gameObject.activeSelf) continue;
                 if (IsRealPart(child.gameObject)) { Debug.LogError($"[StepPresenter] refused to hide REAL part '{child.name}' as a future ghost part."); continue; }
+                if (!HideGuard.CanHide(child.gameObject, "StepPresenter.HideFutureParts")) continue;
                 child.gameObject.SetActive(false);
                 _hiddenSiblings.Add(child.gameObject);
                 hidden++;
@@ -701,6 +702,7 @@ namespace AdaptiveAR.Steps
             {
                 if (sib == target.transform || !sib.gameObject.activeSelf) continue;
                 if (IsRealPart(sib.gameObject)) { Debug.LogError($"[StepPresenter] refused to hide REAL part '{sib.name}' as a ghost sibling."); continue; }
+                if (!HideGuard.CanHide(sib.gameObject, "StepPresenter.ActivateIsolated(sibling)")) continue;
                 sib.gameObject.SetActive(false);
                 _hiddenSiblings.Add(sib.gameObject);
             }
@@ -714,7 +716,7 @@ namespace AdaptiveAR.Steps
 
         private void RestoreIsolation()
         {
-            foreach (GameObject g in _activatedAncestors) if (g != null && !IsRealPart(g)) g.SetActive(false);
+            foreach (GameObject g in _activatedAncestors) if (g != null && !IsRealPart(g) && HideGuard.CanHide(g, "StepPresenter.RestoreIsolation(ancestor)")) g.SetActive(false);
             _activatedAncestors.Clear();
             foreach (GameObject g in _hiddenSiblings) if (g != null) g.SetActive(true);
             _hiddenSiblings.Clear();
@@ -728,6 +730,7 @@ namespace AdaptiveAR.Steps
         private void MakeInert(GameObject ghost)
         {
             if (ghost == null || _madeInert.Contains(ghost)) return;
+            if (IsRealPart(ghost) || !HideGuard.CanHide(ghost, "StepPresenter.MakeInert")) { Debug.LogError($"[StepPresenter] refused to make REAL part '{ghost.name}' inert (it is not a ghost)."); return; }
             _madeInert.Add(ghost);
 
             foreach (DropIntoTray d in ghost.GetComponentsInChildren<DropIntoTray>(true))
@@ -811,6 +814,7 @@ namespace AdaptiveAR.Steps
             {
                 if (target == null) continue;
                 if (IsRealPart(target)) { Debug.LogError($"[StepPresenter] refused to deactivate REAL part '{target.name}' from a ghost list."); continue; }
+                if (!HideGuard.CanHide(target, "StepPresenter.DeactivateAll")) continue;
                 target.SetActive(false);
             }
             list.Clear();
