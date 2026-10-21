@@ -383,6 +383,12 @@ namespace AdaptiveAR.Steps
                 // Parts the operator manipulates are registered for lookup only.
                 if (entry.excludeFromAutoHide)
                     continue;
+                // A real part (grabbable / placed) is never a ghost, whatever the entry says.
+                if (entry.target.GetComponent<Oculus.Interaction.PointableElement>() != null || entry.target.GetComponent<PlacementLock>() != null)
+                {
+                    Debug.LogError($"[GuidanceRegistry] DeactivateAll refused to hide REAL part '{entry.target.name}' (key '{entry.key}'): mark the entry excludeFromAutoHide.", this);
+                    continue;
+                }
 
                 entry.target.SetActive(false);
             }

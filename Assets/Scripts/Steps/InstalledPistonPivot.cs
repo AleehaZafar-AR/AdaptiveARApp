@@ -30,6 +30,14 @@ namespace AdaptiveAR.Steps
         [Tooltip("Seconds for the smooth return to the authored crankshaft orientation once the piston is complete.")]
         public float returnSeconds = 0.4f;
 
+        [Tooltip("Largest swing allowed either way from the authored orientation, degrees (upper bound; the oil pan may reduce it).")]
+        public float maxSwingDegrees = 75f;
+        [Tooltip("Smallest swing always allowed either way, degrees, so the cap / bolts / nuts stay reachable.")]
+        public float minSwingDegrees = 25f;
+
+        public float LimitNegative { get; private set; }
+        public float LimitPositive { get; private set; }
+
         private Quaternion _authoredLocalRotation;
         private bool _returning;
 
@@ -58,6 +66,12 @@ namespace AdaptiveAR.Steps
             var rot = go.AddComponent<Oculus.Interaction.OneGrabRotateTransformer>();
             rot.InjectOptionalPivotTransform(go.transform);
             rot.InjectOptionalRotationAxis(Oculus.Interaction.OneGrabRotateTransformer.Axis.Up);
+            pivot.ComputeLimits(head, pivotPoint, up);
+            rot.Constraints = new Oculus.Interaction.OneGrabRotateTransformer.OneGrabRotateConstraints
+            {
+                MinAngle = new Oculus.Interaction.FloatConstraint { Constrain = true, Value = -pivot.LimitNegative },
+                MaxAngle = new Oculus.Interaction.FloatConstraint { Constrain = true, Value = pivot.LimitPositive }
+            };
             pivot._grabbable.InjectOptionalOneGrabTransformer(rot);
 
             head.SetParent(go.transform, true);
@@ -69,6 +83,54 @@ namespace AdaptiveAR.Steps
             _all.Add(pivot);
             Debug.Log($"[PistonPivot] {kit}: created at {pivotPoint} axis={up} ({pivot._forwarded.Count} grab interactable(s) turn the installed piston about the journal axis; targets {(ghostGroup != null ? ghostGroup.name : "-")} follow).");
             return pivot;
+        }
+
+        /// <summary>
+        /// Swing limits: 0 = authored orientation. Each way, the piston (its renderers' bounds
+        /// corners, rotated about the crank axis through the pivot) must stay above the oil pan's
+        /// top plane; the first angle that dips below it ends the range. Clamped to
+        /// [minSwingDegrees, maxSwingDegrees]; symmetric default when no oil pan is found.
+        /// </summary>
+        private void ComputeLimits(Transform head, Vector3 pivotPoint, Vector3 axisWorld)
+        {
+            LimitNegative = LimitPositive = Mathf.Clamp(60f, minSwingDegrees, maxSwingDegrees);
+            Renderer pan = null;
+            foreach (Transform t in head.root.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name.IndexOf("oilpan", System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (t.GetComponentInParent<InstalledPistonPivot>() != null) continue;
+                var r = t.GetComponentInChildren<Renderer>(true);
+                if (r != null && r.gameObject.activeInHierarchy) { pan = r; break; }
+            }
+            if (pan == null)
+            {
+                Debug.LogWarning($"[PistonPivot] {Kit}: no oil pan renderer found - symmetric swing limit ±{LimitPositive:F0} deg.");
+                return;
+            }
+            float panTop = pan.bounds.max.y;
+            var corners = new List<Vector3>();
+            foreach (Renderer r in head.GetComponentsInChildren<Renderer>(true))
+            {
+                Bounds b = r.bounds;
+                for (int i = 0; i < 8; i++)
+                    corners.Add(new Vector3((i & 1) == 0 ? b.min.x : b.max.x, (i & 2) == 0 ? b.min.y : b.max.y, (i & 4) == 0 ? b.min.z : b.max.z));
+            }
+            float Limit(float sign)
+            {
+                float ok = 0f;
+                for (float a = 5f; a <= maxSwingDegrees; a += 5f)
+                {
+                    Quaternion q = Quaternion.AngleAxis(sign * a, axisWorld);
+                    float minY = float.MaxValue;
+                    foreach (Vector3 c in corners) minY = Mathf.Min(minY, (q * (c - pivotPoint) + pivotPoint).y);
+                    if (minY < panTop - 0.005f) break;
+                    ok = a;
+                }
+                return Mathf.Clamp(ok, minSwingDegrees, maxSwingDegrees);
+            }
+            LimitPositive = Limit(+1f);
+            LimitNegative = Limit(-1f);
+            Debug.Log($"[PistonPivot] {Kit}: swing limits min=-{LimitNegative:F0} max=+{LimitPositive:F0} deg about the crank axis (0 = authored; oil pan top y={panTop:F3}, {corners.Count / 8} renderer(s) checked).");
         }
 
         /// <summary>Every grab on the subassembly (head, rod, pin - and parts joined later) turns the pivot.</summary>

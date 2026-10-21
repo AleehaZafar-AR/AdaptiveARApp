@@ -62,6 +62,9 @@ namespace AdaptiveAR.Steps
                       $"handPointable={(hand != null && hand.PointableElement != null ? ((Component)hand.PointableElement).name + "#" + ((Component)hand.PointableElement).GetInstanceID() : "NONE")} " +
                       $"ctrlRigidbody={(ctrl != null && ctrl.Rigidbody != null ? ctrl.Rigidbody.name : "NONE")} handRigidbody={(hand != null && hand.Rigidbody != null ? hand.Rigidbody.name : "NONE")}");
 
+            Debug.Log($"[ControllerRegrab] part={part.name}#{part.GetInstanceID()} grabInteractable={(hand != null ? "HandGrabInteractable:" + (hand.enabled ? "on" : "OFF") : "none")}{(ctrl != null ? "/GrabInteractable:" + (ctrl.enabled ? "on" : "OFF") : "")} " +
+                      $"grabbable={(grabbable != null ? (grabbable.enabled ? "on" : "OFF") + "#" + grabbable.GetInstanceID() : "none")} collider={(col != null ? col.GetType().Name + (col.enabled ? ":on" : ":OFF") + (col.isTrigger ? ",trigger" : "") : "none")} " +
+                      $"layer={LayerMask.LayerToName(part.layer)} active={part.activeInHierarchy} rb={(rb != null ? (rb.isKinematic ? "kinematic" : "dynamic") + (rb.IsSleeping() ? ",sleeping" : "") : "none")}");
             RepairControllerSide(part, hand, ctrl, rb);
         }
 
@@ -78,7 +81,6 @@ namespace AdaptiveAR.Steps
             { ctrl.enabled = hand.enabled; fixes.Add($"enabled:={hand.enabled}"); }
             else if (fixes.Count > 0 && ctrl.enabled)
             { ctrl.enabled = false; ctrl.enabled = true; fixes.Add("re-registered"); }   // the registry re-reads Rigidbody/colliders on enable
-            if (rb != null && rb.IsSleeping()) rb.WakeUp();
             if (fixes.Count > 0) Debug.LogError($"[ControllerRegrab] '{part.name}': controller side differed from the hand side - repaired [{string.Join(", ", fixes)}]");
         }
 
@@ -93,8 +95,6 @@ namespace AdaptiveAR.Steps
                 b.enabled = true;
                 fixedCount++;
             }
-            var rb = part.GetComponent<Rigidbody>();
-            if (rb != null && rb.IsSleeping()) rb.WakeUp();
             if (log || fixedCount > 0) Describe(part, why, fixedCount);
         }
 

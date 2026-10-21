@@ -557,6 +557,15 @@ namespace AdaptiveAR.Steps
             }
         }
 
+        private void Start()
+        {
+            // The SDK grab callbacks are hooked here, before any action, so [ActualGrabStart]
+            // cannot depend on the action pipeline having run.
+            try { HookInteractors(); BindGrabCallbacks(); }
+            catch (Exception e) { Debug.LogError("[ActualGrabStart] hooking at Start threw: " + e); }
+            if (GetComponent<ControllerGrabDiagnostics>() == null) gameObject.AddComponent<ControllerGrabDiagnostics>();
+        }
+
         private void OnDestroy()
         {
             foreach (KeyValuePair<GameObject, Action<Oculus.Interaction.PointerEvent>> kv in _boundHandlers)
@@ -864,7 +873,8 @@ namespace AdaptiveAR.Steps
                 Transform other = asm.transform.Find(towardsRole);
                 if (self != null && other != null)
                 {
-                    Vector3 d = other.position - self.position;
+                    var rs = self.GetComponent<Renderer>(); var ro = other.GetComponent<Renderer>();
+                    Vector3 d = (ro != null ? ro.bounds.center : other.position) - (rs != null ? rs.bounds.center : self.position);
                     if (d.sqrMagnitude > 1e-8f)
                     {
                         _capAxisLocal = self.InverseTransformDirection(d.normalized).normalized;
@@ -1136,6 +1146,11 @@ namespace AdaptiveAR.Steps
         {
             try
             {
+                if (a.NewState == Oculus.Interaction.InteractorState.Select || a.PreviousState == Oculus.Interaction.InteractorState.Select)
+                {
+                    MonoBehaviour sel = selected();
+                    Debug.Log($"[InteractorState] {interactor.GetType().Name}@{PathOf(interactor.transform)} {a.PreviousState}->{a.NewState} selectedInteractable={(sel != null ? PathOf(sel.transform) : "none")}");
+                }
                 if (a.NewState == Oculus.Interaction.InteractorState.Select)
                 {
                     MonoBehaviour s = selected();
@@ -1403,11 +1418,14 @@ namespace AdaptiveAR.Steps
             bool physical = IsActive && !_completed;
             bool ack = _ackArmed;
             List<string> accepted = DescribeCurrentlyAccepted(out bool armed);
-            bool tolerated = _toleratedObjects.Contains(part) || part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null
-                             || (part.GetComponentInParent<InstalledPistonPivot>() != null && part.GetComponent<PlacementLock>() != null && part.GetComponent<PlacementLock>().IsLocked);
+            string why = _toleratedObjects.Contains(part) ? "tolerated(kit-subassembly)"
+                       : part.GetComponentInParent<AdaptiveAR.MR.EngineTurntable>() != null ? "tolerated(under-turntable)"
+                       : (part.GetComponentInParent<InstalledPistonPivot>() != null && part.GetComponent<PlacementLock>() != null && part.GetComponent<PlacementLock>().IsLocked) ? "tolerated(installed-piston)"
+                       : (physical && _acceptedObjects.Contains(part)) ? "accepted" : (ack && _ackObjects.Contains(part)) ? "accepted(read)" : (!armed ? "not-armed" : "WRONG");
+            bool tolerated = why.StartsWith("tolerated");
             bool eligible = tolerated || (physical && _acceptedObjects.Contains(part)) || (ack && _ackObjects.Contains(part));
 
-            Debug.Log($"[WrongGrab] grabbed={part.name}#{part.GetInstanceID()} accepted=[{string.Join(", ", accepted)}] wrong={(armed && !eligible)} " +
+            Debug.Log($"[WrongGrab] grabbed={part.name}#{part.GetInstanceID()} accepted=[{string.Join(", ", accepted)}] wrong={(armed && !eligible)} reason={why} " +
                       $"state={(physical ? "PHYSICAL" : (ack ? "READ" : "none"))} action={CurrentActionId()} source={source}");
             Debug.Log($"[EligibilityRuntime] selected={part.name}#{part.GetInstanceID()} acceptedObjects=[{string.Join(", ", accepted)}] eligible={eligible}" +
                       $"{(tolerated ? "(tolerated)" : "")} state={(physical ? "PHYSICAL" : (ack ? "READ" : "none"))} action={CurrentActionId()} source={source}");
@@ -2060,6 +2078,7 @@ namespace AdaptiveAR.Steps
             string variant = _symmetry == AxisSymmetry.HalfTurnAboutAxis
                 ? (Quaternion.Angle(EffectiveTargetRotation(_active), CurrentTarget.rotation) < 0.5f ? "A(authored)" : "B(180deg)")
                 : (_symmetry == AxisSymmetry.AxialFreeFlip && Vector3.Dot(partAxis, targetAxis) < 0f ? "flipped" : "authored");
+            LogHalfTurnDecision(inZone ? "live-in-zone" : "live");
             Debug.Log($"{Tag("Validation")} part={Describe(_active.tf)} target={Describe(CurrentTarget)} " +
                       $"positionError={posErr:F4} rotationError={rotErr:F1} posOK={posErr <= _posTol} rotOK={rotErr <= _rotTol} " +
                       $"axisError={axisAngle:F1} rollIgnored={rollIgnored} roll={roll:F1} symmetryVariant={variant} sym={_symmetry} axisLocal={_active.axisLocal} " +
@@ -2165,9 +2184,33 @@ namespace AdaptiveAR.Steps
                 return targetFrame * Quaternion.Inverse(partFrame);        // maps the part's long/normal onto the target's
             }
             if (_symmetry != AxisSymmetry.HalfTurnAboutAxis) return CurrentTarget.rotation;
-            Quaternion a = CurrentTarget.rotation;
-            Quaternion b = CurrentTarget.rotation * Quaternion.AngleAxis(180f, c.axisLocal);
-            return Quaternion.Angle(c.tf.rotation, a) <= Quaternion.Angle(c.tf.rotation, b) ? a : b;
+            HalfTurnVariants(c, out Quaternion a, out Quaternion b, out float angA, out float angB);
+            return angA <= angB ? a : b;
+        }
+
+        /// <summary>
+        /// The two valid orientations of a half-turn-symmetric part: A = authored, B = authored
+        /// turned 180 degrees about the part's PHYSICAL symmetry axis (the rod axis for the cap,
+        /// resolved from the assembled ghost - not the mesh's longest extent).
+        /// </summary>
+        private void HalfTurnVariants(Candidate c, out Quaternion a, out Quaternion b, out float angA, out float angB)
+        {
+            Vector3 axis = AxisFor(c.tf);
+            a = CurrentTarget.rotation;
+            b = CurrentTarget.rotation * Quaternion.AngleAxis(180f, axis);
+            angA = Quaternion.Angle(c.tf.rotation, a);
+            angB = Quaternion.Angle(c.tf.rotation, b);
+        }
+
+        /// <summary>[PistonEndValidation] variant=A|B angleError= accepted= (half-turn roles only).</summary>
+        private void LogHalfTurnDecision(string when)
+        {
+            if (_symmetry != AxisSymmetry.HalfTurnAboutAxis || _active == null || _active.tf == null || CurrentTarget == null) return;
+            HalfTurnVariants(_active, out _, out _, out float angA, out float angB);
+            bool useB = angB < angA;
+            float err = useB ? angB : angA;
+            Debug.Log($"{Tag("Validation")} variant={(useB ? "B" : "A")} angleError={err:F1} accepted={err <= _rotTol} " +
+                      $"(A={angA:F1} B={angB:F1} tol={_rotTol:F0} axisLocal={AxisFor(_active.tf)} axisFromGhost={_hasCapAxis} when={when})");
         }
 
         private float OrientationError(Candidate c)
@@ -2220,6 +2263,7 @@ namespace AdaptiveAR.Steps
         private void FailAttempt(string trigger, bool counted)
         {
             if (!_inAttempt) return;
+            LogHalfTurnDecision("attempt:" + trigger);
             _inAttempt = false;
             AttemptCount++;
             LastAttemptCounted = counted;
@@ -2272,6 +2316,7 @@ namespace AdaptiveAR.Steps
 
             string tag = Tag("Success");
             string placedTag = PlacedTag();
+            LogHalfTurnDecision("success:" + trigger);
             string parentBefore = _active.tf.parent != null ? $"{_active.tf.parent.name}#{_active.tf.parent.GetInstanceID()}" : "<root>";
             Vector3 snapPos = CurrentTarget.position;
             _occupiedTargets.Add(CurrentTarget);
@@ -2354,7 +2399,9 @@ namespace AdaptiveAR.Steps
             if (kitName != null && guidanceRegistry != null) guidanceRegistry.TryGetKitHandle(kitName, out handle);
             if (IsHolderAction())
                 Debug.Log($"[HolderPlacement] occupiedSlot={CurrentSlotNumber()} installedHolder={placedPart.name} nextSlot={Mathf.Min(4, CurrentSlotNumber() + 1)} (slot ghost, validation target and snap target were the same transform {Describe(CurrentTarget)})");
-            StartCoroutine(WatchPlacedPart(placedPart, placedTag, parentBefore, snapPos, handle, kitName));
+            var tt = AdaptiveAR.MR.EngineTurntable.Current;
+            bool engineMounted = tt != null && CurrentTarget != null && CurrentTarget.IsChildOf(tt.transform);
+            StartCoroutine(WatchPlacedPart(placedPart, placedTag, parentBefore, snapPos, handle, kitName, engineMounted));
         }
 
         private bool IsHolderAction()
@@ -2412,8 +2459,9 @@ namespace AdaptiveAR.Steps
         private string PlacedTag()
         {
             string kit = GuidanceRegistry.KitOf(PartKey);
-            if (kit == null) return IsHolderAction() ? $"[Holder{CurrentSlotNumber()}Success]" : Tag("Success");
+            if (kit == null) return IsHolderAction() ? $"[HolderSuccess] slot={CurrentSlotNumber()}" : Tag("Success");
             string role = RoleNameOf(PartKey) ?? "";
+            if (role == "PistonEnd") return "[PistonEnd" + kit.Substring(kit.Length - 1) + "Success]";
             string shortRole = role == "ConnectingRod" ? "Rod" : role == "ConnectingPin" ? "Pin" : role == "PistonHead" ? "Head"
                              : role == "PistonEnd" ? "Cap" : role.StartsWith("pistonBolt") ? "Bolt" : role.StartsWith("PistonNut") ? "Nut" : role;
             return "[Piston" + kit.Substring(kit.Length - 1) + shortRole + "Success]";
@@ -2425,7 +2473,7 @@ namespace AdaptiveAR.Steps
         /// active, visible, under its parent and at its snapped local pose. Every correction is
         /// an ERROR naming what was found; state lines at +0, +0.5 and +2 s.
         /// </summary>
-        private System.Collections.IEnumerator WatchPlacedPart(Transform part, string tag, string parentBefore, Vector3 snapPos, Transform handle, string kit)
+        private System.Collections.IEnumerator WatchPlacedPart(Transform part, string tag, string parentBefore, Vector3 snapPos, Transform handle, string kit, bool engineMounted = false)
         {
             if (part == null) yield break;
             yield return new WaitForEndOfFrame();
@@ -2439,7 +2487,7 @@ namespace AdaptiveAR.Steps
             int reports = 0;
             float[] reportAt = { 0f, 0.5f, 2f };
 
-            float guardSeconds = kit == null ? 6f : 2f;        // engine-mounted parts (holders, camshaft, crankshaft) are watched longer
+            float guardSeconds = (kit == null || engineMounted) ? 6f : 2f;   // anything mounted on the engine is watched longer
             while (Time.time - start <= guardSeconds + 0.05f)
             {
                 if (part == null) { Debug.LogError($"{tag} the placed part was DESTROYED."); yield break; }

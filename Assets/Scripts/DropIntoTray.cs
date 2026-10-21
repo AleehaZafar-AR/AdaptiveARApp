@@ -80,6 +80,15 @@ public class DropIntoTray : MonoBehaviour
              "in the colliders cannot cause an endless fall-and-respawn loop.")]
     [SerializeField] private int maxRecoveriesBeforeHolding = 3;
 
+    [Header("Resting")]
+    [Tooltip("Seconds below the motion thresholds before a loose part is put to rest: sweep CCD off, body asleep.")]
+    [SerializeField] private float restAfterSeconds = 0.5f;
+
+    [Tooltip("A resting (sleeping) part is woken while any grab interactor's body is within this distance, metres, " +
+             "so the Interaction SDK's trigger registry sees it. Tracked hands wake parts with their physics capsules; " +
+             "controller-driven hands have none.")]
+    [SerializeField] private float wakeRadius = 0.15f;
+
     [Header("Debug")]
     [SerializeField] private bool logRecovery = true;
 
@@ -87,6 +96,8 @@ public class DropIntoTray : MonoBehaviour
 
     private bool _wasMoving;
     private float _stillSince = -1f;
+    private bool _resting;
+    private bool _wokeLogged;
 
     private Vector3 authoredLocalPosition;
     private Quaternion authoredLocalRotation;
@@ -118,6 +129,9 @@ public class DropIntoTray : MonoBehaviour
 
     void OnEnable()
     {
+        // A placed (locked) part that is re-activated must never be dropped back to gravity.
+        var padlock = GetComponent<AdaptiveAR.Steps.PlacementLock>();
+        if (padlock != null && padlock.IsLocked) { Hold(); return; }
         if (releaseToGravityOnEnable)
             ReleaseToPhysics();
         else
@@ -142,14 +156,46 @@ public class DropIntoTray : MonoBehaviour
         // be left disabled after a toggle, which makes the part grabbable by one input but
         // not the other.
         bool moving = rb.linearVelocity.sqrMagnitude > 0.0004f || rb.angularVelocity.sqrMagnitude > 0.01f;
-        if (moving) { _wasMoving = true; _stillSince = -1f; }
+        if (moving)
+        {
+            _wasMoving = true; _stillSince = -1f;
+            if (_resting)
+            {
+                // Back in motion (grabbed / knocked): full sweep collision again.
+                _resting = false; _wokeLogged = false;
+                rb.collisionDetectionMode = EffectiveCollisionDetection;
+            }
+        }
         else if (_wasMoving)
         {
             if (_stillSince < 0f) _stillSince = Time.time;
-            else if (Time.time - _stillSince > 0.5f)
+            else if (Time.time - _stillSince > restAfterSeconds)
             {
+                // At rest: no sweep CCD (it keeps re-solving resting contacts), let the body sleep.
                 _wasMoving = false;
+                _resting = true;
+                rb.collisionDetectionMode = CollisionDetectionMode.Discrete;
+                rb.Sleep();
+                if (logRecovery) Debug.Log($"[TrayRest] '{name}' at rest: sweep collision off, body asleep (wakes normally on grab or when a hand is within {wakeRadius * 100f:F0} cm).");
                 AdaptiveAR.Steps.GrabParity.OnSettled(gameObject, "settled after moving");
+            }
+        }
+
+        // The SDK finds parts through physics triggers on the part; a sleeping body is kept
+        // awake only while a hand / controller-hand body is close enough to be reaching for it.
+        if (_resting && rb.IsSleeping())
+        {
+            var bodies = AdaptiveAR.Steps.ControllerGrabDiagnostics.InteractorBodies;
+            for (int i = 0; i < bodies.Count; i++)
+            {
+                Transform b = bodies[i];
+                if (b == null || !b.gameObject.activeInHierarchy) continue;
+                if ((b.position - transform.position).sqrMagnitude <= wakeRadius * wakeRadius)
+                {
+                    rb.WakeUp();
+                    if (!_wokeLogged) { _wokeLogged = true; Debug.Log($"[ControllerRegrab] woke resting '{name}' - interactor '{b.name}' within {Vector3.Distance(b.position, transform.position) * 100f:F0} cm (sleeping body)."); }
+                    break;
+                }
             }
         }
 

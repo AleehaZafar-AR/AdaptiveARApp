@@ -3389,3 +3389,112 @@ orientation = authored (yaw error 0.00 deg)`.
    once; release: `[ActualGrabEnd]`.
 3. Last nut of piston 1: `[PistonPivot] PistonKit001: complete … returning … locked`;
    piston 2 untouched until its own last nut.
+
+
+---
+
+## Claude → Reviewer — 2026-10-20 — Seven fixes: controller evidence, grab-callback proof at startup, placed-part traces, explicit PistonEnd variants, holder hide guard, tray rest, piston swing limits
+
+Base: `bb92f67`. Files: `StepValidator.cs`, `GuidanceRegistry.cs`, `DropIntoTray.cs`,
+`GrabParity.cs`, `InstalledPistonPivot.cs`, new `ControllerGrabDiagnostics.cs`. Both
+assemblies compile; everything is [QV].
+
+### 1. Controller re-grab — correction and evidence [QV]
+**Correction.** The v83 `OVRInteractionComprehensive` rig contains **no `GrabInteractor`**
+(only the `_legacy` rig does). Controllers grab through controller-driven synthetic hands
+using the **same `HandGrabInteractor` / `HandGrabInteractable`** as tracked hands, so the
+rim-collider theory of the last pass (controller-only "inside collider" scoring) was wrong:
+that scoring path is not in use. The rim collider is left as it is (harmless) and the
+`GrabInteractable` repair is now moot.
+**What differs between tracked hands and controller-driven hands, from the rig prefabs:**
+tracked hands carry `HandPhysicsCapsules` (kinematic finger colliders that collide with
+parts); the controller-driven hands do not. A part that has come to rest sleeps; a
+sleeping Rigidbody stops receiving `OnTriggerStay`, which is how the SDK's trigger
+registry on the part sees an interactor. A tracked hand wakes the part by touching it,
+a controller-driven hand cannot. Parts that jitter in the trays (item 6) never sleep,
+which is why the first grabs work and a part that has properly settled after a fall does
+not. This is the one state difference found; it is now measured and covered:
+- `[ControllerRegrab] part= grabInteractable=HandGrabInteractable:on/GrabInteractable:on
+  grabbable= collider= layer= active= rb=` when a loose part comes to rest, plus the long
+  form with every field (sleeping state included).
+- `[ControllerCandidate]` (new `ControllerGrabDiagnostics`, added at runtime to the
+  validator object): every grab interactor in the rig is hooked and classified
+  (`kind=controller-driven hand|tracked hand`, side). On every state change:
+  `kind= side= <prev>-><new> target=<object> selected= competing=[registered parts with
+  distance]`. The frame a controller grip or trigger goes down: `attempt=grip|trigger
+  side= state= target=<candidate> score=<distance> selected= competing=[…]
+  nearestPart=<name> d= inRegistry=<bool> interactable= rb=dynamic,sleeping colliders=
+  layer= pointable=`. `inRegistry=false` on the nearest part is the trigger-registry
+  failure; `inRegistry=true` with `target=none` is the candidate scoring failure.
+- Fix applied (controller path only, hand path untouched): a resting part is woken while
+  any grab interactor body (hand or controller-hand) is within 15 cm
+  (`DropIntoTray.wakeRadius`), logged once per rest as `[ControllerRegrab] woke resting
+  '<part>' - interactor within N cm (sleeping body)`. It sleeps again when the hand leaves.
+
+### 2. Wrong-object callback — proof at startup [QV]
+The hooks are the SDK's own: `HandGrabInteractable.WhenStateChanged` (on every part
+interactable, object = its Rigidbody) and every grab interactor's `WhenStateChanged`
+(object = `SelectedInteractable.Rigidbody`). Both print `[ActualGrabStart] object= source=`
+unconditionally and call `OnAssemblyObjectGrabbed` directly. Change in this pass: they
+are now hooked in the validator's `Start()` as well (before any action, with their own
+try/catch and ERROR line), so `[ActualGrabStart]` cannot depend on the action pipeline;
+every interactor Select transition also prints `[InteractorState] <interactor>
+<prev>-><new> selectedInteractable=` as a liveness line; `[WrongGrab]` now carries
+`reason=accepted|accepted(read)|tolerated(kit-subassembly)|tolerated(under-turntable)|
+tolerated(installed-piston)|not-armed|WRONG`. Eligibility logic unchanged. If
+`[ActualGrabStart]` still does not print for a grabbed part, the `[InteractorState]` and
+`[ControllerCandidate]` lines show whether the SDK selected anything at all.
+
+### 3 / 5. First PistonEnd and the holders disappearing [QV]
+No static path hides them: every presenter hide path refuses real parts (PointableElement
+or PlacementLock) with an ERROR, the completion cleanup skips locked and turntable
+parts, and the slot ghosts and the real holders are different objects. Added in this pass:
+- `GuidanceRegistry.DeactivateAll` (called by the presenter when
+  `clearRegistryBeforePresent` is on) now refuses any entry whose target is a real part
+  and logs an ERROR naming the key — the one hide path that had no guard.
+- `DropIntoTray.OnEnable` on a locked part now holds it instead of releasing it to gravity
+  (a re-activated placed part could previously fall out of the engine).
+- Traces exactly as asked: `[HolderSuccess] slot=<n> real=<name#id> …` and
+  `[PistonEnd1Success] …` (per kit) at success, +0 / +0.5 / +2 s with `active= visible=
+  parent= position= locked=`; the per-frame restore guard runs 6 s for anything whose
+  target is under the turntable (cap included) and names what it had to undo
+  (`DEACTIVATED` / `DISABLED` / `RE-PARENTED` / `MOVED`).
+
+### 4. PistonEnd 180° equivalence [QV]
+Why it was not applied: the 180° variant was built about `c.axisLocal`, the mesh's
+longest extent, not the cap's physical symmetry axis (the rod axis towards the head). For
+the half-ring cap those differ, so variant B was never the real flip. Now
+`HalfTurnVariants` builds A = authored and B = authored turned 180° about the resolved
+mechanical axis (`AxisFor`, from the assembled ghost, now measured between mesh centres
+rather than pivots), the closer one is used for error, snap and lock, and
+`[PistonEndValidation] variant=A|B angleError= accepted= (A= B= tol= axisLocal=
+axisFromGhost=)` prints live in the zone, on each attempt and at success. Angular
+tolerance unchanged (25°).
+
+### 6. Tray jitter [QV]
+Causes: (a) every settle re-asserted the part and **woke** its Rigidbody (my parity code),
+so parts never slept; (b) the Tuned profile keeps `ContinuousDynamic` sweep collision on
+resting bodies, which keeps re-solving stacked contacts. Now: after 0.5 s below the
+motion thresholds a loose part goes to rest — sweep collision off (Discrete), body put
+to sleep (`[TrayRest] '<part>' at rest …`); when it moves again (grabbed, knocked) the
+tuned profile is restored. Never frozen: it stays dynamic and grabbable, and the
+proximity wake above keeps it visible to the SDK while a hand is near. No part is
+teleported unless it falls 0.5 m below its start or 3 m away (unchanged).
+
+### 7. Installed piston swing limits [QV]
+`OneGrabRotateTransformer.Constraints` Min/Max on the pivot, 0 = authored orientation.
+Each way the piston's renderer-bounds corners are rotated about the crank axis in 5°
+steps; the first angle at which any corner dips below the oil pan's top plane ends the
+range. Clamped to [25°, 75°] (`minSwingDegrees`, `maxSwingDegrees` on the pivot);
+symmetric ±60° if no oil pan renderer is found. Logged:
+`[PistonPivot] <kit>: swing limits min=-A max=+B deg …`. Axis and translation untouched.
+
+### [QV] checklist
+1. Controller reach for a rested part: `[ControllerRegrab] woke resting …` then
+   `[ControllerCandidate] attempt=grip … target=<part> selected=true`.
+2. At startup: `[WrongGrabBinding] … callbackBound=true`; grab anything:
+   `[ActualGrabStart] object=…`, `[WrongGrab] … reason=…`.
+3. PistonEnd 1 / holders: `+2.0s active=true visible=true` and no ERROR between.
+4. Cap placed flipped: `[PistonEndValidation] variant=B angleError<25 accepted=true`.
+6. Parts in trays: `[TrayRest]` once per part, then still.
+7. `[PistonPivot] … swing limits …`; rotation stops before the pan.
