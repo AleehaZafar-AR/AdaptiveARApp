@@ -151,6 +151,20 @@ namespace AdaptiveAR.Steps
                 }
                 Debug.Log($"[ControllerCandidate] attempt={button} side={(e.left ? "L" : "R")} interactor={e.path} state={it.State} target={candName} score={(candD >= 0 ? (candD * 100f).ToString("F1") + "cm" : "n/a")} " +
                           $"selected={it.State == Oculus.Interaction.InteractorState.Select} competing=[{Competing(it, candidate)}] nearestPart={nearestInfo}");
+
+                string intersecting = "n/a", sleeping = "n/a";
+                if (nearest != null && nearest.Rigidbody != null)
+                {
+                    var tray = nearest.Rigidbody.GetComponent<DropIntoTray>();
+                    sleeping = nearest.Rigidbody.IsSleeping().ToString();
+                    if (tray != null)
+                    {
+                        bool penetrating = tray.DeepestPenetration(out Collider surface, out _, out float depth, out bool supported);
+                        intersecting = penetrating ? $"true({depth * 1000f:F1}mm,{surface.name})" : (supported ? "false" : "n/a");
+                    }
+                }
+                Debug.Log($"[ControllerGrabAttempt] nearestPart={(nearest != null ? nearest.Rigidbody.name : "none")} distance={(nearestD < float.MaxValue ? (nearestD * 100f).ToString("F1") + "cm" : "n/a")} " +
+                          $"intersectingTray={intersecting} sleeping={sleeping} candidate={candName} inRegistry={inRegistry} button={button} side={(e.left ? "L" : "R")}");
             }
             catch (System.Exception ex) { Debug.LogError("[ControllerCandidate] attempt log threw: " + ex); }
         }

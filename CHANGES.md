@@ -3498,3 +3498,86 @@ symmetric ±60° if no oil pan renderer is found. Logged:
 4. Cap placed flipped: `[PistonEndValidation] variant=B angleError<25 accepted=true`.
 6. Parts in trays: `[TrayRest]` once per part, then still.
 7. `[PistonPivot] … swing limits …`; rotation stops before the pan.
+
+
+---
+
+## Claude → Reviewer — 2026-10-21 — Four regressions: resting-geometry audit for controller re-grab, hand-withdrawn grab hand-over (rod 1 / cap 2), centred single-owner inspection interaction
+
+Base: `74556d3`. Files: `StepValidator.cs`, `DropIntoTray.cs`, `EngineTurntable.cs`,
+`ControllerGrabDiagnostics.cs`. Both assemblies compile; everything is [QV].
+
+### 1. Controller re-grab — resting state audited and corrected [QV]
+At the moment a loose part comes to rest `DropIntoTray` now prints
+`[RestingPart] part= boundsMinY= trayTopY= surfaceBelow= surfaceY= gapAboveSurface=
+penetration=<mm into surface|none|n/a> sleeping= kinematic= parent= collision= resolves=`
+(surface = first solid collider below the part's centre; penetration =
+`Physics.ComputePenetration` of the part's colliders against every solid surface
+collider: trays, oil pan, work surface, floor plane, engine body — not loose parts, not
+hands). If any collider is embedded more than 2 mm the part is **lifted out along the
+separating direction and allowed to settle again** (at most three lifts per rest; an
+ERROR line each time, and one if it is still embedded after three — that would be a
+collider overlap in the authored geometry). A part is therefore never left asleep
+inside a surface. Every controller grip / trigger press prints
+`[ControllerGrabAttempt] nearestPart= distance= intersectingTray=true(mm,surface)|false
+sleeping= candidate= inRegistry=` (alongside the existing `[ControllerCandidate]`
+line with the registry contents and competing parts). The proximity wake from the
+last pass measured distance from the part's **pivot**, which for these meshes can be
+tens of centimetres from the visible part (e.g. a holder's pivot sits far outside its
+mesh): it now measures to the renderer bounds, so a controller-driven hand reaching
+the mesh actually wakes it. Hand behaviour, collisions and layers untouched.
+What the two lines will show for a failed controller grab: `intersectingTray=true`
+→ geometry (now resolved on rest); `inRegistry=false sleeping=true` → the sleeping
+trigger path (now woken by mesh proximity); `inRegistry=true candidate=none` → the
+controller-driven hand's grab volume does not overlap the part (reach), which is
+rig configuration, not part state.
+
+### 2 / 3. Rod 1 and PistonEnd 2 disappearing — cause: hand-over while the hand is still closed [QV]
+Both parts are **forwarded** after success (rod → the kit handle so the loose
+subassembly stays grabbable; cap → the installed piston's pivot). The hand-over waited
+for "nothing selected", which is true the instant the placement lock disables the
+part's grab and the SDK releases it — while the hand is still physically closed
+around the part. The moment the part's grab was re-enabled, that closed hand
+re-selected it: for the rod that drags the head+rod subassembly away with the hand
+(the rod's own local pose stays intact, so the guard saw nothing); for the cap it
+turns the piston. Whether it happened depended on how quickly the hand opened —
+hence rod 2 fine / rod 1 gone, cap 1 fine / cap 2 gone across builds. Now the
+hand-over (`WaitForHandsWithdrawn`) requires nothing selecting **and every hand /
+controller-hand body at least 12 cm from the part's mesh** (`handWithdrawMeters`),
+with a 10 s fallback; it logs `[Piston1RodSuccess] grab hand-over: hands withdrawn
+(nearest 'X' N cm)`. The placed-part guard now runs 6 s for every part and also
+watches the **kit handle**: if the head moves more than 3 cm after success it logs an
+ERROR naming which interactor holds what (`subassembly carried away selectedBy=[…]`).
+Trace lines as asked: `[Piston1RodSuccess]` / `[PistonEnd2Success]` at +0 / +0.5 /
++2 s with `active= visible= parent= position= locked= … handleMoved= nearestHand=
+grabForwarded=`, plus `[ActualGrabEnd]` for the SDK release.
+
+### 4. Final inspection interaction — cause: one free transformer on the base pivot [QV]
+The completed engine was driven by a single `GrabFreeTransformer` for one and two
+hands, on the turntable root at the oil-pan base with position locked: one-hand
+rotation therefore followed the **wrist orientation** (noisy → jitter, and the
+hand's position delta was discarded → the feel of inverted / unrelated yaw), about
+the **base**, not the engine's centre. Now `EnterInspectionMode`:
+- creates `InspectionPivot` at the **bounds centre of the installed engine's
+  renderers**, oriented like the engine, and parents the turntable under it with world
+  transforms preserved (grouped engine stays one object; part locks are local, unchanged);
+- makes it the **one owner**: the turntable's Grabbable, interactables, rim colliders
+  and yaw enforcement are off; every piston pivot and part Grabbable is disabled; every
+  grab interactable of the engine is pointed at the pivot's Grabbable;
+- one hand: `OneGrabRotateTransformer`, yaw about the centre driven by where the hand
+  is around the pivot — drag left = engine turns left (the same transformer the
+  assembly-time turntable used, whose direction was accepted);
+- two hands: `GrabFreeTransformer` with position locked, tilt locked (only yaw free),
+  scale within 0.6–1.6× about the centre.
+No other script moves the engine during inspection. Log: `[Inspection] pivot at …
+(engine bounds …) one hand = yaw … two hands = scale … n grab interactable(s) forwarded`.
+Completion UI, Restart and Quit untouched.
+
+### [QV] checklist
+1. Drop a part beside the oil pan: `[RestingPart] … penetration=none gapAboveSurface≈0`;
+   controller press: `[ControllerGrabAttempt] … inRegistry=true candidate=<part>`.
+2. Rod 1 success: `grab hand-over: hands withdrawn`, `+2.0s active=true visible=true
+   handleMoved=0.0cm`.
+3. Cap 2 likewise.
+4. Completion: engine turns about its centre, same direction as the hand, no jitter;
+   two hands scale it in place.

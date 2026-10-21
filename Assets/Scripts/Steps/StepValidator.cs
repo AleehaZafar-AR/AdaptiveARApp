@@ -2487,12 +2487,29 @@ namespace AdaptiveAR.Steps
             int reports = 0;
             float[] reportAt = { 0f, 0.5f, 2f };
 
-            float guardSeconds = (kit == null || engineMounted) ? 6f : 2f;   // anything mounted on the engine is watched longer
+            float guardSeconds = 6f;
+            Vector3 handleStart = handle != null ? handle.position : Vector3.zero;
+            bool handleMovedLogged = false;
             while (Time.time - start <= guardSeconds + 0.05f)
             {
                 if (part == null) { Debug.LogError($"{tag} the placed part was DESTROYED."); yield break; }
                 var padlock = part.GetComponent<PlacementLock>();
                 var body = part.GetComponent<Rigidbody>();
+
+                // The subassembly itself carried away (a hand re-grabbed the head through the
+                // just-forwarded part): the part's local pose is intact, so only this sees it.
+                if (handle != null && !handleMovedLogged && Vector3.Distance(handle.position, handleStart) > 0.03f)
+                {
+                    handleMovedLogged = true;
+                    var holders = new List<string>();
+                    foreach (KeyValuePair<MonoBehaviour, MonoBehaviour> kv in _interactorSelection)
+                    {
+                        ResolveInteractable(kv.Value, out Rigidbody hb, out _);
+                        if (hb != null && (hb.transform == handle || hb.transform.IsChildOf(handle))) holders.Add($"{kv.Key.GetType().Name}->{hb.name}");
+                    }
+                    Debug.LogError($"{tag} the kit handle '{handle.name}' MOVED {Vector3.Distance(handle.position, handleStart) * 100f:F1} cm since success " +
+                                   $"(subassembly carried away) selectedBy=[{string.Join(", ", holders)}] handleLock={(handle.GetComponent<PlacementLock>() != null ? (handle.GetComponent<PlacementLock>().Repositionable ? "repositionable" : "fixed") : "none")}");
+                }
 
                 // --- guard ---
                 if (!part.gameObject.activeSelf)
@@ -2528,10 +2545,13 @@ namespace AdaptiveAR.Steps
                     bool visible = active && r != null && r.enabled;
                     float dist = Vector3.Distance(part.position, snapPos);
                     bool underHandle = handle == null || part == handle || part.IsChildOf(handle);
+                    float nearD = NearestInteractorDistance(part, out string nearWho);
                     Debug.Log($"{tag} +{d:F1}s real={part.name}#{part.GetInstanceID()} active={active} visible={visible} " +
                               $"parent={(part.parent != null ? part.parent.name + "#" + part.parent.GetInstanceID() : "<root>")} (before: {parentBefore}) " +
                               $"position={part.position} distanceFromSnap={dist * 1000f:F0}mm locked={(padlock != null && padlock.IsLocked)} " +
-                              $"kinematic={(body != null ? body.isKinematic.ToString() : "n/a")} kit={kit ?? "-"} handle={(handle != null ? handle.name + "#" + handle.GetInstanceID() : "-")} underKitHandle={underHandle}");
+                              $"kinematic={(body != null ? body.isKinematic.ToString() : "n/a")} kit={kit ?? "-"} handle={(handle != null ? handle.name + "#" + handle.GetInstanceID() : "-")} underKitHandle={underHandle} " +
+                              $"handleMoved={(handle != null ? (Vector3.Distance(handle.position, handleStart) * 100f).ToString("F1") + "cm" : "-")} nearestHand={nearWho}@{(float.IsInfinity(nearD) ? "-" : (nearD * 100f).ToString("F0") + "cm")} " +
+                              $"grabForwarded={(padlock != null && padlock.ForwardedToHandle)}");
                     if (!visible) Debug.LogError($"{tag} the placed part is NOT visible (active={active}, renderer={(r != null ? r.enabled.ToString() : "none")}).");
                     if (!underHandle) Debug.LogError($"{tag} the placed part is not under its kit handle '{handle.name}' (parent is '{(part.parent != null ? part.parent.name : "<root>")}').");
                 }
@@ -2616,31 +2636,71 @@ namespace AdaptiveAR.Steps
             StartCoroutine(ForwardWhenHandsOpen(child, handle, handleGrabbable, handleLock));
         }
 
-        private System.Collections.IEnumerator ForwardToPivotWhenHandsOpen(Transform child, InstalledPistonPivot pivot)
+        [Tooltip("A just-placed part's grab is handed to its assembly only once every hand / controller-hand body is " +
+                 "at least this far from the part, metres. 'Nothing selected' is true the moment the lock releases the " +
+                 "SDK's grab while the hand is still closed around the part; that closed hand re-selected the part the " +
+                 "instant its grab was re-enabled and carried the subassembly away.")]
+        [SerializeField] private float handWithdrawMeters = 0.12f;
+
+        /// <summary>Distance from the nearest grab interactor body to the part's renderer bounds (metres; +inf if none).</summary>
+        private static float NearestInteractorDistance(Transform part, out string who)
+        {
+            who = "none";
+            float best = float.PositiveInfinity;
+            if (part == null) return best;
+            var r = part.GetComponentInChildren<Renderer>(true);
+            Bounds b = r != null ? r.bounds : new Bounds(part.position, Vector3.one * 0.02f);
+            foreach (Transform t in ControllerGrabDiagnostics.InteractorBodies)
+            {
+                if (t == null || !t.gameObject.activeInHierarchy) continue;
+                float d = Vector3.Distance(t.position, b.ClosestPoint(t.position));
+                if (d < best) { best = d; who = t.name; }
+            }
+            return best;
+        }
+
+        /// <summary>True when nothing selects and every hand has withdrawn from the part. Up to 10 s; then 'nothing selecting' alone.</summary>
+        private System.Collections.IEnumerator WaitForHandsWithdrawn(Transform child, Oculus.Interaction.Grabbable extraGrabbable, string tag)
         {
             float start = Time.time;
-            while (Time.time - start < 5f)
+            string why = null;
+            while (child != null)
             {
-                var g = child != null ? child.GetComponent<Oculus.Interaction.Grabbable>() : null;
-                if (_interactorSelection.Count == 0 && (g == null || g.SelectingPointsCount == 0)) break;
+                bool anySelecting = _interactorSelection.Count > 0 || (extraGrabbable != null && extraGrabbable.SelectingPointsCount > 0);
+                var childGrabbable = child.GetComponent<Oculus.Interaction.Grabbable>();
+                if (childGrabbable != null && childGrabbable.SelectingPointsCount > 0) anySelecting = true;
+                float near = NearestInteractorDistance(child, out string who);
+                if (!anySelecting && near > handWithdrawMeters) { why = $"hands withdrawn (nearest '{who}' {near * 100f:F0} cm)"; break; }
+                if (!anySelecting && Time.time - start > 10f) { why = $"timeout with '{who}' still within {near * 100f:F0} cm - forwarding anyway"; break; }
                 yield return null;
             }
             yield return new WaitForSeconds(0.25f);
+            Debug.Log($"{tag} grab hand-over: {why ?? "part gone"}");
+        }
+
+        private System.Collections.IEnumerator ForwardToPivotWhenHandsOpen(Transform child, InstalledPistonPivot pivot)
+        {
+            yield return WaitForHandsWithdrawn(child, null, PlacedTagFor(child));
             if (child != null && pivot != null) pivot.ForwardSubassemblyGrabs(child);
+        }
+
+        private string PlacedTagFor(Transform child)
+        {
+            if (child == null) return "[Placed]";
+            string key = _boundKeys.TryGetValue(child.gameObject, out string k) ? k : KeyForObject(child.gameObject);
+            string kit = GuidanceRegistry.KitOf(key);
+            string role = RoleNameOf(key) ?? "";
+            if (kit == null) return "[" + RoleTag(key) + "Success]";
+            string n = kit.Substring(kit.Length - 1);
+            if (role == "PistonEnd") return "[PistonEnd" + n + "Success]";
+            string shortRole = role == "ConnectingRod" ? "Rod" : role == "ConnectingPin" ? "Pin" : role == "PistonHead" ? "Head"
+                             : role.StartsWith("pistonBolt") ? "Bolt" : role.StartsWith("PistonNut") ? "Nut" : role;
+            return "[Piston" + n + shortRole + "Success]";
         }
 
         private System.Collections.IEnumerator ForwardWhenHandsOpen(Transform child, Transform handle, Oculus.Interaction.Grabbable handleGrabbable, PlacementLock handleLock)
         {
-            float start = Time.time;
-            while (Time.time - start < 5f)
-            {
-                bool anySelecting = _interactorSelection.Count > 0 || (handleGrabbable != null && handleGrabbable.SelectingPointsCount > 0);
-                var childGrabbable = child != null ? child.GetComponent<Oculus.Interaction.Grabbable>() : null;
-                if (childGrabbable != null && childGrabbable.SelectingPointsCount > 0) anySelecting = true;
-                if (!anySelecting) break;
-                yield return null;
-            }
-            yield return new WaitForSeconds(0.25f);
+            yield return WaitForHandsWithdrawn(child, handleGrabbable, PlacedTagFor(child));
             if (child == null || handle == null || handleGrabbable == null) yield break;
 
             int n = 0;

@@ -98,6 +98,55 @@ public class DropIntoTray : MonoBehaviour
     private float _stillSince = -1f;
     private bool _resting;
     private bool _wokeLogged;
+    private int _resolveCount;
+    private Renderer _renderer;
+
+    // ---- solid surfaces (trays, oil pan, work surface, desk plane): static or engine-kinematic colliders ----
+    private static readonly System.Collections.Generic.List<Collider> _solid = new System.Collections.Generic.List<Collider>();
+    private static float _solidScannedAt = -999f;
+
+    /// <summary>Enabled, non-trigger colliders that are not loose parts: trays, oil pan, work surface, floor plane, engine body.</summary>
+    public static System.Collections.Generic.List<Collider> SolidColliders()
+    {
+        if (Time.time - _solidScannedAt > 5f)
+        {
+            _solidScannedAt = Time.time;
+            _solid.Clear();
+            foreach (Collider c in FindObjectsByType<Collider>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (c == null || !c.enabled || c.isTrigger) continue;
+                Rigidbody arb = c.attachedRigidbody;
+                if (arb != null && (!arb.isKinematic || arb.GetComponentInParent<DropIntoTray>() != null)) continue;   // loose / placed parts
+                if (c.GetComponentInParent<Oculus.Interaction.HandGrab.HandGrabInteractor>() != null) continue;      // hands
+                _solid.Add(c);
+            }
+        }
+        return _solid;
+    }
+
+    /// <summary>Deepest penetration of this part's colliders into any solid surface (metres), with the surface and the push-out direction.</summary>
+    public bool DeepestPenetration(out Collider surface, out Vector3 direction, out float depth, out bool supported)
+    {
+        surface = null; direction = Vector3.up; depth = 0f; supported = false;
+        foreach (Collider mine in GetComponents<Collider>())
+        {
+            if (mine == null || !mine.enabled || mine.isTrigger) continue;
+            foreach (Collider other in SolidColliders())
+            {
+                if (other == null || !mine.bounds.Intersects(other.bounds)) continue;
+                try
+                {
+                    if (Physics.ComputePenetration(mine, mine.transform.position, mine.transform.rotation, other, other.transform.position, other.transform.rotation, out Vector3 dir, out float dist))
+                    {
+                        supported = true;
+                        if (dist > depth) { depth = dist; direction = dir; surface = other; }
+                    }
+                }
+                catch (System.Exception) { }
+            }
+        }
+        return depth > 0f;
+    }
 
     private Vector3 authoredLocalPosition;
     private Quaternion authoredLocalRotation;
@@ -165,6 +214,7 @@ public class DropIntoTray : MonoBehaviour
                 _resting = false; _wokeLogged = false;
                 rb.collisionDetectionMode = EffectiveCollisionDetection;
             }
+            if (rb.linearVelocity.sqrMagnitude > 0.01f) _resolveCount = 0;       // a real move (carried): fresh budget
         }
         else if (_wasMoving)
         {
@@ -177,6 +227,7 @@ public class DropIntoTray : MonoBehaviour
                 rb.collisionDetectionMode = CollisionDetectionMode.Discrete;
                 rb.Sleep();
                 if (logRecovery) Debug.Log($"[TrayRest] '{name}' at rest: sweep collision off, body asleep (wakes normally on grab or when a hand is within {wakeRadius * 100f:F0} cm).");
+                AuditRestingGeometry();
                 AdaptiveAR.Steps.GrabParity.OnSettled(gameObject, "settled after moving");
             }
         }
@@ -190,10 +241,12 @@ public class DropIntoTray : MonoBehaviour
             {
                 Transform b = bodies[i];
                 if (b == null || !b.gameObject.activeInHierarchy) continue;
-                if ((b.position - transform.position).sqrMagnitude <= wakeRadius * wakeRadius)
+                if (_renderer == null) _renderer = GetComponentInChildren<Renderer>(true);
+                Vector3 nearest = _renderer != null ? _renderer.bounds.ClosestPoint(b.position) : transform.position;   // the mesh, not the pivot
+                if ((b.position - nearest).sqrMagnitude <= wakeRadius * wakeRadius)
                 {
                     rb.WakeUp();
-                    if (!_wokeLogged) { _wokeLogged = true; Debug.Log($"[ControllerRegrab] woke resting '{name}' - interactor '{b.name}' within {Vector3.Distance(b.position, transform.position) * 100f:F0} cm (sleeping body)."); }
+                    if (!_wokeLogged) { _wokeLogged = true; Debug.Log($"[ControllerRegrab] woke resting '{name}' - interactor '{b.name}' within {Vector3.Distance(b.position, nearest) * 100f:F0} cm of its mesh (sleeping body)."); }
                     break;
                 }
             }
@@ -216,6 +269,47 @@ public class DropIntoTray : MonoBehaviour
 
         if (fellThrough || wayOff)
             RecoverToAuthoredPose();
+    }
+
+    /// <summary>
+    /// [RestingPart] when a loose part has come to rest: where it sits relative to the surface
+    /// under it and whether any of its colliders is embedded in a tray / oil pan / surface. A
+    /// part embedded more than 2 mm is lifted out along the separating direction and allowed
+    /// to settle again (at most three times), instead of being left intersecting and asleep.
+    /// </summary>
+    private void AuditRestingGeometry()
+    {
+        if (_renderer == null) _renderer = GetComponentInChildren<Renderer>(true);
+        Bounds b = _renderer != null ? _renderer.bounds : new Bounds(transform.position, Vector3.one * 0.02f);
+
+        // the surface under the part: first solid hit below its centre that is not the part itself
+        float floorY = float.NaN, trayTopY = float.NaN; string under = "none";
+        foreach (RaycastHit h in Physics.RaycastAll(b.center + Vector3.up * 0.05f, Vector3.down, 0.6f))
+        {
+            if (h.collider == null || h.collider.attachedRigidbody == rb || h.collider.isTrigger) continue;
+            if (h.collider.GetComponentInParent<DropIntoTray>() != null && h.collider.attachedRigidbody != null && !h.collider.attachedRigidbody.isKinematic) continue; // another loose part
+            floorY = h.point.y; trayTopY = h.collider.bounds.max.y; under = h.collider.name; break;
+        }
+
+        bool pen = DeepestPenetration(out Collider surface, out Vector3 dir, out float depth, out bool supported);
+        float gap = float.IsNaN(floorY) ? float.NaN : b.min.y - floorY;
+        Debug.Log($"[RestingPart] part={name}#{gameObject.GetInstanceID()} boundsMinY={b.min.y:F4} trayTopY={(float.IsNaN(trayTopY) ? "n/a" : trayTopY.ToString("F4"))} surfaceBelow={under} surfaceY={(float.IsNaN(floorY) ? "n/a" : floorY.ToString("F4"))} " +
+                  $"gapAboveSurface={(float.IsNaN(gap) ? "n/a" : (gap * 1000f).ToString("F1") + "mm")} penetration={(pen ? (depth * 1000f).ToString("F1") + "mm into " + surface.name : (supported ? "none" : "n/a"))} " +
+                  $"sleeping={rb.IsSleeping()} kinematic={rb.isKinematic} parent={(transform.parent != null ? transform.parent.name : "<root>")} collision={rb.collisionDetectionMode} resolves={_resolveCount}");
+
+        if (pen && depth > 0.002f && _resolveCount < 3)
+        {
+            _resolveCount++;
+            Vector3 lift = dir.normalized * (depth + 0.002f);
+            transform.position += lift;
+            rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero;
+            rb.collisionDetectionMode = EffectiveCollisionDetection;
+            rb.WakeUp();
+            _resting = false; _wasMoving = true; _stillSince = -1f;
+            Debug.LogError($"[RestingPart] '{name}' was embedded {depth * 1000f:F1} mm in '{surface.name}' - lifted {lift.magnitude * 1000f:F1} mm along {dir} to settle again (resolve {_resolveCount}/3).");
+        }
+        else if (pen && depth > 0.002f)
+            Debug.LogError($"[RestingPart] '{name}' still embedded {depth * 1000f:F1} mm in '{surface.name}' after 3 lifts - left as is (geometry overlap between part and surface colliders).");
     }
 
     private void ApplyPhysicsProfile()

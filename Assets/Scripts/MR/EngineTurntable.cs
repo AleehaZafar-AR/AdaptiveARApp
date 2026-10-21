@@ -214,19 +214,69 @@ namespace AdaptiveAR.MR
         /// part's grab interactable is pointed at this body so grabbing any part moves the whole
         /// assembly - nothing can separate.
         /// </summary>
+        public Transform InspectionPivot { get; private set; }
+
+        /// <summary>
+        /// Completion: the finished engine becomes ONE inspection object with ONE interaction
+        /// owner. An InspectionPivot is created at the bounds centre of the installed engine's
+        /// renderers (not at the turntable root on the oil-pan base), the turntable is parented
+        /// under it with world transforms preserved, and every grab interactable of the engine
+        /// is pointed at the pivot's Grabbable:
+        ///   one hand  -> OneGrabRotateTransformer: yaw about the centre, driven by where the hand
+        ///                is around the pivot (drag left = engine turns left), no wrist jitter
+        ///   two hands -> GrabFreeTransformer: scale within [minScale, maxScale] about the centre,
+        ///                yaw only (tilt locked), position locked
+        /// The assembly-time turntable Grabbable / transformer and the yaw enforcement are off.
+        /// </summary>
         public void EnterInspectionMode(float minScale, float maxScale)
         {
             if (_inspection) return;
             _inspection = true;
             if (_visual != null) _visual.SetActive(false);
 
-            var free = gameObject.AddComponent<Oculus.Interaction.GrabFreeTransformer>();
+            // 1. geometric centre of the completed engine
+            Bounds b = new Bounds(); bool any = false;
+            foreach (Renderer r in GetComponentsInChildren<Renderer>(false))
+            {
+                if (r == null || !r.enabled || (_visual != null && r.gameObject == _visual)) continue;
+                if (!any) { b = r.bounds; any = true; } else b.Encapsulate(r.bounds);
+            }
+            Vector3 centre = any ? b.center : transform.position;
+
+            // 2. pivot at the centre, engine orientation; the turntable (and everything on it) goes under it
+            var pivotGo = new GameObject("InspectionPivot");
+            pivotGo.transform.SetParent(transform.parent, false);
+            pivotGo.transform.SetPositionAndRotation(centre, transform.rotation);
+            transform.SetParent(pivotGo.transform, true);
+            InspectionPivot = pivotGo.transform;
+
+            // 3. the assembly-time owner is switched off: one owner from here on
+            foreach (MonoBehaviour mb in _interactables) if (mb != null) mb.enabled = false;
+            if (_grabbable != null) _grabbable.enabled = false;
+            if (_colliderRoot != null) foreach (Collider c in _colliderRoot.GetComponentsInChildren<Collider>(true)) c.enabled = false;
+            else if (_collider != null) _collider.enabled = false;
+
+            var rb = pivotGo.AddComponent<Rigidbody>(); rb.isKinematic = true; rb.useGravity = false;
+            var grab = pivotGo.AddComponent<Oculus.Interaction.Grabbable>();
+
+            var rotate = pivotGo.AddComponent<Oculus.Interaction.OneGrabRotateTransformer>();
+            rotate.InjectOptionalPivotTransform(pivotGo.transform);
+            rotate.InjectOptionalRotationAxis(Oculus.Interaction.OneGrabRotateTransformer.Axis.Up);
+
+            var free = pivotGo.AddComponent<Oculus.Interaction.GrabFreeTransformer>();
             var lockPos = new Oculus.Interaction.TransformerUtils.PositionConstraints
             {
                 ConstraintsAreRelative = true,
                 XAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = 0f, Max = 0f } },
                 YAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = 0f, Max = 0f } },
                 ZAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = 0f, Max = 0f } }
+            };
+            Vector3 e = pivotGo.transform.localEulerAngles;
+            var yawOnly = new Oculus.Interaction.TransformerUtils.RotationConstraints
+            {
+                XAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = e.x, Max = e.x } },
+                YAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = false },
+                ZAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = e.z, Max = e.z } }
             };
             var scale = new Oculus.Interaction.TransformerUtils.ScaleConstraints
             {
@@ -236,21 +286,24 @@ namespace AdaptiveAR.MR
                 ZAxis = new Oculus.Interaction.TransformerUtils.ConstrainedAxis { ConstrainAxis = true, AxisRange = new Oculus.Interaction.TransformerUtils.FloatRange { Min = minScale, Max = maxScale } }
             };
             free.InjectOptionalPositionConstraints(lockPos);
+            free.InjectOptionalRotationConstraints(yawOnly);
             free.InjectOptionalScaleConstraints(scale);
-            free.Initialize(_grabbable);
-            _grabbable.InjectOptionalOneGrabTransformer(free);
-            _grabbable.InjectOptionalTwoGrabTransformer(free);
+            grab.InjectOptionalOneGrabTransformer(rotate);
+            grab.InjectOptionalTwoGrabTransformer(free);          // Grabbable.Start initialises both (new object)
 
+            // 4. every grab interactable of the engine drives the pivot; nothing else moves
             int n = 0;
-            foreach (var h in GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
-            { if (h.transform.IsChildOf(transform)) { h.InjectOptionalPointableElement(_grabbable); h.enabled = true; n++; } }
-            foreach (var g in GetComponentsInChildren<Oculus.Interaction.GrabInteractable>(true))
-            { if (g.transform.IsChildOf(transform)) { g.InjectOptionalPointableElement(_grabbable); g.enabled = true; n++; } }
-            foreach (var padlock in GetComponentsInChildren<AdaptiveAR.Steps.PlacementLock>(true)) padlock.ForwardedToHandle = true;
-            foreach (var rb in GetComponentsInChildren<Rigidbody>(true))
-                AdaptiveAR.Steps.GrabParity.ReassertBroadcasters(rb.gameObject, "inspection mode", false);
+            foreach (var h in pivotGo.GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
+            { h.InjectOptionalPointableElement(grab); h.enabled = true; n++; }
+            foreach (var g in pivotGo.GetComponentsInChildren<Oculus.Interaction.GrabInteractable>(true))
+            { g.InjectOptionalPointableElement(grab); g.enabled = true; n++; }
+            foreach (var padlock in pivotGo.GetComponentsInChildren<AdaptiveAR.Steps.PlacementLock>(true)) padlock.ForwardedToHandle = true;
+            foreach (var other in pivotGo.GetComponentsInChildren<Oculus.Interaction.Grabbable>(true))
+                if (other != grab && other.enabled) other.enabled = false;              // piston pivots, turntable: no second owner
 
-            if (logChanges) Debug.Log($"[Turntable] inspection mode: ring hidden, free rotation in place, two-hand scale {minScale:F1}-{maxScale:F1}x, {n} part grab(s) forwarded to the whole engine.");
+            if (logChanges) Debug.Log($"[Inspection] pivot at {centre} (engine bounds {b.size}, turntable root was {transform.position}); " +
+                                      $"one hand = yaw about the centre (OneGrabRotate), two hands = scale {minScale:F1}-{maxScale:F1}x + yaw (GrabFree, tilt and position locked); " +
+                                      $"{n} grab interactable(s) forwarded to the one owner; turntable interaction off.");
         }
 
         private void LateUpdate()
