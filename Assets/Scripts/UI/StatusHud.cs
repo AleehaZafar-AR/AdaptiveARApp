@@ -60,7 +60,8 @@ namespace AdaptiveAR.UI
         [SerializeField] private float refreshInterval = 0.1f;
 
         private float _timer;
-        private TextMeshProUGUI _stepValue, _levelValue, _attemptsValue, _elapsedValue;
+        private TextMeshProUGUI _stepValue, _levelValue, _attemptsValue, _elapsedValue, _physioValue;
+        private string _physioText = "no source";
         private bool _resolved;
 
         /// <summary>
@@ -94,6 +95,8 @@ namespace AdaptiveAR.UI
             {
                 _levelValue = CloneRow(panel, errorLabel, errorValueText, "SUPPORT LEVEL", 64f);
                 _attemptsValue = CloneRow(panel, errorLabel, errorValueText, "ATTEMPTS THIS STEP", 128f);
+                _physioValue = CloneRow(panel, errorLabel, errorValueText, "PHYSIOLOGY (BLE / HR / PPI / RMSSD)", 192f);
+                if (_physioValue != null) { _physioValue.fontSize = _physioValue.fontSize * 0.8f; _physioValue.text = _physioText; }
             }
             Debug.Log($"[StatusHud] fields resolved: step={(supportLevelText != null)} progress={(progressValueText != null)} time={(timeValueText != null)} errors={(errorValueText != null)} level={(_levelValue != null)} attempts={(_attemptsValue != null)}");
         }
@@ -130,6 +133,13 @@ namespace AdaptiveAR.UI
 
             _timer = 0f;
             Refresh();
+        }
+
+        /// <summary>Researcher-facing physiology status; pushed by PhysiologicalStateProvider. Never shown on participant panels.</summary>
+        public void SetPhysiology(string text)
+        {
+            _physioText = text ?? "";
+            if (_physioValue != null) _physioValue.text = _physioText;
         }
 
         private void Refresh()

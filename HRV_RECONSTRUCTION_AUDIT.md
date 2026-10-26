@@ -286,3 +286,24 @@ Each stage ends with a device log line that proves it; nothing advances on compi
 10. **Independence check.** Static: the only callers of `SupportLevelController.ApplyAction/SetSupportLevel` remain session (`ai_decision`), `StepRunner` (`step_default`), `SupportLevelDebugInput` (`debug_input`). Runtime: with the sensor streaming and no provider, a full run shows no `support_change` whose `source` is anything but those three; `decision` lines show physiology as input only.
 
 Items that remain [QV] until a Quest run: MTU behaviour (D7), first-sample latency, whether the control-point reply arrives as notification or indication on this firmware, and reconnect behaviour.
+
+
+---
+
+## J. Implementation status (Stages 1–6), 2026-10-26 — branch `hrv-integration`
+
+Original audit (sections A–I) preserved above. All items below are **[QV]**: compiled and unit-tested, not yet run on a Quest 3 with a sensor.
+
+| Stage | State | What exists |
+|---|---|---|
+| 1 Permissions + plugin compile | implemented | Manifest: `BLUETOOTH_SCAN` (`neverForLocation`), `BLUETOOTH_CONNECT`, `bluetooth_le` feature (not required). `BleBridge.java` compiles against android-32 + Unity classes (javac, 0 errors). Receiver requests both permissions at runtime via `PermissionCallbacks`. |
+| 2 Discovery | implemented | `BluetoothLeScanner` low-latency scan, name-substring filter (`Polar`), 30 s scan timeout → rescan with back-off. |
+| 3 GATT + stream start | implemented | `connectGatt(TRANSPORT_LE)` → `discoverServices` → `requestMtu(512)` (requested/granted logged) → CCCD on control point → CCCD on data → write `02 03`. `stream_started` only on control-point response `F0 02 03 00 …`; `06` (already in state) → `03 03` then `02 03`; other status → `stream_error`. `ONLINE_MEASUREMENT_STOPPED` → `stream_stopped`. |
+| 4 Correct samples in Unity | implemented | Frame validation: length ≥ 10, type 0x03, frame type 0, not compressed, payload multiple of 6; else `malformed_packet` with hex. N = (len − 10)/6. Per sample: hr u8, ppi u16 LE, errorEstimate u16 LE, flags bits 0/1/2. `UnitySendMessage("PolarPpiReceiver","OnPpi","S|seq|idx|n|len|tsNs|hr|ppi|err|flags")`; receipt time stamped first thing in `OnPpi`. |
+| 5 Raw logging | implemented | `SessionLogger.LogPpiSample` writes every parsed sample (`ppi_sample`, schema v2) with the live-window decision on it; lines before `BeginSession` are buffered and flushed in order. No MAC address anywhere. |
+| 6 Live summary | implemented | `PhysiologyWindow` (plain C#): rolling 60 s, min 10 accepted, range 300–2000 ms, blocker rejection, skin-contact rejection off by default, no successive-difference filter; `physio_window` every 5 s with counts, quality, completeness, age, `grab_overlap_ms`; StatusHud row "PHYSIOLOGY (BLE / HR / PPI / RMSSD)". 20/20 headless tests pass (`dotnet run --project Tools/PhysiologyTests`). |
+| 7–10 | **not implemented** (by instruction) | `PhysiologicalSample`, `SubmitPhysiological`, `BuildDecisionContext`, decision seam untouched. Static check: no reference to `ApplyAction`, `SetSupportLevel`, `SupportAction`, `SupportLevel`, decision types anywhere under `Assets/Scripts/Physiology` or in the bridge. |
+
+Scene wiring: no scene edit. `PhysiologyBootstrap` creates the single `PolarPpiReceiver` object at start-up from `Assets/Resources/Physiology/PhysiologyConfig.asset` (enabled, source PolarVeritySense/Replay/None, window settings). Reason: the live scene file carries uncommitted researcher edits that must not be touched, and the object must exist exactly once across Restart (`DontDestroyOnLoad` + duplicate guard; rebinding logged as `[Physio] rebound …` and `physio_connection state=rebind`).
+
+Known limits to confirm on device: control-point response delivery (indicate vs notify — the bridge picks indicate only if the characteristic lacks notify), granted MTU and samples per notification, first-sample latency, reconnect behaviour.

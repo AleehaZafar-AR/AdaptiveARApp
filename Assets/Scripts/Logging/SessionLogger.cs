@@ -30,7 +30,7 @@ namespace AdaptiveAR.Logging
         /// Bump ONLY when the meaning of an existing field changes. Adding new fields
         /// does not require a bump, because consumers key by name.
         /// </summary>
-        public const string SchemaVersion = "adaptivear.session.v1";
+        public const string SchemaVersion = "adaptivear.session.v2";   // v2: + ppi_sample, physio_window, physio_connection; session_start + physio_* fields (additive)
 
         public static class Events
         {
@@ -67,7 +67,17 @@ namespace AdaptiveAR.Logging
 
             // --- prototype shortcut: the remaining pistons were fitted automatically ---
             public const string RemainingPistonsAutoCompleted = "remaining_pistons_auto_completed";
+
+            // --- physiology (schema v2): every raw PPI sample, window summaries, BLE/stream state ---
+            public const string PpiSample = "ppi_sample";
+            public const string PhysioWindow = "physio_window";
+            public const string PhysioConnection = "physio_connection";
         }
+
+        /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
+        public string PhysioSource { get; set; }
+        public string PhysioAcceptRules { get; set; }
+        public string PhysioBridgeVersion { get; set; }
 
         [Header("Participant")]
         [Tooltip("Set per participant before the session. Also settable at runtime via SetParticipant().")]
@@ -104,6 +114,7 @@ namespace AdaptiveAR.Logging
         private DateTime _sessionStartUtc;
         private int _sequence;
         private readonly List<string> _pendingBeforeOpen = new List<string>();
+        private string _actionId;                     // last action entered (alignment for physio_window)
 
         // --- envelope state, stamped onto every line ---
         private int _stepIndex = -1;
@@ -164,6 +175,9 @@ namespace AdaptiveAR.Logging
             w.Str("platform", Application.platform.ToString());
             w.Str("log_path", FilePath);
             w.Str("session_start_utc", _sessionStartUtc.ToString("o", CultureInfo.InvariantCulture));
+            w.Str("physio_source", PhysioSource);
+            w.Str("physio_accept_rules", PhysioAcceptRules);
+            w.Str("physio_bridge_version", PhysioBridgeVersion);
             Write(w);
 
             // Anything recorded before the file existed is now flushed in order.
@@ -315,6 +329,71 @@ namespace AdaptiveAR.Logging
             Write(w);
         }
 
+        /// <summary>One raw PPI sample as received, with the live-window decision made on it. Nothing is filtered before this line.</summary>
+        public void LogPpiSample(AdaptiveAR.Physiology.PpiSample s)
+        {
+            if (s == null) return;
+            var w = NewLine(Events.PpiSample);
+            w.Num("t_receipt_session_ms", (float)s.ReceiptSessionMs);
+            w.Num("t_receipt_realtime_s", (float)s.ReceiptRealtimeS);
+            if (s.DeviceTimestampNs != 0) w.Num("device_ts_ns", (long)s.DeviceTimestampNs); else w.Null("device_ts_ns");
+            w.Num("ppi_ms", s.PpiMs);
+            w.Num("hr_bpm_device", s.DeviceHrBpm);
+            w.Num("error_estimate_ms", s.ErrorEstimateMs);
+            w.Bool("blocker", s.Blocker);
+            w.Bool("skin_contact", s.SkinContact);
+            w.Bool("skin_contact_supported", s.SkinContactSupported);
+            w.Num("packet_seq", s.PacketSeq);
+            w.Num("sample_index", s.SampleIndex);
+            w.Num("samples_in_packet", s.SamplesInPacket);
+            w.Num("packet_len", s.PacketLength);
+            w.Bool("accepted", s.Accepted);
+            w.Str("reject_reason", s.RejectReason);
+            w.Str("source", s.Source);
+            Write(w);
+        }
+
+        /// <summary>Live-window summary at a cadence (kind=rolling) or at a decision (kind=decision).</summary>
+        public void LogPhysioWindow(AdaptiveAR.Physiology.PhysioSummary s, string kind, string connectionState, string source, double grabOverlapMs)
+        {
+            if (s == null) return;
+            var w = NewLine(Events.PhysioWindow);
+            w.Str("window_kind", kind);
+            w.Num("window_start_session_ms", (float)(SessionElapsedMs - (s.WindowEndMs - s.WindowStartMs)));
+            w.Num("window_end_session_ms", SessionElapsedMs);
+            w.Num("window_ms", (float)(s.WindowEndMs - s.WindowStartMs));
+            w.Bool("available", s.Available);
+            w.NumOrNull("rmssd_ms", s.RmssdMs.HasValue ? (float?)s.RmssdMs.Value : null);
+            w.NumOrNull("mean_ibi_ms", s.MeanIbiMs.HasValue ? (float?)s.MeanIbiMs.Value : null);
+            w.NumOrNull("hr_bpm_from_ibi", s.HrFromIbiBpm.HasValue ? (float?)s.HrFromIbiBpm.Value : null);
+            w.NumOrNull("hr_bpm_device_last", s.LastDeviceHrBpm);
+            w.Num("n_raw", s.NRaw);
+            w.Num("n_accepted", s.NAccepted);
+            w.Num("n_rejected", s.NRejected);
+            w.Num("n_rejected_blocker", s.NRejectedBlocker);
+            w.Num("n_rejected_range", s.NRejectedRange);
+            w.Num("n_rejected_skin", s.NRejectedSkin);
+            w.NumOrNull("mean_error_estimate_ms", s.MeanErrorEstimateMs.HasValue ? (float?)s.MeanErrorEstimateMs.Value : null);
+            w.Num("completeness", (float)s.Completeness);
+            w.NumOrNull("quality", s.Quality.HasValue ? (float?)s.Quality.Value : null);
+            w.NumOrNull("sample_age_ms", s.SampleAgeMs.HasValue ? (float?)s.SampleAgeMs.Value : null);
+            w.Num("grab_overlap_ms", (float)grabOverlapMs);
+            w.Str("connection_state", connectionState);
+            w.Str("source", source);
+            w.Str("action_id", _actionId);
+            Write(w);
+        }
+
+        /// <summary>BLE / stream state. The device name is recorded; the Bluetooth address never is.</summary>
+        public void LogPhysioConnection(string state, string detail, string deviceName)
+        {
+            var w = NewLine(Events.PhysioConnection);
+            w.Str("state", state);
+            w.Str("detail", detail);
+            w.Str("device_name", deviceName);
+            Write(w);
+        }
+
         public void LogPhysiological(PhysiologicalSample sample)
         {
             var w = NewLine(Events.Physiological);
@@ -348,6 +427,7 @@ namespace AdaptiveAR.Logging
         public void LogActionEnter(int actionIndex, string actionId, string kind,
                                    bool enabled, string disabledReason)
         {
+            _actionId = actionId;
             var w = NewLine(Events.ActionEnter);
             w.Num("action_index", actionIndex);
             w.Str("action_id", actionId);

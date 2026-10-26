@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Plain-C# tests for the physiology core. No Unity, no headset: the same source files the
+       app compiles are included directly. Run:  dotnet run (project Tools/PhysiologyTests)  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>AdaptiveAR.Physiology.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Assets\Scripts\Physiology\PpiSample.cs" />
+    <Compile Include="..\..\Assets\Scripts\Physiology\HrvMath.cs" />
+    <Compile Include="..\..\Assets\Scripts\Physiology\PhysiologyWindow.cs" />
+  </ItemGroup>
+
+</Project>
