@@ -41,6 +41,7 @@ namespace AdaptiveAR.Physiology
         private IPhysiologicalSource _source;
         private PhysiologyWindow _window;
         private SessionLogger _logger;
+        private AssemblySessionController _session;
         private StatusHud _hud;
         private StepValidator _validator;
         private float _nextWindowLog;
@@ -111,6 +112,7 @@ namespace AdaptiveAR.Physiology
         private void Rebind()
         {
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
+            _session = FindAnyObjectByType<AssemblySessionController>(FindObjectsInactive.Include);
             _hud = FindAnyObjectByType<StatusHud>(FindObjectsInactive.Include);
             UnhookValidator();
             _validator = FindAnyObjectByType<StepValidator>(FindObjectsInactive.Include);
@@ -189,13 +191,23 @@ namespace AdaptiveAR.Physiology
             LatestSummary = _window.Summarize(now);
             if (_logger != null)
                 _logger.LogPhysioWindow(LatestSummary, "rolling", ConnectionState, SourceId, GrabOverlapMs(LatestSummary.WindowStartMs, LatestSummary.WindowEndMs));
+            // Stage 7: the existing seam. A valid, fresh snapshot becomes the session's latest
+            // PhysiologicalSample (logged as the existing 'physiological' event); otherwise the
+            // session's latest is cleared so nothing stale can be handed to a decision.
+            if (_session != null) _session.SubmitPhysiological(SnapshotSample());
             PushHud();
         }
 
-        /// <summary>Context snapshot: null when unavailable or stale. (Not consumed by the decision seam until Stage 8.)</summary>
+        /// <summary>Context snapshot: null when unavailable or stale.</summary>
         public PhysioSummary Snapshot()
         {
             return _window != null ? _window.Snapshot(NowMs, maxSnapshotAgeMs) : null;
+        }
+
+        /// <summary>The snapshot as the decision-context type; null when unavailable or stale.</summary>
+        public AdaptiveAR.Decision.PhysiologicalSample SnapshotSample()
+        {
+            return PhysiologicalSampleMapper.ToSample(Snapshot(), SourceId);
         }
 
         // ------------------------------------------------------------------ movement proxy: grab intervals

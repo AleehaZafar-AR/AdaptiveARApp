@@ -92,6 +92,27 @@ namespace AdaptiveAR.Physiology.Tests
             Check("8b parse rejects malformed", PpiSample.Parse("S|12|1", 0, 0, "x") == null && PpiSample.Parse("X|1|2|3|4|5|6|7|8|9", 0, 0, "x") == null);
             Check("8c flags bit0 blocker", PpiSample.Parse("S|1|0|1|16|0|60|900|3|1", 0, 0, "x").Blocker);
 
+            // 9. mapping to the decision-context sample: null when unavailable / stale, fields otherwise
+            var w9 = new PhysiologyWindow(new PhysiologyWindowConfig { WindowMs = 60000, MinAccepted = 5 });
+            double t9 = 0;
+            for (int i = 0; i < 3; i++) { t9 += 800; w9.Admit(S(800, hr: 75), t9); }
+            Check("9 mapper returns null when unavailable", PhysiologicalSampleMapper.ToSample(w9.Summarize(t9), "test") == null
+                  && PhysiologicalSampleMapper.ToSample(null, "test") == null);
+            for (int i = 0; i < 5; i++) { t9 += 800; w9.Admit(S(i % 2 == 0 ? 800 : 820, hr: 75), t9); }
+            var mapped = PhysiologicalSampleMapper.ToSample(w9.Snapshot(t9 + 100, 15000), "PolarVeritySense/x");
+            double expectedIbi = HrvMath.MeanIbi(new double[] { 800, 800, 800, 800, 820, 800, 820, 800 }).Value;
+            Check("9b mapper not null / not empty", mapped != null && !mapped.IsEmpty);
+            Check("9b1 mapper HR = device HR", mapped != null && mapped.HeartRateBpm.HasValue && Math.Abs(mapped.HeartRateBpm.Value - 75f) < 1e-6, mapped == null ? "null" : $"hr={mapped.HeartRateBpm}");
+            Check("9b2 mapper RMSSD present", mapped != null && mapped.RmssdMs.HasValue, mapped == null ? "null" : $"rmssd={mapped.RmssdMs}");
+            Check("9b3 mapper mean IBI", mapped != null && mapped.MeanIbiMs.HasValue && Math.Abs(mapped.MeanIbiMs.Value - expectedIbi) < 1e-3, mapped == null ? "null" : $"ibi={mapped.MeanIbiMs} expected={expectedIbi}");
+            Check("9b4 mapper quality / age / source", mapped != null && mapped.Quality.HasValue && Math.Abs(mapped.Quality.Value - 1f) < 1e-6 && mapped.AgeMs.HasValue && mapped.Source == "PolarVeritySense/x",
+                  mapped == null ? "null" : $"q={mapped.Quality} age={mapped.AgeMs} src={mapped.Source}");
+            Check("9c mapper null when stale", PhysiologicalSampleMapper.ToSample(w9.Snapshot(t9 + 30000, 15000), "x") == null);
+            var ctx = new AdaptiveAR.Decision.DecisionContext { Physiological = PhysiologicalSampleMapper.ToSample(w9.Snapshot(t9 + 30000, 15000), "x") };
+            Check("9d DecisionContext.PhysiologicalMissing when stale", ctx.PhysiologicalMissing);
+            ctx.Physiological = mapped;
+            Check("9e DecisionContext carries the sample", !ctx.PhysiologicalMissing);
+
             Console.WriteLine($"\n{_passed} passed, {_failed} failed");
             return _failed == 0 ? 0 : 1;
         }

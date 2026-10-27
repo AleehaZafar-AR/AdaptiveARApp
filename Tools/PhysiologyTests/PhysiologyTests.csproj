@@ -16,6 +16,10 @@
     <Compile Include="..\..\Assets\Scripts\Physiology\PpiSample.cs" />
     <Compile Include="..\..\Assets\Scripts\Physiology\HrvMath.cs" />
     <Compile Include="..\..\Assets\Scripts\Physiology\PhysiologyWindow.cs" />
+    <Compile Include="..\..\Assets\Scripts\Physiology\PhysiologicalSampleMapper.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\DecisionTypes.cs" />
+    <Compile Include="..\..\Assets\Scripts\Support\SupportAction.cs" />
+    <Compile Include="..\..\Assets\Scripts\Support\SupportLevel.cs" />
   </ItemGroup>
 
 </Project>

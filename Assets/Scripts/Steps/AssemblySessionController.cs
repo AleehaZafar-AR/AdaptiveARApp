@@ -860,6 +860,7 @@ namespace AdaptiveAR.Steps
                 Debug.LogError($"[Session] presenter.PresentAction threw for '{(action != null ? action.Id : "?")}': {e}");
             }
             InstalledPartSentinel.ReportAll("next-action:" + (action != null ? action.Id : "<none>"));
+            LogDecisionContextProbe("action_enter:" + (action != null ? action.Id : "<none>"));
 
             if (logger != null && action != null)
                 logger.LogActionEnter(resolved, action.Id, action.kind.ToString(),
@@ -1319,10 +1320,33 @@ namespace AdaptiveAR.Steps
                 SupportChangesOnStep = _supportChangesOnStep,
                 SupportChangesTotal = _supportChangesTotal,
 
-                Physiological = LatestPhysiological
+                Physiological = ResolvePhysiologicalSnapshot()
             };
 
             return ctx;
+        }
+
+        private AdaptiveAR.Physiology.PhysiologicalStateProvider _physiology;
+
+        /// <summary>
+        /// The physiological context for a decision: the provider's CURRENT valid snapshot
+        /// (enough accepted samples, not stale), or null. Falls back to the last submitted
+        /// sample only when no provider exists (e.g. a replayed context). Physiology is
+        /// context only; nothing here changes the support level.
+        /// </summary>
+        private PhysiologicalSample ResolvePhysiologicalSnapshot()
+        {
+            if (_physiology == null) _physiology = FindAnyObjectByType<AdaptiveAR.Physiology.PhysiologicalStateProvider>(FindObjectsInactive.Include);
+            if (_physiology != null) return _physiology.SnapshotSample();
+            return LatestPhysiological;
+        }
+
+        /// <summary>Logs what a decision provider would have been given right now, without any decision being made.</summary>
+        public void LogDecisionContextProbe(string where)
+        {
+            if (logger == null) return;
+            try { logger.LogDecisionContextProbe(BuildDecisionContext(), where); }
+            catch (Exception e) { Debug.LogWarning("[Session] context probe threw: " + e.Message, this); }
         }
 
         /// <summary>

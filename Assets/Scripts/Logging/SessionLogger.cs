@@ -82,6 +82,9 @@ namespace AdaptiveAR.Logging
             public const string SensorSetupReady = "sensor_setup_ready";
             public const string SensorSetupContinue = "sensor_setup_continue";
             public const string SensorSetupSkipped = "sensor_setup_skipped";
+
+            // --- the decision context as a provider would receive it NOW; no decision is made ---
+            public const string DecisionContextProbe = "decision_context_probe";
         }
 
         /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
@@ -633,6 +636,26 @@ namespace AdaptiveAR.Logging
             w.Num("level_after_num", (int)levelAfter);
             w.Bool("applied", applied);
 
+            Write(w);
+        }
+
+        /// <summary>The exact context a provider would be handed at this moment (physiology included), with no decision requested.</summary>
+        public void LogDecisionContextProbe(DecisionContext context, string where)
+        {
+            var w = NewLine(Events.DecisionContextProbe);
+            w.Str("where", where);
+            if (context != null)
+            {
+                w.Num("decision_index", context.DecisionIndex);
+                w.Num("step_index", context.StepIndex);
+                w.Str("step_id", context.StepId);
+                w.Num("step_elapsed_ms", context.StepElapsedMs);
+                w.Num("attempts_on_step", context.AttemptsOnStep);
+                w.Num("errors_on_step", context.ErrorsOnStep);
+                w.Str("current_support_level", context.CurrentSupportLevel.ToString());
+                w.Bool("physiological_missing", context.PhysiologicalMissing);
+                WritePhysiological(w, "physiological", context.Physiological);
+            }
             Write(w);
         }
 
