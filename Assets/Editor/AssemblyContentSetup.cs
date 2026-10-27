@@ -406,9 +406,9 @@ namespace AdaptiveAR.EditorTools
             step.taskComplexity = spec.taskComplexity;
             step.expectedDurationSeconds = spec.expectedSeconds;
 
-            // Opening level for each step. A neutral, usable starting point - the real
-            // transition policy comes from the literature review.
-            step.defaultSupportLevel = SupportLevel.L2_Guided;
+            // Opening level for each step: least assistance, so the constrained
+            // decision layer escalates to L2/L3 only when needed.
+            step.defaultSupportLevel = SupportLevel.L1_Minimal;
 
             // --- validation ---
             step.requiresValidation = true;
