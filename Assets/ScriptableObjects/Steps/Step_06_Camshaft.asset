@@ -147,7 +147,7 @@ MonoBehaviour:
     disabledReason:
     autoCompleteRemaining: 0
   expectedDurationSeconds: 120
-  defaultSupportLevel: 2
+  defaultSupportLevel: 1
   l1Minimal:
     instructionText: 
     instructionDetail: 

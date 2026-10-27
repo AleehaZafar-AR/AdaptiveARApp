@@ -50,7 +50,7 @@ MonoBehaviour:
     disabledReason:
     autoCompleteRemaining: 1
   expectedDurationSeconds: 90
-  defaultSupportLevel: 2
+  defaultSupportLevel: 1
   l1Minimal:
     instructionText: 
     instructionDetail: 

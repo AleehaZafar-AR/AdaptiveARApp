@@ -193,7 +193,7 @@ MonoBehaviour:
     enabled: 1
     disabledReason: 
   expectedDurationSeconds: 90
-  defaultSupportLevel: 2
+  defaultSupportLevel: 1
   l1Minimal:
     instructionText: Repeat the piston assembly procedure for the second piston.
     instructionDetail: 

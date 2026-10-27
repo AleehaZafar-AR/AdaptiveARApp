@@ -94,7 +94,7 @@ MonoBehaviour:
     disabledReason: No tool model exists in the repository. Architecture is in place;
       assign a tool prefab and a detection rule once supplied.
   expectedDurationSeconds: 120
-  defaultSupportLevel: 2
+  defaultSupportLevel: 1
   l1Minimal:
     instructionText: 
     instructionDetail: 

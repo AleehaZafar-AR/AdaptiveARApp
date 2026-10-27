@@ -193,7 +193,7 @@ MonoBehaviour:
     enabled: 0
     disabledReason: Superseded by the Complete Remaining Pistons shortcut after piston 2.
   expectedDurationSeconds: 90
-  defaultSupportLevel: 2
+  defaultSupportLevel: 1
   l1Minimal:
     instructionText: Repeat the piston assembly procedure for the remaining pistons.
     instructionDetail: 
