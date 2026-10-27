@@ -35,6 +35,8 @@ namespace AdaptiveAR.Physiology
         public PhysioSummary LatestSummary { get; private set; }
         public string SourceId { get { return _source != null ? _source.SourceId : "none"; } }
         public string ConnectionState { get; private set; } = "none";
+        /// <summary>True while the bound source reports an open PPI stream (Polar: control-point success received; replay: enabled).</summary>
+        public bool SourceStreaming { get { return _source != null && _source.IsStreaming; } }
 
         private IPhysiologicalSource _source;
         private PhysiologyWindow _window;

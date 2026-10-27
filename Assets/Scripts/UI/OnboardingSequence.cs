@@ -102,6 +102,23 @@ namespace AdaptiveAR.UI
         /// <summary>Raised when the participant presses Begin on the last screen.</summary>
         public event Action OnCompleted;
 
+        /// <summary>
+        /// While true another screen (the sensor set-up) owns the panel and the advance button:
+        /// Advance() does nothing. Cleared by that owner before it calls Begin().
+        /// </summary>
+        public bool ExternalOwner { get; set; }
+        public Button AdvanceButton { get { return advanceButton; } }
+
+        /// <summary>Renders arbitrary content on this panel for an external owner. buttonLabel null hides the button.</summary>
+        public void ShowExternal(string eyebrow, string title, string body, string buttonLabel, bool showButton)
+        {
+            if (eyebrowText != null) eyebrowText.text = eyebrow ?? "";
+            if (titleText != null) titleText.text = title ?? "";
+            if (bodyText != null) bodyText.text = body ?? "";
+            if (advanceLabel != null && buttonLabel != null) advanceLabel.text = buttonLabel;
+            if (advanceButton != null && advanceButton.gameObject.activeSelf != showButton) advanceButton.gameObject.SetActive(showButton);
+        }
+
         private float _startedAtMs;
 
         private void OnEnable()
@@ -122,6 +139,8 @@ namespace AdaptiveAR.UI
         /// <summary>Restarts the sequence: placement first if needed, then screen one.</summary>
         public void Begin()
         {
+            if (ExternalOwner) return;                      // the sensor set-up screen has the panel
+            if (advanceButton != null && !advanceButton.gameObject.activeSelf) advanceButton.gameObject.SetActive(true);
             IsFinished = false;
             Index = -1;
             _startedAtMs = Time.time * 1000f;
@@ -182,7 +201,7 @@ namespace AdaptiveAR.UI
 
         public void Advance()
         {
-            if (IsFinished) return;
+            if (IsFinished || ExternalOwner) return;
 
             // On the placement screen the button confirms the placement instead of paging.
             // A failed confirm leaves the screen up with the reason in the body text.

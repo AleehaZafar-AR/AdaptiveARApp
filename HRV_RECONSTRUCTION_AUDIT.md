@@ -307,3 +307,14 @@ Original audit (sections A–I) preserved above. All items below are **[QV]**: c
 Scene wiring: no scene edit. `PhysiologyBootstrap` creates the single `PolarPpiReceiver` object at start-up from `Assets/Resources/Physiology/PhysiologyConfig.asset` (enabled, source PolarVeritySense/Replay/None, window settings). Reason: the live scene file carries uncommitted researcher edits that must not be touched, and the object must exist exactly once across Restart (`DontDestroyOnLoad` + duplicate guard; rebinding logged as `[Physio] rebound …` and `physio_connection state=rebind`).
 
 Known limits to confirm on device: control-point response delivery (indicate vs notify — the bridge picks indicate only if the characteristic lacks notify), granted MTU and samples per notification, first-sample latency, reconnect behaviour.
+
+### J.1 Hardware verification and the sensor set-up screen (2026-10-26)
+
+Reported from a Quest 3 run with the Polar Verity Sense: discovery, connection, PPI stream start, per-sample parsing, Unity callback, window processing, rolling RMSSD and the HUD row all live. **Stages 1–6: device-verified** (JSONL field check pending the pulled file).
+
+Added before Stage 7, by request: `SensorSetupScreen` (UI) runs on the home panel before the existing onboarding.
+- A **Connecting**: no Continue, no timeout; status line from the BLE/physiology state; leaves only when the stream has started (control-point success), ≥ 1 accepted sample has reached the provider and the device HR is non-zero.
+- B **Stabilisation**: 60 s countdown (`stabilisationSeconds`), live HR, participant-facing "Signal: Good / Weak"; RMSSD is not shown.
+- C **Ready** only when `PhysiologicalStateProvider.Snapshot()` is non-null (min accepted, not stale); otherwise "Waiting for a stable sensor signal" until it is. Continue → `OnboardingSequence.Begin()` (placement → welcome → … unchanged).
+- Skipped (logged `sensor_setup_skipped`) when the config source is None / disabled or no provider exists; the assembly controller never depends on BLE.
+- Events: `sensor_setup_enter`, `sensor_stream_ready`, `sensor_stabilization_start`, `sensor_stabilization_complete`, `sensor_setup_waiting`, `sensor_setup_ready`, `sensor_setup_continue`, `sensor_setup_skipped`, each with setup elapsed ms, connection state, sample counts, quality, last device HR, RMSSD availability and snapshot validity. The screen is sensor initialisation / initial physiological context, not a clinical or validated resting baseline, in code, logs and wording.

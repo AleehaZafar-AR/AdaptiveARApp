@@ -107,8 +107,8 @@ namespace AdaptiveAR.UI
         {
             Show(Screen.Home);
 
-            // Begin the introduction as soon as the home screen is up.
-            if (onboarding != null) onboarding.Begin();
+            // Sensor initialisation first (skipped when physiology is off), then the introduction.
+            if (onboarding != null) SensorSetupScreen.Launch(this, onboarding);
         }
 
         /// <summary>Hooked to the Start button. StepManager's own listener runs alongside this.</summary>

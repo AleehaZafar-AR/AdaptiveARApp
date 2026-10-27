@@ -72,6 +72,16 @@ namespace AdaptiveAR.Logging
             public const string PpiSample = "ppi_sample";
             public const string PhysioWindow = "physio_window";
             public const string PhysioConnection = "physio_connection";
+
+            // --- pre-task sensor initialisation / stabilisation screen (not a validated resting baseline) ---
+            public const string SensorSetupEnter = "sensor_setup_enter";
+            public const string SensorStreamReady = "sensor_stream_ready";
+            public const string SensorStabilizationStart = "sensor_stabilization_start";
+            public const string SensorStabilizationComplete = "sensor_stabilization_complete";
+            public const string SensorSetupWaiting = "sensor_setup_waiting";
+            public const string SensorSetupReady = "sensor_setup_ready";
+            public const string SensorSetupContinue = "sensor_setup_continue";
+            public const string SensorSetupSkipped = "sensor_setup_skipped";
         }
 
         /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
@@ -381,6 +391,27 @@ namespace AdaptiveAR.Logging
             w.Str("connection_state", connectionState);
             w.Str("source", source);
             w.Str("action_id", _actionId);
+            Write(w);
+        }
+
+        /// <summary>One sensor set-up screen transition with the physiology state at that moment.</summary>
+        public void LogSensorSetup(string eventName, string phase, string detail, float setupElapsedMs,
+                                   AdaptiveAR.Physiology.PhysioSummary s, bool snapshotValid, string connectionState)
+        {
+            var w = NewLine(eventName);
+            w.Str("phase", phase);
+            w.Str("detail", detail);
+            w.Num("setup_elapsed_ms", setupElapsedMs);
+            w.Str("connection_state", connectionState);
+            w.Bool("snapshot_valid", snapshotValid);
+            w.Num("n_raw", s != null ? s.NRaw : 0);
+            w.Num("n_accepted", s != null ? s.NAccepted : 0);
+            w.Num("n_rejected", s != null ? s.NRejected : 0);
+            w.NumOrNull("quality", s != null && s.Quality.HasValue ? (float?)s.Quality.Value : null);
+            w.NumOrNull("hr_bpm_device_last", s != null ? s.LastDeviceHrBpm : null);
+            w.Bool("rmssd_available", s != null && s.Available);
+            w.NumOrNull("rmssd_ms", s != null && s.RmssdMs.HasValue ? (float?)s.RmssdMs.Value : null);
+            w.NumOrNull("sample_age_ms", s != null && s.SampleAgeMs.HasValue ? (float?)s.SampleAgeMs.Value : null);
             Write(w);
         }
 
