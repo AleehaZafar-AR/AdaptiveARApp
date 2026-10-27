@@ -94,3 +94,13 @@ crashlytics-build.properties
 # headless physiology tests (dotnet build output)
 Tools/PhysiologyTests/bin/
 Tools/PhysiologyTests/obj/
+
+# AI provider secrets (never commit)
+Assets/Resources/Decision/ai_provider.local.json
+Assets/Resources/Decision/ai_provider.local.json.meta
+**/ai_provider.local.json
+
+# decision evaluation build output
+Tools/DecisionEval/bin/
+Tools/DecisionEval/obj/
+eval_out/

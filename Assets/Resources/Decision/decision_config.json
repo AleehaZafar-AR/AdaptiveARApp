@@ -1,0 +1,34 @@
+{
+  "_comment": "Decision layer configuration. Override on the headset with persistentDataPath/AdaptiveAR/config/decision_config.json. provider: llm | reference | none. The API key is NEVER here: put {\"apiKey\":\"...\"} in persistentDataPath/AdaptiveAR/config/ai_provider.local.json (adb push) or in Assets/Resources/Decision/ai_provider.local.json (git-ignored).",
+  "enabled": true,
+  "provider": "llm",
+  "schedule": {
+    "onActionEnter": true,
+    "onCountedError": true,
+    "periodicSeconds": 0,
+    "minIntervalSeconds": 20,
+    "firstDecisionAfterStepMs": 15000
+  },
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "apiVersion": "2023-06-01",
+    "maxTokens": 64,
+    "temperature": 0,
+    "timeoutMs": 8000,
+    "systemPrompt": null
+  },
+  "referencePolicy": {
+    "_comment": "PLACEHOLDER values pending the literature review (CLAUDE.md 2.2). No physiological rule exists by design (CLAUDE.md 2.4).",
+    "name": "placeholder_v0",
+    "slowRatioIncrease": 1.5,
+    "errorsOnStepIncrease": 2,
+    "attemptsOnStepIncrease": 4,
+    "fastRatioDecrease": 0.6,
+    "minStepElapsedMsForIncrease": 10000,
+    "minStepElapsedMsForDecrease": 20000,
+    "clampAtBoundaries": true,
+    "fallbackExpectedMs": 0
+  }
+}

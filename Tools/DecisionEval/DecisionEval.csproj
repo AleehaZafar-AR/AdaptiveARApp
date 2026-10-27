@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Headless technical evaluation of the decision framework (CLAUDE.md section 3).
+       Compiles the same plain-C# decision sources the app uses. Example:
+         dotnet run (project Tools/DecisionEval) -c Release : provider=reference scenarios=synthetic count=40 repeats=3 perturb=true out=eval_out
+         dotnet run (project Tools/DecisionEval) -c Release : provider=llm config=Assets/Resources/Decision/decision_config.json keyfile=path/to/ai_provider.local.json -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>AdaptiveAR.Decision.Eval</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Assets\Scripts\Support\SupportAction.cs" />
+    <Compile Include="..\..\Assets\Scripts\Support\SupportLevel.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\DecisionTypes.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\MiniJson.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\ReferencePolicy.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\LlmDecisionCore.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\DecisionConfig.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\IAsyncDecisionProvider.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\Evaluation\ScenarioGenerator.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\Evaluation\ContextJsonl.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\Evaluation\EvaluationRunner.cs" />
+    <Compile Include="..\..\Assets\Scripts\Logging\JsonLineWriter.cs" />
+  </ItemGroup>
+
+</Project>

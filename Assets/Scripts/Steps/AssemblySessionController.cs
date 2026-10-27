@@ -106,6 +106,17 @@ namespace AdaptiveAR.Steps
         /// <summary>Raised whenever counters change, so HUDs can refresh without polling every field.</summary>
         public event Action OnStateChanged;
 
+        /// <summary>An action was entered (after its presentation). The decision scheduler listens here.</summary>
+        public event Action<AssemblyAction> OnActionEntered;
+        /// <summary>A placement attempt was counted as an error.</summary>
+        public event Action OnCountedError;
+
+        /// <summary>True between the first step and the end of the sequence: the window in which decisions make sense.</summary>
+        public bool AssemblyRunning { get { return SessionActive && !SequenceFinished && _currentStep != null; } }
+        public SupportLevel CurrentSupportLevel { get { return supportLevel != null ? supportLevel.CurrentLevel : SupportLevel.L1_Minimal; } }
+        /// <summary>The last response the seam applied (any provider), for the HUD and diagnostics.</summary>
+        public DecisionResponse LastDecisionResponse { get; private set; }
+
         private float _overallMs;
         private float _stepMs;
         private int _attemptsOnStep;
@@ -861,6 +872,7 @@ namespace AdaptiveAR.Steps
             }
             InstalledPartSentinel.ReportAll("next-action:" + (action != null ? action.Id : "<none>"));
             LogDecisionContextProbe("action_enter:" + (action != null ? action.Id : "<none>"));
+            try { OnActionEntered?.Invoke(action); } catch (Exception e) { Debug.LogError("[Session] OnActionEntered handler threw: " + e); }
 
             if (logger != null && action != null)
                 logger.LogActionEnter(resolved, action.Id, action.kind.ToString(),
@@ -1046,6 +1058,7 @@ namespace AdaptiveAR.Steps
             // (released near the target without fitting). Carrying the part in and out of the
             // zone, holding it, or adjusting it during the same attempt is never an error.
             bool counted = !success && validator != null && validator.LastAttemptCounted;
+            if (counted) { try { OnCountedError?.Invoke(); } catch (Exception e) { Debug.LogError("[Session] OnCountedError handler threw: " + e); } }
             if (counted)
             {
                 _errorsOnStep++;
@@ -1380,6 +1393,7 @@ namespace AdaptiveAR.Steps
 
             SupportLevel after = supportLevel != null ? supportLevel.CurrentLevel : before;
 
+            LastDecisionResponse = response;
             _decisionIndex++;
 
             if (logger != null)
@@ -1431,6 +1445,51 @@ namespace AdaptiveAR.Steps
             }
 
             return ApplyDecision(ctx, response);
+        }
+
+        /// <summary>
+        /// The asynchronous path (a network model): build the context now, wait for the
+        /// provider's routine, then apply through the same constrained ApplyDecision. A
+        /// provider that throws or never answers becomes a recorded fallback.
+        /// </summary>
+        public System.Collections.IEnumerator RequestAndApplyDecisionRoutine(IAsyncDecisionProvider provider, Action<DecisionResponse, SupportLevel> onApplied)
+        {
+            DecisionContext ctx = BuildDecisionContext();
+            if (provider == null)
+            {
+                SupportLevel l0 = ApplyDecision(ctx, DecisionResponse.Failed(ConstraintStatus.ProviderError, 0f, null, null));
+                onApplied?.Invoke(LastDecisionResponse, l0);
+                yield break;
+            }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            DecisionResponse response = null;
+            System.Collections.IEnumerator routine = null;
+            try { routine = provider.RequestDecisionRoutine(ctx, r => response = r); }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Session] async provider threw on start: {e.Message}", this);
+                response = DecisionResponse.Failed(ConstraintStatus.ProviderError, (float)sw.Elapsed.TotalMilliseconds, provider.ProviderId, e.Message);
+            }
+            if (routine != null)
+            {
+                bool more = true;
+                while (more)
+                {
+                    try { more = routine.MoveNext(); }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[Session] async provider threw: {e.Message}", this);
+                        response = DecisionResponse.Failed(ConstraintStatus.ProviderError, (float)sw.Elapsed.TotalMilliseconds, provider.ProviderId, e.Message);
+                        break;
+                    }
+                    if (more) yield return routine.Current;
+                }
+            }
+            sw.Stop();
+            if (response == null) response = DecisionResponse.Failed(ConstraintStatus.ProviderError, (float)sw.Elapsed.TotalMilliseconds, provider.ProviderId, null);
+            else if (response.LatencyMs <= 0f) response.LatencyMs = (float)sw.Elapsed.TotalMilliseconds;
+            SupportLevel after = ApplyDecision(ctx, response);
+            onApplied?.Invoke(LastDecisionResponse, after);
         }
 
         /// <summary>Records a physiological reading and keeps it as the latest context input.</summary>

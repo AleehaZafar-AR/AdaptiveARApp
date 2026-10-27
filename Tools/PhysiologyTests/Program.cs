@@ -5,6 +5,111 @@ using AdaptiveAR.Physiology;
 
 namespace AdaptiveAR.Physiology.Tests
 {
+    public static class DecisionTests
+    {
+        public static void Run(Action<string, bool, string> check)
+        {
+            void Check(string name, bool ok, string detail = "") { check(name, ok, detail); }
+            var cfg = new AdaptiveAR.Decision.ReferencePolicyConfig();
+            var refp = new AdaptiveAR.Decision.ReferencePolicyProvider(cfg);
+            AdaptiveAR.Decision.DecisionContext C(int level, float elapsed, float? expected, int errors, int attempts) => new AdaptiveAR.Decision.DecisionContext
+            { CurrentSupportLevel = (AdaptiveAR.Support.SupportLevel)level, StepElapsedMs = elapsed, StepExpectedMs = expected, ErrorsOnStep = errors, AttemptsOnStep = attempts };
+
+            // 10 MiniJson round trip
+            var parsed = AdaptiveAR.Decision.MiniJson.ParseObject("{\"a\":1.5,\"b\":\"x\\\"y\",\"c\":[true,null,{\"d\":-2}],\"e\":false}");
+            Check("10 MiniJson parse", parsed != null && AdaptiveAR.Decision.MiniJson.GetDouble(parsed, "a", 0) == 1.5 && AdaptiveAR.Decision.MiniJson.GetString(parsed, "b") == "x\"y"
+                  && AdaptiveAR.Decision.MiniJson.GetList(parsed, "c").Count == 3 && !AdaptiveAR.Decision.MiniJson.GetBool(parsed, "e", true), "");
+            string ser = AdaptiveAR.Decision.MiniJson.Serialize(parsed);
+            var again = AdaptiveAR.Decision.MiniJson.ParseObject(ser);
+            Check("10b MiniJson serialize round trip", again != null && AdaptiveAR.Decision.MiniJson.GetString(again, "b") == "x\"y" && ser.Contains("\"e\":false"), ser);
+
+            // 11 reference policy: deterministic + each rule
+            var r1 = refp.RequestDecision(C(2, 45000, 60000, 0, 1)); var r2 = refp.RequestDecision(C(2, 45000, 60000, 0, 1));
+            Check("11 reference deterministic", r1.ParsedAction == r2.ParsedAction && r1.Status == AdaptiveAR.Decision.ConstraintStatus.Ok && r1.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, r1.ProviderReason);
+            Check("11b errors -> INCREASE", refp.RequestDecision(C(2, 5000, 60000, 2, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT);
+            Check("11c attempts -> INCREASE", refp.RequestDecision(C(1, 5000, 60000, 0, 4)).ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT);
+            Check("11d slow -> INCREASE", refp.RequestDecision(C(2, 95000, 60000, 0, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT);
+            Check("11e fast+clean -> DECREASE", refp.RequestDecision(C(2, 25000, 60000, 0, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT);
+            Check("11f fast but too early -> KEEP", refp.RequestDecision(C(2, 15000, 60000, 0, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT);
+            Check("11g boundary clamp L3 -> KEEP", refp.RequestDecision(C(3, 5000, 60000, 3, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT);
+            Check("11h boundary clamp L1 -> KEEP", refp.RequestDecision(C(1, 25000, 60000, 0, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT);
+            Check("11i no expected duration -> timing rules skipped", refp.RequestDecision(C(2, 95000, null, 0, 1)).ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT);
+            var physCtx = C(2, 45000, 60000, 0, 1); physCtx.Physiological = new AdaptiveAR.Decision.PhysiologicalSample { RmssdMs = 5f, HeartRateBpm = 150f };
+            Check("11j physiology alone never changes the reference decision", refp.RequestDecision(physCtx).ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT);
+            var json = AdaptiveAR.Decision.ReferencePolicyConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"name\":\"lit_v1\",\"errorsOnStepIncrease\":9}"));
+            Check("11k config from JSON", json.Name == "lit_v1" && json.ErrorsOnStepIncrease == 9 && new AdaptiveAR.Decision.ReferencePolicyProvider(json).ProviderId == "reference:lit_v1");
+
+            // 12 model output parsing under the constrained action set
+            string pid = "test";
+            Check("12 JSON action ok", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("{\"action\":\"INCREASE_SUPPORT\",\"reason\":\"slow\"}", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.Ok
+                  && AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("{\"action\":\"INCREASE_SUPPORT\"}", pid, 1).ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT);
+            Check("12b JSON with fences ok", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("```json\n{\"action\":\"keep_support\"}\n```", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.Ok);
+            Check("12c bare token ok", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("DECREASE_SUPPORT", pid, 1).ParsedAction == AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT);
+            var oov = AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("{\"action\":\"MAXIMUM_SUPPORT\"}", pid, 1);
+            Check("12d out of vocabulary -> fallback KEEP, recorded", oov.Status == AdaptiveAR.Decision.ConstraintStatus.OutOfVocabulary && oov.UsedFallback && oov.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT && oov.RawOutput.Contains("MAXIMUM"));
+            Check("12e bare unknown token -> OutOfVocabulary", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("RESET_SUPPORT", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.OutOfVocabulary);
+            Check("12f prose -> Unparseable", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("I think you should increase support now.", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.Unparseable);
+            Check("12g empty -> Unparseable", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.Unparseable);
+            var lc = new AdaptiveAR.Decision.LlmConfig();
+            Check("12h http 500 -> ProviderError", AdaptiveAR.Decision.LlmDecisionCore.Interpret(lc, 500, "{\"error\":\"x\"}", 10, false, null).Status == AdaptiveAR.Decision.ConstraintStatus.ProviderError);
+            Check("12i timeout -> ProviderTimeout", AdaptiveAR.Decision.LlmDecisionCore.Interpret(lc, 0, null, 8000, true, "timeout").Status == AdaptiveAR.Decision.ConstraintStatus.ProviderTimeout);
+            string body = "{\"id\":\"m\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"action\\\":\\\"KEEP_SUPPORT\\\",\\\"reason\\\":\\\"ok\\\"}\"}],\"usage\":{}}";
+            var ok = AdaptiveAR.Decision.LlmDecisionCore.Interpret(lc, 200, body, 300, false, null);
+            Check("12j anthropic body -> Ok KEEP", ok.Status == AdaptiveAR.Decision.ConstraintStatus.Ok && ok.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT && ok.ProviderReason == "ok" && ok.LatencyMs == 300, ok.RawOutput);
+
+            // 13 request build: headers carry the key, the body never does; context is the exact AI input
+            var ctx = C(2, 30000, 60000, 1, 2); ctx.StepId = "step_02"; ctx.Physiological = null;
+            var spec = AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(lc, "sk-test-SECRET", ctx);
+            Check("13 request spec", spec.Headers["x-api-key"] == "sk-test-SECRET" && !spec.Body.Contains("SECRET") && spec.Body.Contains("\"model\":\"" + lc.Model + "\"")
+                  && spec.Body.Contains("step_02") && spec.Body.Contains("physiological_missing") && spec.Body.Contains("\"temperature\":0"), spec.Body);
+            Check("13b context json has null physiology", AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(ctx).Contains("\"physiological\":null"));
+
+            // 14 scenario generator determinism + perturbations
+            var s1 = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Synthetic(12, 3); var s2 = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Synthetic(12, 3);
+            bool same = s1.Count == 12 && s2.Count == 12; for (int i = 0; same && i < 12; i++) same &= s1[i].Id == s2[i].Id && s1[i].Context.StepElapsedMs == s2[i].Context.StepElapsedMs;
+            Check("14 synthetic scenarios deterministic", same);
+            var pert = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Perturb(s1[0], 3);
+            Check("14b perturbations", pert.Count == 4 && pert[1].Context.Physiological == null && !pert[1].Context.StepExpectedMs.HasValue && pert[2].Kind == "adversarial" && pert[0].BaseId == s1[0].Id);
+
+            // 15 evaluation metrics with a deliberately flaky provider
+            var flaky = new FlakyProvider();
+            var scen = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Synthetic(6, 1);
+            var all = new System.Collections.Generic.List<AdaptiveAR.Decision.Evaluation.Scenario>(scen);
+            foreach (var b in scen) all.AddRange(AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Perturb(b, 1));
+            var res = AdaptiveAR.Decision.Evaluation.EvaluationRunner.Run(flaky, refp, all, 3, null);
+            var sum = res.Summary;
+            Check("15 harness call count", res.Calls.Count == all.Count * 3 && sum.Scenarios == all.Count && sum.BaseScenarios == 6);
+            Check("15b compliance < 1 with violations counted", sum.Compliance < 1.0 && sum.StatusCounts.ContainsKey("OutOfVocabulary") && sum.Failures.Count > 0);
+            Check("15c consistency in (0,1]", sum.Consistency > 0 && sum.Consistency <= 1.0, sum.Consistency.ToString());
+            Check("15d robustness kinds present", sum.RobustnessByKind.ContainsKey("noise") && sum.RobustnessByKind.ContainsKey("adversarial"));
+            var refRes = AdaptiveAR.Decision.Evaluation.EvaluationRunner.Run(refp, refp, all, 2, null);
+            Check("15e reference vs itself: consistency 1, agreement 1, compliance 1", refRes.Summary.Consistency == 1.0 && refRes.Summary.AgreementWithReference == 1.0 && refRes.Summary.Compliance == 1.0);
+            string md = AdaptiveAR.Decision.Evaluation.EvaluationRunner.SummaryToMarkdown(refRes.Summary);
+            Check("15f summary outputs", md.Contains("Decision consistency") && AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.Evaluation.EvaluationRunner.SummaryToJson(refRes.Summary)) != null
+                  && AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.Evaluation.EvaluationRunner.CallToJsonLine(refRes.Calls[0])) != null);
+
+            // 16 replay from a recorded decision_context_probe line
+            string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";
+            var replay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { line, "not json", "" });
+            Check("16 replay probe line", replay.Count == 1 && replay[0].Context.StepId == "st" && replay[0].Context.CurrentSupportLevel == AdaptiveAR.Support.SupportLevel.L2_Guided
+                  && !replay[0].Context.StepExpectedMs.HasValue && replay[0].Context.Physiological != null && Math.Abs(replay[0].Context.Physiological.RmssdMs.Value - 41.5f) < 1e-4);
+        }
+
+        /// <summary>Returns a valid action most of the time, an out-of-vocabulary token sometimes, prose rarely - exercising the metrics.</summary>
+        private sealed class FlakyProvider : AdaptiveAR.Decision.IDecisionProvider
+        {
+            private int _n;
+            public string ProviderId { get { return "flaky"; } }
+            public AdaptiveAR.Decision.DecisionResponse RequestDecision(AdaptiveAR.Decision.DecisionContext c)
+            {
+                _n++;
+                string text = _n % 7 == 0 ? "{\"action\":\"MAXIMUM_SUPPORT\"}" : (_n % 11 == 0 ? "sure, keep going" : (_n % 3 == 0 ? "{\"action\":\"INCREASE_SUPPORT\"}" : "{\"action\":\"KEEP_SUPPORT\"}"));
+                var r = AdaptiveAR.Decision.LlmDecisionCore.ParseActionText(text, ProviderId, 50 + _n % 5);
+                return r;
+            }
+        }
+    }
+
     public static class Program
     {
         private static int _failed, _passed;
@@ -112,6 +217,8 @@ namespace AdaptiveAR.Physiology.Tests
             Check("9d DecisionContext.PhysiologicalMissing when stale", ctx.PhysiologicalMissing);
             ctx.Physiological = mapped;
             Check("9e DecisionContext carries the sample", !ctx.PhysiologicalMissing);
+
+            DecisionTests.Run(Check);
 
             Console.WriteLine($"\n{_passed} passed, {_failed} failed");
             return _failed == 0 ? 0 : 1;

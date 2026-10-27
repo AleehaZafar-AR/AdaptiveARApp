@@ -1,0 +1,4 @@
+{
+  "_comment": "Copy to ai_provider.local.json (git-ignored) and paste your key, or adb push it to persistentDataPath/AdaptiveAR/config/ai_provider.local.json.",
+  "apiKey": "sk-ant-REPLACE_ME"
+}

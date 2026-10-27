@@ -85,6 +85,8 @@ namespace AdaptiveAR.Logging
 
             // --- the decision context as a provider would receive it NOW; no decision is made ---
             public const string DecisionContextProbe = "decision_context_probe";
+            public const string DecisionTrigger = "decision_trigger";
+            public const string DecisionConfig = "decision_config";
         }
 
         /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
@@ -592,29 +594,8 @@ namespace AdaptiveAR.Logging
         {
             var w = NewLine(Events.Decision);
 
-            w.BeginObject("context");
-            if (context != null)
-            {
-                w.Num("decision_index", context.DecisionIndex);
-                w.Num("step_index", context.StepIndex);
-                w.Str("step_id", context.StepId);
-                w.Num("step_count", context.StepCount);
-                w.Num("task_complexity", context.TaskComplexity);
-                w.Str("operator_experience", context.OperatorExperience);
-                w.Num("step_elapsed_ms", context.StepElapsedMs);
-                w.Num("overall_elapsed_ms", context.OverallElapsedMs);
-                w.NumOrNull("step_expected_ms", context.StepExpectedMs);
-                w.Num("attempts_on_step", context.AttemptsOnStep);
-                w.Num("errors_on_step", context.ErrorsOnStep);
-                w.Num("errors_total", context.ErrorsTotal);
-                w.Str("current_support_level", context.CurrentSupportLevel.ToString());
-                w.Num("current_support_level_num", (int)context.CurrentSupportLevel);
-                w.Num("support_changes_on_step", context.SupportChangesOnStep);
-                w.Num("support_changes_total", context.SupportChangesTotal);
-                w.Bool("physiological_missing", context.PhysiologicalMissing);
-                WritePhysiological(w, "physiological", context.Physiological);
-            }
-            w.EndObject();
+            WriteContext(w, context);
+            w.Str("ai_input", context != null ? AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(context) : null);
 
             w.BeginObject("response");
             if (response != null)
@@ -639,23 +620,60 @@ namespace AdaptiveAR.Logging
             Write(w);
         }
 
-        /// <summary>The exact context a provider would be handed at this moment (physiology included), with no decision requested.</summary>
-        public void LogDecisionContextProbe(DecisionContext context, string where)
+        /// <summary>The full context block shared by 'decision' and 'decision_context_probe' (same field order).</summary>
+        private static void WriteContext(JsonLineWriter w, DecisionContext context)
         {
-            var w = NewLine(Events.DecisionContextProbe);
-            w.Str("where", where);
+            w.BeginObject("context");
             if (context != null)
             {
                 w.Num("decision_index", context.DecisionIndex);
                 w.Num("step_index", context.StepIndex);
                 w.Str("step_id", context.StepId);
+                w.Num("step_count", context.StepCount);
+                w.Num("task_complexity", context.TaskComplexity);
+                w.Str("operator_experience", context.OperatorExperience);
                 w.Num("step_elapsed_ms", context.StepElapsedMs);
+                w.Num("overall_elapsed_ms", context.OverallElapsedMs);
+                w.NumOrNull("step_expected_ms", context.StepExpectedMs);
                 w.Num("attempts_on_step", context.AttemptsOnStep);
                 w.Num("errors_on_step", context.ErrorsOnStep);
+                w.Num("errors_total", context.ErrorsTotal);
                 w.Str("current_support_level", context.CurrentSupportLevel.ToString());
+                w.Num("current_support_level_num", (int)context.CurrentSupportLevel);
+                w.Num("support_changes_on_step", context.SupportChangesOnStep);
+                w.Num("support_changes_total", context.SupportChangesTotal);
                 w.Bool("physiological_missing", context.PhysiologicalMissing);
                 WritePhysiological(w, "physiological", context.Physiological);
             }
+            w.EndObject();
+        }
+
+        /// <summary>The exact context a provider would be handed at this moment (physiology included), with no decision requested. Replayable by the evaluation harness.</summary>
+        public void LogDecisionContextProbe(DecisionContext context, string where)
+        {
+            var w = NewLine(Events.DecisionContextProbe);
+            w.Str("where", where);
+            WriteContext(w, context);
+            Write(w);
+        }
+
+        /// <summary>A decision was requested by the scheduler (the 'decision' line follows when it completes).</summary>
+        public void LogDecisionTrigger(string trigger, string providerId, int requestNumber)
+        {
+            var w = NewLine(Events.DecisionTrigger);
+            w.Str("trigger", trigger);
+            w.Str("provider_id", providerId);
+            w.Num("request_number", requestNumber);
+            Write(w);
+        }
+
+        /// <summary>The decision layer's configuration and provider status at bind time (no secrets).</summary>
+        public void LogDecisionConfig(string description, string status, string providerId)
+        {
+            var w = NewLine(Events.DecisionConfig);
+            w.Str("config", description);
+            w.Str("status", status);
+            w.Str("provider_id", providerId);
             Write(w);
         }
 

@@ -60,8 +60,9 @@ namespace AdaptiveAR.UI
         [SerializeField] private float refreshInterval = 0.1f;
 
         private float _timer;
-        private TextMeshProUGUI _stepValue, _levelValue, _attemptsValue, _elapsedValue, _physioValue;
+        private TextMeshProUGUI _stepValue, _levelValue, _attemptsValue, _elapsedValue, _physioValue, _aiValue;
         private string _physioText = "no source";
+        private string _aiText = "AI off";
         private bool _resolved;
 
         /// <summary>
@@ -97,6 +98,8 @@ namespace AdaptiveAR.UI
                 _attemptsValue = CloneRow(panel, errorLabel, errorValueText, "ATTEMPTS THIS STEP", 128f);
                 _physioValue = CloneRow(panel, errorLabel, errorValueText, "PHYSIOLOGY (BLE / HR / PPI / RMSSD)", 192f);
                 if (_physioValue != null) { _physioValue.fontSize = _physioValue.fontSize * 0.8f; _physioValue.text = _physioText; }
+                _aiValue = CloneRow(panel, errorLabel, errorValueText, "DECISION LAYER", 256f);
+                if (_aiValue != null) { _aiValue.fontSize = _aiValue.fontSize * 0.8f; _aiValue.text = _aiText; }
             }
             Debug.Log($"[StatusHud] fields resolved: step={(supportLevelText != null)} progress={(progressValueText != null)} time={(timeValueText != null)} errors={(errorValueText != null)} level={(_levelValue != null)} attempts={(_attemptsValue != null)}");
         }
@@ -136,6 +139,13 @@ namespace AdaptiveAR.UI
         }
 
         /// <summary>Researcher-facing physiology status; pushed by PhysiologicalStateProvider. Never shown on participant panels.</summary>
+        /// <summary>Decision-layer status (provider, last action / status / latency); pushed by DecisionScheduler.</summary>
+        public void SetAi(string text)
+        {
+            _aiText = text ?? "";
+            if (_aiValue != null) _aiValue.text = _aiText;
+        }
+
         public void SetPhysiology(string text)
         {
             _physioText = text ?? "";
