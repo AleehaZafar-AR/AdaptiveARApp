@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="Simulation\*.cs" />
     <Compile Include="..\..\Assets\Scripts\Support\SupportAction.cs" />
     <Compile Include="..\..\Assets\Scripts\Support\SupportLevel.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\DecisionTypes.cs" />
@@ -22,6 +23,7 @@
     <Compile Include="..\..\Assets\Scripts\Decision\ReferencePolicy.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\DecisionEvidence.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\TaskEventLedger.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\RequestGate.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\LlmDecisionCore.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\DecisionConfig.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\IAsyncDecisionProvider.cs" />

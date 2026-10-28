@@ -1,20 +1,36 @@
-// Headless technical evaluation runner. Arguments are key=value pairs:
-//   provider=reference|llm        which provider to evaluate (default reference)
-//   config=<decision_config.json> (default Assets/Resources/Decision/decision_config.json)
-//   keyfile=<ai_provider.local.json>  API key for provider=llm (never printed)
-//   scenarios=synthetic|<session.jsonl>  synthetic grid sample or replayed contexts (default synthetic)
-//   count=<n>  seed=<n>  repeats=<n>  perturb=true|false  out=<dir>
+// Headless technical evaluation runner. Arguments are key=value pairs.
+//
+// mode=simulate   (virtual-participant trajectories, real-session replay, metamorphic pairs)
+//   provider=canned[:episode|keep|malformed|sequence:A,B] | reference | live-llm
+//   scenarios=<dir or file>          (default Tools/DecisionEval/Scenarios)
+//   scenario=S2,S8                   (optional id filter, prefix match)
+//   physiology=all | null,nominal,elevated,stale   (default all)
+//   reps=<n>                         repetitions per scenario × physiology (default 1)
+//   replay=<session.jsonl>[;more]    real headset sessions to replay (default none)
+//   replay_reps=<n>                  resubmissions per recorded context (default 5)
+//   metamorphic=true|false           (default true)   metamorphic_reps=<n> (default 3)
+//   latency_clock=true|false         advance the fake clock by measured latency (default true)
+//   price_in=<usd per M input tokens> price_out=<usd per M output tokens> (cost estimate assumptions)
+//   config=<decision_config.json>    keyfile=<ai_provider.local.json> (live-llm; never printed)
+//   out=<dir>                        (default eval_out/<utc timestamp>_<provider>)
+//   verbose=true                     per-decision log lines
+//
+// mode=grid (the earlier context-grid evaluation; default when mode is absent)
+//   provider=reference|llm  scenarios=synthetic|<session.jsonl>  count= seed= repeats= perturb= out=
+
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using AdaptiveAR.Decision;
 using AdaptiveAR.Decision.Evaluation;
+using AdaptiveAR.Decision.Simulation;
 
 namespace AdaptiveAR.Decision.Eval
 {
-    /// <summary>Blocking HTTP transport for the headless harness; same core as the headset.</summary>
+    /// <summary>Blocking HTTP transport for the grid harness; same core as the headset.</summary>
     public sealed class HttpLlmProvider : IDecisionProvider
     {
         private readonly LlmConfig _cfg; private readonly string _key; private readonly HttpClient _http = new HttpClient();
@@ -53,9 +69,81 @@ namespace AdaptiveAR.Decision.Eval
         {
             var a = new Dictionary<string, string>();
             foreach (string s in args) { int i = s.IndexOf('='); if (i > 0) a[s.Substring(0, i).ToLowerInvariant()] = s.Substring(i + 1); }
-            string providerKind = Get(a, "provider", "reference");
-            string configPath = Get(a, "config", Path.Combine("Assets", "Resources", "Decision", "decision_config.json"));
+            string mode = Get(a, "mode", "grid");
+            try
+            {
+                return mode == "simulate" ? Simulate(a) : Grid(a);
+            }
+            catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 2; }
+            catch (FileNotFoundException e) { Console.Error.WriteLine(e.Message + (e.FileName != null ? ": " + e.FileName : "")); return 2; }
+            catch (FormatException e) { Console.Error.WriteLine(e.Message); return 2; }
+        }
+
+        private static string LoadKey(Dictionary<string, string> a)
+        {
             string keyFile = Get(a, "keyfile", null);
+            string key = keyFile != null && File.Exists(keyFile) ? SecretStore.ExtractApiKey(File.ReadAllText(keyFile)) : Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+            if (string.IsNullOrEmpty(key))
+            {
+                string local = Path.Combine("Assets", "Resources", "Decision", "ai_provider.local.json");
+                if (File.Exists(local)) key = SecretStore.ExtractApiKey(File.ReadAllText(local));
+            }
+            return key;
+        }
+
+        private static DecisionConfig LoadConfig(Dictionary<string, string> a)
+        {
+            string configPath = Get(a, "config", Path.Combine("Assets", "Resources", "Decision", "decision_config.json"));
+            return File.Exists(configPath) ? DecisionConfig.FromJson(File.ReadAllText(configPath), "file:" + configPath) : new DecisionConfig();
+        }
+
+        // ------------------------------------------------------------------ mode=simulate
+
+        private static int Simulate(Dictionary<string, string> a)
+        {
+            var o = new SimulationOptions
+            {
+                ProviderKind = Get(a, "provider", "reference"),
+                Config = LoadConfig(a),
+                Physiology = PhysiologyProfiles.ParseList(Get(a, "physiology", "all")),
+                Repetitions = int.Parse(Get(a, "reps", "1")),
+                AdvanceClockByLatency = bool.Parse(Get(a, "latency_clock", "true")),
+                ReplayRepeats = int.Parse(Get(a, "replay_reps", "5")),
+                Metamorphic = bool.Parse(Get(a, "metamorphic", "true")),
+                MetamorphicRepeats = int.Parse(Get(a, "metamorphic_reps", "3")),
+                Verbose = bool.Parse(Get(a, "verbose", "false"))
+            };
+            if (o.ProviderKind == "live-llm" || o.ProviderKind == "llm") o.ApiKey = LoadKey(a);
+            CostModel.InputUsdPerMTok = double.Parse(Get(a, "price_in", "3.0"), System.Globalization.CultureInfo.InvariantCulture);
+            CostModel.OutputUsdPerMTok = double.Parse(Get(a, "price_out", "15.0"), System.Globalization.CultureInfo.InvariantCulture);
+
+            string scenarioPath = Get(a, "scenarios", Path.Combine("Tools", "DecisionEval", "Scenarios"));
+            o.Scenarios = ScenarioScript.LoadAll(scenarioPath);
+            string filter = Get(a, "scenario", null);
+            if (!string.IsNullOrEmpty(filter))
+            {
+                string[] ids = filter.Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+                o.Scenarios = o.Scenarios.Where(s => ids.Any(id => s.Id.StartsWith(id, StringComparison.OrdinalIgnoreCase))).ToList();
+            }
+            if (o.Scenarios.Count == 0) { Console.Error.WriteLine("no scenarios matched in " + scenarioPath); return 2; }
+            string replay = Get(a, "replay", null);
+            if (!string.IsNullOrEmpty(replay)) o.ReplayFiles = replay.Split(';').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+            o.OutDir = Get(a, "out", Path.Combine("eval_out", DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + "_sim_" + o.ProviderKind.Replace(':', '-')));
+
+            Console.WriteLine($"mode=simulate provider={o.ProviderKind} scenarios={o.Scenarios.Count} [{string.Join(", ", o.Scenarios.Select(s => s.Id))}] physiology=[{string.Join(",", o.Physiology)}] reps={o.Repetitions} replay={o.ReplayFiles.Count} file(s) × {o.ReplayRepeats} metamorphic={o.Metamorphic}");
+            Console.WriteLine("config: " + o.Config.Describe());
+            SimulationResult r = SimulationRunner.Run(o, Console.WriteLine);
+            Console.WriteLine();
+            Console.WriteLine(File.ReadAllText(Path.Combine(o.OutDir, "evaluation_summary.md")));
+            Console.WriteLine($"provider calls total: {r.ProviderCalls}");
+            return 0;
+        }
+
+        // ------------------------------------------------------------------ mode=grid (unchanged behaviour)
+
+        private static int Grid(Dictionary<string, string> a)
+        {
+            string providerKind = Get(a, "provider", "reference");
             string scenariosArg = Get(a, "scenarios", "synthetic");
             int count = int.Parse(Get(a, "count", "40"));
             int seed = int.Parse(Get(a, "seed", "7"));
@@ -63,14 +151,14 @@ namespace AdaptiveAR.Decision.Eval
             bool perturb = bool.Parse(Get(a, "perturb", "true"));
             string outDir = Get(a, "out", Path.Combine("eval_out", DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + "_" + providerKind));
 
-            DecisionConfig cfg = File.Exists(configPath) ? DecisionConfig.FromJson(File.ReadAllText(configPath), "file:" + configPath) : new DecisionConfig();
+            DecisionConfig cfg = LoadConfig(a);
             var reference = new ReferencePolicyProvider(cfg.ReferencePolicy);
 
             IDecisionProvider provider;
             if (providerKind == "reference") provider = reference;
-            else if (providerKind == "llm")
+            else if (providerKind == "llm" || providerKind == "live-llm")
             {
-                string key = keyFile != null && File.Exists(keyFile) ? SecretStore.ExtractApiKey(File.ReadAllText(keyFile)) : Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+                string key = LoadKey(a);
                 if (string.IsNullOrEmpty(key)) { Console.Error.WriteLine("provider=llm needs keyfile=<ai_provider.local.json> or ANTHROPIC_API_KEY"); return 2; }
                 provider = new HttpLlmProvider(cfg.Llm, key);
             }
