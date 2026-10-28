@@ -123,6 +123,8 @@ namespace AdaptiveAR.Steps
         public float OverallElapsedMs { get { return _overallMs; } }
         public float StepElapsedMs { get { return _stepMs; } }
         public int CurrentStepIndex { get { return _currentIndex; } }
+        /// <summary>The active action's id for logging surfaces outside the session (null between actions).</summary>
+        public string CurrentActionId { get { return workflow != null && workflow.CurrentAction != null ? workflow.CurrentAction.Id : null; } }
         public int AttemptsOnStep { get { return _attemptsOnStep; } }
         public int AttemptsTotal { get { return _attemptsTotal; } }
         private int _attemptsTotal;

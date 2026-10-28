@@ -93,6 +93,10 @@ namespace AdaptiveAR.Logging
 
             // --- diagnostic snapshot of a part at a snap / lock / join / hand-over / guard event (PartWatch) ---
             public const string PartLifecycle = "part_lifecycle";
+
+            // --- participant information request: hidden secondary panels revealed / hidden on demand (not a support change) ---
+            public const string SupportInfoOpened = "support_info_opened";
+            public const string SupportInfoClosed = "support_info_closed";
         }
 
         /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
@@ -545,6 +549,24 @@ namespace AdaptiveAR.Logging
             var w = NewLine(Events.ComponentDropped);
             w.Str("part_key", partKey);
             w.Str("requested_key", requestedKey);
+            Write(w);
+        }
+
+        /// <summary>
+        /// The participant revealed (or hid) the secondary panels the current level hides by
+        /// default. A USER INFORMATION REQUEST: the envelope carries the level, step and
+        /// session time; nothing about the level, the decision layer or the task changes.
+        /// open_count is the number of opens so far this session; closed_by is "participant",
+        /// "level_change" or "placement" on a close line.
+        /// </summary>
+        public void LogSupportInfo(bool opened, string surface, string actionId, System.Collections.Generic.IList<string> zones, int openCount, string by)
+        {
+            var w = NewLine(opened ? Events.SupportInfoOpened : Events.SupportInfoClosed);
+            w.Str("surface", surface);
+            w.Str("action_id", actionId);
+            w.StrArray("zones", zones);
+            w.Num("open_count", openCount);
+            w.Str(opened ? "opened_by" : "closed_by", by);
             Write(w);
         }
 

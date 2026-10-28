@@ -89,11 +89,68 @@ namespace AdaptiveAR.UI
         [Range(0f, 1f)]
         [SerializeField] private float fadedAlpha = 0.18f;
 
+        [Header("On-demand information")]
+        [Tooltip("Zones the participant may reveal temporarily when the current level hides them (the " +
+                 "'Task info' control). Presentation only: the level, the decision layer and the task " +
+                 "state are untouched. Never the Research zone.")]
+        [SerializeField] private string[] onDemandZones = { "Steps", "Performance" };
+
         [Header("Debug")]
         [SerializeField] private bool logChanges = true;
 
         private readonly Dictionary<Zone, float> _targetAlpha = new Dictionary<Zone, float>();
         private bool _placementMode;
+        private bool _infoRevealed;
+
+        /// <summary>True while the participant has the hidden on-demand zones revealed.</summary>
+        public bool InfoRevealed { get { return _infoRevealed; } }
+
+        /// <summary>(revealed, by): "participant", "level_change", "placement".</summary>
+        public event Action<bool, string> OnInfoRevealedChanged;
+
+        private bool IsOnDemand(Zone z)
+        {
+            if (z == null || onDemandZones == null) return false;
+            foreach (string l in onDemandZones) if (l == z.label) return true;
+            return false;
+        }
+
+        public List<string> OnDemandZoneLabels()
+        {
+            var list = new List<string>();
+            foreach (Zone z in zones) if (IsOnDemand(z)) list.Add(z.label);
+            return list;
+        }
+
+        /// <summary>True when at least one on-demand zone is not fully present at the current level (so there is something to reveal).</summary>
+        public bool HasOnDemandZoneHidden()
+        {
+            SupportLevel level = CurrentLevel();
+            foreach (Zone z in zones)
+                if (IsOnDemand(z) && z.root != null && z.For(level) != Presence.Full) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Reveals (or re-hides) the on-demand zones at Full presence without changing the
+        /// level's authored layout for anything else. A level change always clears it.
+        /// </summary>
+        public void SetInfoRevealed(bool revealed, string by)
+        {
+            if (_infoRevealed == revealed) return;
+            _infoRevealed = revealed;
+            if (!_placementMode)
+            {
+                SupportLevel level = CurrentLevel();
+                foreach (Zone z in zones)
+                {
+                    if (z == null || z.group == null || !IsOnDemand(z)) continue;
+                    _targetAlpha[z] = revealed ? 1f : AlphaFor(z.For(level));
+                }
+            }
+            if (logChanges) Debug.Log($"[AdaptivePanels] on-demand info {(revealed ? "revealed" : "hidden")} by {by} at {CurrentLevel()}: {string.Join(", ", OnDemandZoneLabels())}");
+            try { OnInfoRevealedChanged?.Invoke(revealed, by); } catch (Exception e) { Debug.LogError("[AdaptivePanels] OnInfoRevealedChanged handler threw: " + e); }
+        }
 
         /// <summary>True while only the main panel is shown, before the workspace exists.</summary>
         public bool PlacementMode { get { return _placementMode; } }
@@ -107,6 +164,7 @@ namespace AdaptiveAR.UI
         {
             _placementMode = placing;
             Prepare();
+            if (placing && _infoRevealed) SetInfoRevealed(false, "placement");
 
             if (!placing)
             {
@@ -164,6 +222,9 @@ namespace AdaptiveAR.UI
         private void HandleLevelChanged(SupportLevel from, SupportLevel to, string reason)
         {
             if (_placementMode) return;   // applied when placement ends
+
+            // A new level returns to its authored presentation: an on-demand reveal ends.
+            if (_infoRevealed) { _infoRevealed = false; try { OnInfoRevealedChanged?.Invoke(false, "level_change"); } catch (Exception e) { Debug.LogError("[AdaptivePanels] OnInfoRevealedChanged handler threw: " + e); } }
 
             // Visibility only. Nothing here touches workflow state, so a support change
             // cannot reset progress, duplicate a canvas or clear an instruction.
