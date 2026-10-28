@@ -18,7 +18,7 @@ namespace AdaptiveAR.Decision
 {
     public sealed class ReferencePolicyConfig
     {
-        public string Name = "placeholder_v0";
+        public string Name = "placeholder_v1";
         /// <summary>step_elapsed / step_expected at or above which the step is "slow" (INCREASE). Placeholder.</summary>
         public double SlowRatioIncrease = 1.5;
         /// <summary>Counted errors on the step at or above which support increases. Placeholder.</summary>
@@ -35,6 +35,12 @@ namespace AdaptiveAR.Decision
         public bool ClampAtBoundaries = true;
         /// <summary>When a step has no authored expected duration, use this one for the timing rules (0 = skip timing rules).</summary>
         public double FallbackExpectedMs = 0;
+        /// <summary>Successful actions since the last level change at or above which, with no recent error, support decreases one level. Placeholder.</summary>
+        public int RecoverySuccessesForDecrease = 2;
+        /// <summary>No recovery DECREASE until this long after the last error, ms (a step with no error yet passes). Placeholder.</summary>
+        public double RecoveryQuietMs = 20000;
+        /// <summary>Oscillation guard: KEEP for this long after any level change on the step, ms. Placeholder.</summary>
+        public double MinMsBetweenChanges = 20000;
 
         public static ReferencePolicyConfig FromJson(Dictionary<string, object> o)
         {
@@ -49,6 +55,9 @@ namespace AdaptiveAR.Decision
             c.MinStepElapsedMsForDecrease = MiniJson.GetDouble(o, "minStepElapsedMsForDecrease", c.MinStepElapsedMsForDecrease);
             c.ClampAtBoundaries = MiniJson.GetBool(o, "clampAtBoundaries", c.ClampAtBoundaries);
             c.FallbackExpectedMs = MiniJson.GetDouble(o, "fallbackExpectedMs", c.FallbackExpectedMs);
+            c.RecoverySuccessesForDecrease = MiniJson.GetInt(o, "recoverySuccessesForDecrease", c.RecoverySuccessesForDecrease);
+            c.RecoveryQuietMs = MiniJson.GetDouble(o, "recoveryQuietMs", c.RecoveryQuietMs);
+            c.MinMsBetweenChanges = MiniJson.GetDouble(o, "minMsBetweenChanges", c.MinMsBetweenChanges);
             return c;
         }
 
@@ -56,7 +65,8 @@ namespace AdaptiveAR.Decision
         {
             return $"name={Name};slowRatioIncrease={SlowRatioIncrease};errorsOnStepIncrease={ErrorsOnStepIncrease};attemptsOnStepIncrease={AttemptsOnStepIncrease};" +
                    $"fastRatioDecrease={FastRatioDecrease};minElapsedIncreaseMs={MinStepElapsedMsForIncrease};minElapsedDecreaseMs={MinStepElapsedMsForDecrease};" +
-                   $"clampAtBoundaries={ClampAtBoundaries};fallbackExpectedMs={FallbackExpectedMs};physiologyRule=none";
+                   $"clampAtBoundaries={ClampAtBoundaries};fallbackExpectedMs={FallbackExpectedMs};" +
+                   $"recoverySuccessesForDecrease={RecoverySuccessesForDecrease};recoveryQuietMs={RecoveryQuietMs};minMsBetweenChanges={MinMsBetweenChanges};physiologyRule=none";
         }
     }
 
@@ -80,10 +90,24 @@ namespace AdaptiveAR.Decision
                              : (_cfg.FallbackExpectedMs > 0 ? (double?)_cfg.FallbackExpectedMs : null);
             double? ratio = expected.HasValue ? (double?)(ctx.StepElapsedMs / expected.Value) : null;
 
-            if (ctx.ErrorsOnStep >= _cfg.ErrorsOnStepIncrease) { action = SupportAction.INCREASE_SUPPORT; why.Add($"errors_on_step={ctx.ErrorsOnStep}>={_cfg.ErrorsOnStepIncrease}"); }
-            else if (ctx.AttemptsOnStep >= _cfg.AttemptsOnStepIncrease) { action = SupportAction.INCREASE_SUPPORT; why.Add($"attempts_on_step={ctx.AttemptsOnStep}>={_cfg.AttemptsOnStepIncrease}"); }
-            else if (ratio.HasValue && ctx.StepElapsedMs >= _cfg.MinStepElapsedMsForIncrease && ratio.Value >= _cfg.SlowRatioIncrease)
+            // Until the level has changed on this step the cumulative counters govern; after a
+            // change, only what happened SINCE it counts, so a past escalation cannot keep
+            // re-firing and recovery can be seen. Bidirectional, one level per decision.
+            bool recentGoverns = ctx.SupportChangesOnStep > 0;
+            int errorsForIncrease = recentGoverns ? ctx.ErrorsSinceLastSupportChange : ctx.ErrorsOnStep;
+            bool quietSinceError = !ctx.TimeSinceLastErrorMs.HasValue || ctx.TimeSinceLastErrorMs.Value >= _cfg.RecoveryQuietMs;
+            bool recovered = ctx.SuccessfulActionsSinceLastSupportChange >= _cfg.RecoverySuccessesForDecrease
+                             && ctx.ErrorsSinceLastSupportChange == 0 && quietSinceError;
+
+            if (ctx.TimeSinceLastSupportChangeMs.HasValue && ctx.TimeSinceLastSupportChangeMs.Value < _cfg.MinMsBetweenChanges)
+            { why.Add($"cooldown time_since_last_support_change={ctx.TimeSinceLastSupportChangeMs.Value:F0}<{_cfg.MinMsBetweenChanges}"); }
+            else if (errorsForIncrease >= _cfg.ErrorsOnStepIncrease)
+            { action = SupportAction.INCREASE_SUPPORT; why.Add($"{(recentGoverns ? "errors_since_last_support_change" : "errors_on_step")}={errorsForIncrease}>={_cfg.ErrorsOnStepIncrease}"); }
+            else if (!recentGoverns && ctx.AttemptsOnStep >= _cfg.AttemptsOnStepIncrease) { action = SupportAction.INCREASE_SUPPORT; why.Add($"attempts_on_step={ctx.AttemptsOnStep}>={_cfg.AttemptsOnStepIncrease}"); }
+            else if (!recentGoverns && ratio.HasValue && ctx.StepElapsedMs >= _cfg.MinStepElapsedMsForIncrease && ratio.Value >= _cfg.SlowRatioIncrease)
             { action = SupportAction.INCREASE_SUPPORT; why.Add($"elapsed_ratio={ratio.Value:F2}>={_cfg.SlowRatioIncrease}"); }
+            else if (recovered)
+            { action = SupportAction.DECREASE_SUPPORT; why.Add($"recovered successes_since_change={ctx.SuccessfulActionsSinceLastSupportChange}>={_cfg.RecoverySuccessesForDecrease},errors_since_change=0,quiet"); }
             else if (ratio.HasValue && ctx.StepElapsedMs >= _cfg.MinStepElapsedMsForDecrease && ratio.Value <= _cfg.FastRatioDecrease && ctx.ErrorsOnStep == 0 && ctx.AttemptsOnStep <= 1)
             { action = SupportAction.DECREASE_SUPPORT; why.Add($"elapsed_ratio={ratio.Value:F2}<={_cfg.FastRatioDecrease},clean"); }
             else why.Add(ratio.HasValue ? $"within_band ratio={ratio.Value:F2}" : "no_expected_duration");

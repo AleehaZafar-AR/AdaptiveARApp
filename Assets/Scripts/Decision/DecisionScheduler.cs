@@ -107,10 +107,10 @@ namespace AdaptiveAR.Decision
 
         private void Bind()
         {
-            if (_session != null) { _session.OnActionEntered -= HandleActionEntered; _session.OnCountedError -= HandleCountedError; _session.OnWrongComponentGrabbed -= HandleWrongComponent; }
+            if (_session != null) { _session.OnActionEntered -= HandleActionEntered; _session.OnCountedError -= HandleCountedError; _session.OnWrongComponentGrabbed -= HandleWrongComponent; _session.OnActionCompleted -= HandleActionCompleted; }
             _session = FindAnyObjectByType<AssemblySessionController>(FindObjectsInactive.Include);
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
-            if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; _session.OnWrongComponentGrabbed += HandleWrongComponent; }
+            if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; _session.OnWrongComponentGrabbed += HandleWrongComponent; _session.OnActionCompleted += HandleActionCompleted; }
             _inFlight = false;
             _nextPeriodicAt = Config != null && Config.Schedule.PeriodicSeconds > 0 ? Time.realtimeSinceStartup + (float)Config.Schedule.PeriodicSeconds : 1e9f;
             if (_logger != null) _logger.LogDecisionConfig(Config != null ? Config.Describe() : "none", Status, ProviderId);
@@ -133,6 +133,12 @@ namespace AdaptiveAR.Decision
         /// interval, and the minimum time on the step, so repeated wrong grabs can never
         /// spam the provider. The context carries the cumulative error/attempt counts.
         /// </summary>
+        /// <summary>Success is evidence too (recovery). Same gate: never a request per success without throttling.</summary>
+        private void HandleActionCompleted(AssemblyAction action)
+        {
+            if (Config != null && Config.Schedule.OnActionComplete) TryRequest("action_complete:" + (action != null ? action.Id : "?"), ignoreStepMinimum: false);
+        }
+
         private void HandleWrongComponent(string partKey)
         {
             if (Config != null && Config.Schedule.OnWrongComponent) TryRequest("wrong_component_grabbed:" + (partKey ?? "?"), ignoreStepMinimum: false);

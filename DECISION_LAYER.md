@@ -29,9 +29,9 @@ Status 2026-10-27: implemented on branch `hrv-integration`; compiles; headless t
 `decision_config.json` (override on the headset: `persistentDataPath/AdaptiveAR/config/decision_config.json`):
 
 - `enabled`, `provider`: `llm` | `reference` | `none`
-- `schedule`: `onActionEnter`, `onCountedError`, `onWrongComponent` (a wrong part picked up; same gate as every trigger: one request in flight, `minIntervalSeconds`, `firstDecisionAfterStepMs`, so repeated wrong grabs cannot spam the provider), `periodicSeconds` (0 = off), `minIntervalSeconds`, `firstDecisionAfterStepMs`
+- `schedule`: `onActionEnter`, `onCountedError`, `onWrongComponent` (a wrong part picked up), `onActionComplete` (a validated placement or tool action done: positive evidence so recovery can be seen); every trigger passes the same gate: one request in flight, `minIntervalSeconds`, `firstDecisionAfterStepMs`, so neither repeated wrong grabs nor a run of successes can spam the provider, `periodicSeconds` (0 = off), `minIntervalSeconds`, `firstDecisionAfterStepMs`
 - `llm`: `provider` (anthropic), `model`, `endpoint`, `apiVersion`, `maxTokens` (16: one bare token), `timeoutMs`, `systemPrompt` (null = built-in). No sampling parameters are sent: `temperature` is rejected by `claude-sonnet-5-5` (HTTP 400, found on the 2026-10-27 Quest run) and the request builder never emits it; a `temperature` key in a config file is ignored.
-- `referencePolicy`: `name`, `slowRatioIncrease`, `errorsOnStepIncrease`, `attemptsOnStepIncrease`, `fastRatioDecrease`, `minStepElapsedMsForIncrease`, `minStepElapsedMsForDecrease`, `clampAtBoundaries`, `fallbackExpectedMs` — **placeholders pending the literature review**; the `name` is written into every decision and evaluation output.
+- `referencePolicy`: `name`, `slowRatioIncrease`, `errorsOnStepIncrease`, `attemptsOnStepIncrease`, `fastRatioDecrease`, `minStepElapsedMsForIncrease`, `minStepElapsedMsForDecrease`, `clampAtBoundaries`, `fallbackExpectedMs`, `recoverySuccessesForDecrease`, `recoveryQuietMs`, `minMsBetweenChanges` — **placeholders pending the literature review** (`placeholder_v1`); the `name` is written into every decision and evaluation output.
 
 **API key** (never in git, never logged):
 ```
@@ -43,9 +43,15 @@ or copy `ai_provider.local.example.json` → `Assets/Resources/Decision/ai_provi
 
 The model's whole reply must be one bare token: `KEEP_SUPPORT`, `INCREASE_SUPPORT` or `DECREASE_SUPPORT`. The system prompt and a one-line user-turn instruction both say so; no reason is requested; `maxTokens` is 16. The parser is strict: a bare token or a complete `{"action": ...}` object parses, everything else (prose, truncated JSON, unknown tokens) is a recorded violation with fallback `KEEP_SUPPORT`. History: the 2026-10-28 Quest run asked for `{"action","reason"}` under 64 tokens; every reason was cut mid-sentence, the object never closed, and all five decisions were (correctly) `Unparseable`. The contract changed; the parser did not.
 
+## Recent-performance context and bidirectional adaptation
+
+The context carries, beside the cumulative step counters, what happened since the level last changed on the step (or since step entry): `errors_since_last_support_change`, `successful_actions_since_last_support_change`, `time_since_last_error_ms` (null = no error yet on the step) and `time_since_last_support_change_ms` (null = unchanged since entry). They are in `ai_input`, in every `decision` / `decision_context_probe` line, replayable, and in the synthetic scenarios. A validated action completion counts as a success and may trigger a decision through the normal gate.
+
+The prompt says adaptation is bidirectional: sustained recovery in the recent fields justifies `DECREASE_SUPPORT`, one level per decision, never while recent errors continue, never on physiology alone, and not shortly after a change. The reference policy mirrors this: until the level changes on a step the cumulative rules govern; afterwards only errors since the change can re-escalate, and `recoverySuccessesForDecrease` successes with no error since the change and `recoveryQuietMs` since the last error produce a one-level decrease; `minMsBetweenChanges` is an oscillation guard. Tests 17a–k cover L1→L2, L2→L3, L3→L2, L2→L1, a new error blocking a downgrade, no L3→L1 jump, and physiology alone never decreasing.
+
 ## Physiology in the contract
 
-The system prompt states the role explicitly: task performance evidence is primary; the optional physiological block is corroborating context that may strengthen or weaken a task-supported conclusion but never causes a change by itself; missing, stale or low-quality physiology is absent evidence and never counts against the operator; there is no fixed threshold or stress cut-off. The reference policy (`placeholder_v0`) still has no physiological rule.
+The system prompt states the role explicitly: task performance evidence is primary; the optional physiological block is corroborating context that may strengthen or weaken a task-supported conclusion but never causes a change by itself; missing, stale or low-quality physiology is absent evidence and never counts against the operator; there is no fixed threshold or stress cut-off. The reference policy (`placeholder_v1`) still has no physiological rule.
 
 ## Support transition cue
 
@@ -76,5 +82,5 @@ Smoke results: reference policy against itself: consistency 100 %, agreement 100
 ## Not done / next
 
 - A Quest run with the key: `decision_config` → `decision_trigger` → `decision` lines with `provider_id=anthropic:…`, Research Panel row `AI  Claude Sonnet 5.5 | KEEP_SUPPORT | Ok | 800 ms`.
-- The reference-policy numbers from the literature review (replace `placeholder_v0`).
+- The reference-policy numbers from the literature review (replace `placeholder_v1`).
 - Run the full evaluation with the model and keep the `eval_out` folders with the dissertation data.

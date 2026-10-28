@@ -648,6 +648,10 @@ namespace AdaptiveAR.Logging
                 w.Num("current_support_level_num", (int)context.CurrentSupportLevel);
                 w.Num("support_changes_on_step", context.SupportChangesOnStep);
                 w.Num("support_changes_total", context.SupportChangesTotal);
+                w.Num("errors_since_last_support_change", context.ErrorsSinceLastSupportChange);
+                w.Num("successful_actions_since_last_support_change", context.SuccessfulActionsSinceLastSupportChange);
+                w.NumOrNull("time_since_last_error_ms", context.TimeSinceLastErrorMs);
+                w.NumOrNull("time_since_last_support_change_ms", context.TimeSinceLastSupportChangeMs);
                 w.Bool("physiological_missing", context.PhysiologicalMissing);
                 WritePhysiological(w, "physiological", context.Physiological);
             }

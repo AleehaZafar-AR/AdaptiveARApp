@@ -6,6 +6,7 @@
     "onActionEnter": true,
     "onCountedError": true,
     "onWrongComponent": true,
+    "onActionComplete": true,
     "periodicSeconds": 0,
     "minIntervalSeconds": 20,
     "firstDecisionAfterStepMs": 15000
@@ -21,7 +22,7 @@
   },
   "referencePolicy": {
     "_comment": "PLACEHOLDER values pending the literature review (CLAUDE.md 2.2). No physiological rule exists by design (CLAUDE.md 2.4).",
-    "name": "placeholder_v0",
+    "name": "placeholder_v1",
     "slowRatioIncrease": 1.5,
     "errorsOnStepIncrease": 2,
     "attemptsOnStepIncrease": 4,
@@ -29,6 +30,9 @@
     "minStepElapsedMsForIncrease": 10000,
     "minStepElapsedMsForDecrease": 20000,
     "clampAtBoundaries": true,
-    "fallbackExpectedMs": 0
+    "fallbackExpectedMs": 0,
+    "recoverySuccessesForDecrease": 2,
+    "recoveryQuietMs": 20000,
+    "minMsBetweenChanges": 20000
   }
 }

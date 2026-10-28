@@ -131,6 +131,36 @@ namespace AdaptiveAR.Physiology.Tests
             Check("15f summary outputs", md.Contains("Decision consistency") && AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.Evaluation.EvaluationRunner.SummaryToJson(refRes.Summary)) != null
                   && AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.Evaluation.EvaluationRunner.CallToJsonLine(refRes.Calls[0])) != null);
 
+            // 17 bidirectional adaptation under the reference policy (defaults: errors>=2 increase; recovery = 2 successes, 0 errors since change, >=20 s quiet; 20 s cooldown)
+            AdaptiveAR.Decision.DecisionContext R(int level, float elapsed, int errorsOnStep, int errorsSince, int successesSince, float? sinceError, float? sinceChange, int changes)
+                => new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = (AdaptiveAR.Support.SupportLevel)level, StepElapsedMs = elapsed, StepExpectedMs = 60000f,
+                       ErrorsOnStep = errorsOnStep, AttemptsOnStep = errorsOnStep + 1, ErrorsSinceLastSupportChange = errorsSince, SuccessfulActionsSinceLastSupportChange = successesSince,
+                       TimeSinceLastErrorMs = sinceError, TimeSinceLastSupportChangeMs = sinceChange, SupportChangesOnStep = changes };
+            AdaptiveAR.Support.SupportLevel Step(AdaptiveAR.Decision.DecisionContext c, string name, AdaptiveAR.Support.SupportAction expect, AdaptiveAR.Support.SupportLevel expectLevel)
+            {
+                var r = refp.RequestDecision(c);
+                var next = AdaptiveAR.Support.SupportLevels.Apply(c.CurrentSupportLevel, r.ParsedAction);
+                Check(name, r.Status == AdaptiveAR.Decision.ConstraintStatus.Ok && r.ParsedAction == expect && next == expectLevel, $"{r.ParsedAction} -> {next} ({r.ProviderReason})");
+                return next;
+            }
+            var l = Step(R(1, 20000, 2, 2, 0, 1000f, null, 0), "17a struggling L1 -> L2", AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            l = Step(R((int)l, 40000, 5, 3, 0, 2000f, 20000f, 1), "17b continued struggle L2 -> L3", AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L3_Assisted);
+            l = Step(R((int)l, 90000, 5, 0, 2, 50000f, 50000f, 2), "17c sustained success L3 -> L2 (cumulative errors/slow step no longer re-fire)", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            l = Step(R((int)l, 130000, 5, 0, 3, 90000f, 40000f, 3), "17d continued success L2 -> L1", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L1_Minimal);
+            Step(R(2, 130000, 6, 1, 3, 3000f, 40000f, 3), "17e new error after recovery -> KEEP (no premature downgrade)", AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            Step(R(2, 130000, 5, 0, 3, 15000f, 40000f, 3), "17e2 too soon after the last error -> KEEP", AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            var l3 = Step(R(3, 90000, 5, 0, 4, 60000f, 60000f, 2), "17f one decision from L3 lands on L2, never L1", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            Step(R((int)l3, 91000, 5, 0, 4, 61000f, 1000f, 3), "17f2 immediate second decision -> KEEP (cooldown), still L2", AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            Check("17g DECREASE is one level by construction", AdaptiveAR.Support.SupportLevels.Apply(AdaptiveAR.Support.SupportLevel.L3_Assisted, AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT) == AdaptiveAR.Support.SupportLevel.L2_Guided);
+            var physOnly = R(3, 90000, 5, 0, 0, 1000f, 50000f, 2); physOnly.Physiological = new AdaptiveAR.Decision.PhysiologicalSample { RmssdMs = 90f, HeartRateBpm = 60f, Quality = 1f };
+            Check("17h calm physiology alone never decreases", refp.RequestDecision(physOnly).ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT);
+            string recentJson = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(R(2, 40000, 5, 0, 2, null, 20000f, 1));
+            Check("17i recent fields in ai_input", recentJson.Contains("\"errors_since_last_support_change\":0") && recentJson.Contains("\"successful_actions_since_last_support_change\":2")
+                  && recentJson.Contains("\"time_since_last_error_ms\":null") && recentJson.Contains("\"time_since_last_support_change_ms\":20000"), recentJson);
+            Check("17j prompt states bidirectional rules", sys.Contains("bidirectional") && sys.Contains("DECREASE_SUPPORT") && sys.Contains("exactly one level") && sys.Contains("never decrease on physiology alone") && sys.Contains("recent errors continue"), "");
+            var schedAc = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"onActionComplete\":false}"));
+            Check("17k action-complete trigger config", new AdaptiveAR.Decision.DecisionScheduleConfig().OnActionComplete && !schedAc.OnActionComplete);
+
             // 16 replay from a recorded decision_context_probe line
             string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";
             var replay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { line, "not json", "" });

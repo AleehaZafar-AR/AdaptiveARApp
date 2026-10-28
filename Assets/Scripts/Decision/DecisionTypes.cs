@@ -128,6 +128,15 @@ namespace AdaptiveAR.Decision
         public int SupportChangesOnStep;
         public int SupportChangesTotal;
 
+        // --- recent performance: what happened since the level last changed (or since step entry) ---
+        // The cumulative counters above cannot show recovery inside a long step; these can.
+        public int ErrorsSinceLastSupportChange;
+        public int SuccessfulActionsSinceLastSupportChange;
+        /// <summary>Milliseconds since the last counted/behavioural error on this step; null = no error yet on this step.</summary>
+        public float? TimeSinceLastErrorMs;
+        /// <summary>Milliseconds since the level last changed on this step; null = unchanged since step entry.</summary>
+        public float? TimeSinceLastSupportChangeMs;
+
         // --- physiology (nullable throughout) ---
         public PhysiologicalSample Physiological;
 

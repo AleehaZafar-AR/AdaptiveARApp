@@ -128,6 +128,8 @@ namespace AdaptiveAR.Steps
         public event Action OnCountedError;
         /// <summary>A part that cannot satisfy the current action was picked up (one per grab). The decision scheduler listens here.</summary>
         public event Action<string> OnWrongComponentGrabbed;
+        /// <summary>A physically validated (or tool) action was completed successfully. The decision scheduler listens here.</summary>
+        public event Action<AssemblyAction> OnActionCompleted;
 
         /// <summary>True between the first step and the end of the sequence: the window in which decisions make sense.</summary>
         public bool AssemblyRunning { get { return SessionActive && !SequenceFinished && _currentStep != null; } }
@@ -141,6 +143,12 @@ namespace AdaptiveAR.Steps
         private int _errorsOnStep;
         private int _errorsTotal;
         private int _supportChangesOnStep;
+
+        // Recent performance since the later of step entry / last level change (decision context).
+        private int _errorsSinceChange;
+        private int _successesSinceChange;
+        private float _lastErrorStepMs = -1f;      // -1 = no error yet on this step
+        private float _lastChangeStepMs = -1f;     // -1 = level unchanged since step entry
         private int _supportChangesTotal;
         private int _decisionIndex;
 
@@ -530,6 +538,7 @@ namespace AdaptiveAR.Steps
             // per frame (the validator raises this on the grab transition only).
             _errorsOnStep++;
             _errorsTotal++;
+            NoteRecentError();
             PushEnvelope();
 
             try { OnWrongComponentGrabbed?.Invoke(partKey); } catch (Exception e) { Debug.LogError("[Session] OnWrongComponentGrabbed handler threw: " + e); }
@@ -987,6 +996,16 @@ namespace AdaptiveAR.Steps
             if (logger != null && action != null)
                 logger.LogActionComplete(workflow.ActionIndex, action.Id, _stepMs, reason);
 
+            // A validated placement or a tool action done is positive evidence; an acknowledged
+            // READ step is not. Raised before the next action is entered so the trigger name
+            // says what happened; the scheduler's gate decides whether a request follows.
+            if (action != null && (action.RequiresPhysicalValidation || reason == "tool_action"))
+            {
+                _successesSinceChange++;
+                PushEnvelope();
+                try { OnActionCompleted?.Invoke(action); } catch (Exception e) { Debug.LogError("[Session] OnActionCompleted handler threw: " + e); }
+            }
+
             if (validator != null) validator.Clear();
 
             StepData stage = workflow.CurrentStage;
@@ -1020,6 +1039,10 @@ namespace AdaptiveAR.Steps
             _attemptsOnStep = 0;
             _errorsOnStep = 0;
             _supportChangesOnStep = 0;
+            _errorsSinceChange = 0;
+            _successesSinceChange = 0;
+            _lastErrorStepMs = -1f;
+            _lastChangeStepMs = -1f;
             _stepOpen = true;
 
             PushEnvelope();
@@ -1085,6 +1108,7 @@ namespace AdaptiveAR.Steps
             {
                 _errorsOnStep++;
                 _errorsTotal++;
+                NoteRecentError();
             }
 
             PushEnvelope();
@@ -1298,6 +1322,9 @@ namespace AdaptiveAR.Steps
         {
             _supportChangesOnStep++;
             _supportChangesTotal++;
+            _errorsSinceChange = 0;
+            _successesSinceChange = 0;
+            _lastChangeStepMs = _stepMs;
 
             PushEnvelope();
 
@@ -1355,10 +1382,21 @@ namespace AdaptiveAR.Steps
                 SupportChangesOnStep = _supportChangesOnStep,
                 SupportChangesTotal = _supportChangesTotal,
 
+                ErrorsSinceLastSupportChange = _errorsSinceChange,
+                SuccessfulActionsSinceLastSupportChange = _successesSinceChange,
+                TimeSinceLastErrorMs = _lastErrorStepMs >= 0f ? (float?)Mathf.Max(0f, _stepMs - _lastErrorStepMs) : null,
+                TimeSinceLastSupportChangeMs = _lastChangeStepMs >= 0f ? (float?)Mathf.Max(0f, _stepMs - _lastChangeStepMs) : null,
+
                 Physiological = ResolvePhysiologicalSnapshot()
             };
 
             return ctx;
+        }
+
+        private void NoteRecentError()
+        {
+            _errorsSinceChange++;
+            _lastErrorStepMs = _stepMs;
         }
 
         private AdaptiveAR.Physiology.PhysiologicalStateProvider _physiology;

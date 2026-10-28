@@ -41,7 +41,11 @@ namespace AdaptiveAR.Decision.Evaluation
                 TaskComplexity = MiniJson.GetInt(c, "task_complexity", 0), OperatorExperience = MiniJson.GetString(c, "operator_experience"),
                 StepElapsedMs = (float)MiniJson.GetDouble(c, "step_elapsed_ms", 0), OverallElapsedMs = (float)MiniJson.GetDouble(c, "overall_elapsed_ms", 0),
                 AttemptsOnStep = MiniJson.GetInt(c, "attempts_on_step", 0), ErrorsOnStep = MiniJson.GetInt(c, "errors_on_step", 0), ErrorsTotal = MiniJson.GetInt(c, "errors_total", 0),
-                SupportChangesOnStep = MiniJson.GetInt(c, "support_changes_on_step", 0), SupportChangesTotal = MiniJson.GetInt(c, "support_changes_total", 0)
+                SupportChangesOnStep = MiniJson.GetInt(c, "support_changes_on_step", 0), SupportChangesTotal = MiniJson.GetInt(c, "support_changes_total", 0),
+                ErrorsSinceLastSupportChange = MiniJson.GetInt(c, "errors_since_last_support_change", 0),
+                SuccessfulActionsSinceLastSupportChange = MiniJson.GetInt(c, "successful_actions_since_last_support_change", 0),
+                TimeSinceLastErrorMs = F(MiniJson.GetNullableDouble(c, "time_since_last_error_ms")),
+                TimeSinceLastSupportChangeMs = F(MiniJson.GetNullableDouble(c, "time_since_last_support_change_ms"))
             };
             double? exp = MiniJson.GetNullableDouble(c, "step_expected_ms");
             ctx.StepExpectedMs = exp.HasValue ? (float?)exp.Value : null;
