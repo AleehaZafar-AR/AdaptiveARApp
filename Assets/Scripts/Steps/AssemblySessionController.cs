@@ -60,6 +60,12 @@ namespace AdaptiveAR.Steps
                  "action is an instruction (READ) already behave this way.")]
         [SerializeField] private bool gateFirstActionBehindContinue = true;
 
+        [Tooltip("While the step introduction waits for Continue, the step's actionable parts are closed at the " +
+                 "Interaction SDK level (their interactables disabled, exactly as an installed part is), so they " +
+                 "cannot be grabbed or selected; nothing else in the environment is touched. Continue restores " +
+                 "exactly what was disabled and enters the first action in the same call.")]
+        [SerializeField] private bool introGateDisablesInteraction = true;
+
         [Header("Support transition cue")]
         [Tooltip("When an AI decision raises the support level (L1->L2, L2->L3): a short neutral " +
                  "message on the participant card, a soft tone, then the current action's " +
@@ -474,6 +480,8 @@ namespace AdaptiveAR.Steps
 
         private void OnDisable()
         {
+            ReleaseIntroInteractionGate("session disabled");
+
             if (stepRunner != null)
             {
                 stepRunner.OnStepChanged -= HandleStepChanged;
@@ -1076,6 +1084,7 @@ namespace AdaptiveAR.Steps
             {
                 workflow.SetPhase(WorkflowPhase.Assembly);
                 workflow.EnterStage(index);
+                ReleaseIntroInteractionGate("step changed");
                 _stepIntroPending = false; _stepIntroActionIndex = -1;
 
                 // Support level is already the step's (StepRunner set it before announcing the
@@ -1279,6 +1288,8 @@ namespace AdaptiveAR.Steps
 
         private bool _stepIntroPending;
         private int _stepIntroActionIndex = -1;
+        private readonly StepIntroInteractionGate _introInteractionGate = new StepIntroInteractionGate();
+        private string _pendingDecisionEvidence;
 
         /// <summary>True between step entry and the Continue press that activates its first action.</summary>
         public bool StepIntroPending { get { return _stepIntroPending; } }
@@ -1291,6 +1302,16 @@ namespace AdaptiveAR.Steps
             try { if (validator != null) validator.Clear(); } catch (Exception e) { Debug.LogError("[Session] validator.Clear threw at step intro: " + e); }
             try { if (presenter != null) presenter.PresentStepIntro(); } catch (Exception e) { Debug.LogError("[Session] presenter.PresentStepIntro threw: " + e); }
             if (logger != null) logger.LogNote("step_intro_enter:" + stage.StepIdentifier);
+
+            // SDK-level closure of the step's actionable parts: not grabbable, not selectable,
+            // so no placement can be attempted (let alone validated) before Continue.
+            if (introGateDisablesInteraction)
+            {
+                try { _introInteractionGate.Engage(stage, registry, "step intro"); }
+                catch (Exception e) { Debug.LogError("[Session] step intro interaction gate threw: " + e); }
+                if (logger != null)
+                    logger.LogNote($"step_intro_gate:{stage.StepIdentifier}:parts={_introInteractionGate.PartCount}:components={_introInteractionGate.ComponentCount}:held_released={_introInteractionGate.HeldAtEngage}");
+            }
             Debug.Log($"[Session] step '{stage.StepIdentifier}' introduced at {(supportLevel != null ? supportLevel.CurrentLevel.ToString() : "?")}: first action #{firstActionIndex} waits for Continue.");
         }
 
@@ -1301,8 +1322,20 @@ namespace AdaptiveAR.Steps
             _stepIntroActionIndex = -1;
             if (logger != null) logger.LogNote("step_intro_continue:" + (_currentStep != null ? _currentStep.StepIdentifier : "") + ":" + requestedBy);
             Debug.Log($"[Progression] step intro acknowledged by {requestedBy}: entering action #{index}.");
+            // Atomic with the action entry: the interactables come back and the first action
+            // (validation, guidance, audio, decision trigger) starts in this same call.
+            ReleaseIntroInteractionGate("continue:" + requestedBy);
             EnterAction(index);
             RaiseStateChanged();
+        }
+
+        /// <summary>Re-opens the parts the step introduction closed; no-op when nothing is gated.</summary>
+        private void ReleaseIntroInteractionGate(string why)
+        {
+            if (!_introInteractionGate.Engaged) return;
+            try { _introInteractionGate.Release(why); }
+            catch (Exception e) { Debug.LogError("[Session] step intro interaction gate release threw: " + e); }
+            if (logger != null) logger.LogNote("step_intro_gate_released:" + why);
         }
 
         private int CountBoundKits()
@@ -1325,6 +1358,7 @@ namespace AdaptiveAR.Steps
             if (SequenceFinished) return;
 
             SequenceFinished = true;
+            ReleaseIntroInteractionGate("sequence complete");
 
             if (workflow != null) workflow.SetPhase(WorkflowPhase.Complete);
 
