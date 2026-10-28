@@ -14,7 +14,7 @@
     "model": "claude-sonnet-5-5",
     "endpoint": "https://api.anthropic.com/v1/messages",
     "apiVersion": "2023-06-01",
-    "maxTokens": 64,
+    "maxTokens": 16,
     "timeoutMs": 8000,
     "systemPrompt": null
   },

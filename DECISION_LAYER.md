@@ -30,7 +30,7 @@ Status 2026-10-27: implemented on branch `hrv-integration`; compiles; headless t
 
 - `enabled`, `provider`: `llm` | `reference` | `none`
 - `schedule`: `onActionEnter`, `onCountedError`, `periodicSeconds` (0 = off), `minIntervalSeconds`, `firstDecisionAfterStepMs`
-- `llm`: `provider` (anthropic), `model`, `endpoint`, `apiVersion`, `maxTokens`, `timeoutMs`, `systemPrompt` (null = built-in). No sampling parameters are sent: `temperature` is rejected by `claude-sonnet-5-5` (HTTP 400, found on the 2026-10-27 Quest run) and the request builder never emits it; a `temperature` key in a config file is ignored.
+- `llm`: `provider` (anthropic), `model`, `endpoint`, `apiVersion`, `maxTokens` (16: one bare token), `timeoutMs`, `systemPrompt` (null = built-in). No sampling parameters are sent: `temperature` is rejected by `claude-sonnet-5-5` (HTTP 400, found on the 2026-10-27 Quest run) and the request builder never emits it; a `temperature` key in a config file is ignored.
 - `referencePolicy`: `name`, `slowRatioIncrease`, `errorsOnStepIncrease`, `attemptsOnStepIncrease`, `fastRatioDecrease`, `minStepElapsedMsForIncrease`, `minStepElapsedMsForDecrease`, `clampAtBoundaries`, `fallbackExpectedMs` — **placeholders pending the literature review**; the `name` is written into every decision and evaluation output.
 
 **API key** (never in git, never logged):
@@ -38,6 +38,10 @@ Status 2026-10-27: implemented on branch `hrv-integration`; compiles; headless t
 adb push ai_provider.local.json /sdcard/Android/data/com.vuforia.engine.VuforiaEngine/files/AdaptiveAR/config/ai_provider.local.json
 ```
 or copy `ai_provider.local.example.json` → `Assets/Resources/Decision/ai_provider.local.json` (git-ignored; baked into that build). With `provider: llm` and no key the scheduler is OFF, logs an ERROR and the HUD row reads `AI no key`.
+
+## Response contract
+
+The model's whole reply must be one bare token: `KEEP_SUPPORT`, `INCREASE_SUPPORT` or `DECREASE_SUPPORT`. The system prompt and a one-line user-turn instruction both say so; no reason is requested; `maxTokens` is 16. The parser is strict: a bare token or a complete `{"action": ...}` object parses, everything else (prose, truncated JSON, unknown tokens) is a recorded violation with fallback `KEEP_SUPPORT`. History: the 2026-10-28 Quest run asked for `{"action","reason"}` under 64 tokens; every reason was cut mid-sentence, the object never closed, and all five decisions were (correctly) `Unparseable`. The contract changed; the parser did not.
 
 ## Live flow
 

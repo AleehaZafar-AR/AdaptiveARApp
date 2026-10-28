@@ -57,6 +57,20 @@ namespace AdaptiveAR.Physiology.Tests
             var ok = AdaptiveAR.Decision.LlmDecisionCore.Interpret(lc, 200, body, 300, false, null);
             Check("12j anthropic body -> Ok KEEP", ok.Status == AdaptiveAR.Decision.ConstraintStatus.Ok && ok.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT && ok.ProviderReason == "ok" && ok.LatencyMs == 300, ok.RawOutput);
 
+            // 12k regression: the real 2026-10-28 Quest output (JSON reason truncated by max_tokens) stays Unparseable, fallback KEEP
+            string quest = "{\"action\":\"INCREASE_SUPPORT\",\"reason\":\"Seven errors on the step at L1_Minimal, with no support changes yet, indicate the operator needs more assistance, even though elap";
+            var questResp = AdaptiveAR.Decision.LlmDecisionCore.ParseActionText(quest, pid, 1500);
+            Check("12k truncated JSON from Quest -> Unparseable, fallback KEEP, raw kept", questResp.Status == AdaptiveAR.Decision.ConstraintStatus.Unparseable && questResp.UsedFallback
+                  && questResp.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT && questResp.RawOutput == quest, questResp.Status.ToString());
+            string questBody = "{\"id\":\"m\",\"content\":[{\"type\":\"text\",\"text\":\"" + quest.Replace("\"", "\\\"") + "\"}],\"stop_reason\":\"max_tokens\"}";
+            Check("12k2 same via Interpret", AdaptiveAR.Decision.LlmDecisionCore.Interpret(lc, 200, questBody, 1500, false, null).Status == AdaptiveAR.Decision.ConstraintStatus.Unparseable);
+            // 12l the contract reply: one bare token in an Anthropic body -> Ok, applied action
+            string tokenBody = "{\"id\":\"m\",\"content\":[{\"type\":\"text\",\"text\":\"INCREASE_SUPPORT\"}],\"stop_reason\":\"end_turn\"}";
+            var tokenResp = AdaptiveAR.Decision.LlmDecisionCore.Interpret(lc, 200, tokenBody, 1300, false, null);
+            Check("12l bare token body -> Ok INCREASE", tokenResp.Status == AdaptiveAR.Decision.ConstraintStatus.Ok && !tokenResp.UsedFallback && tokenResp.ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, tokenResp.RawOutput);
+            Check("12m token with whitespace/newline -> Ok", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("  DECREASE_SUPPORT\n", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.Ok);
+            Check("12n token plus prose -> Unparseable (parser not loosened)", AdaptiveAR.Decision.LlmDecisionCore.ParseActionText("INCREASE_SUPPORT because of errors", pid, 1).Status == AdaptiveAR.Decision.ConstraintStatus.Unparseable);
+
             // 13 request build: headers carry the key, the body never does; context is the exact AI input
             var ctx = C(2, 30000, 60000, 1, 2); ctx.StepId = "step_02"; ctx.Physiological = null;
             var spec = AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(lc, "sk-test-SECRET", ctx);
@@ -69,6 +83,18 @@ namespace AdaptiveAR.Physiology.Tests
             Check("13c sonnet-5-5 request has no temperature", sonnet.Model == "claude-sonnet-5-5" && !sonnetBody.ContainsKey("temperature") && !sonnetSpec.Body.Contains("temperature")
                   && sonnetBody.ContainsKey("model") && sonnetBody.ContainsKey("max_tokens") && sonnetBody.ContainsKey("system") && sonnetBody.ContainsKey("messages"), sonnetSpec.Body);
             Check("13d provider id has no sampling suffix", sonnet.ProviderId == "anthropic:claude-sonnet-5-5", sonnet.ProviderId);
+            // 13f the production prompt targets one bare token: all three tokens named, no reason/JSON requested, user turn carries the instruction, small budget
+            string sys = AdaptiveAR.Decision.LlmDecisionCore.DefaultSystemPrompt;
+            var prodBody = AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(new AdaptiveAR.Decision.LlmConfig(), "k", ctx).Body);
+            string prodSystem = AdaptiveAR.Decision.MiniJson.GetString(prodBody, "system", "");
+            var prodMsgs = AdaptiveAR.Decision.MiniJson.GetList(prodBody, "messages");
+            string prodUser = AdaptiveAR.Decision.MiniJson.GetString((System.Collections.Generic.Dictionary<string, object>)prodMsgs[0], "content", "");
+            Check("13f production prompt expects only the enum token",
+                  prodSystem == sys && sys.Contains("KEEP_SUPPORT") && sys.Contains("INCREASE_SUPPORT") && sys.Contains("DECREASE_SUPPORT")
+                  && sys.Contains("exactly one of these three tokens") && sys.Contains("no JSON") && sys.Contains("no reason") && !sys.Contains("\"reason\"") && !sys.Contains("{\"action\"")
+                  && prodUser.EndsWith(AdaptiveAR.Decision.LlmDecisionCore.UserTurnInstruction) && prodUser.StartsWith("{")
+                  && AdaptiveAR.Decision.MiniJson.GetDouble(prodBody, "max_tokens", 0) == 16 && new AdaptiveAR.Decision.LlmConfig().MaxTokens == 16, prodSystem);
+            Check("13g default config asset uses the token budget", AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").Llm.MaxTokens == 16);
             Check("13e friendly model name", AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-sonnet-5-5") == "Claude Sonnet 5.5"
                   && AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-opus-5-5") == "Claude Opus 5.5" && sonnet.DisplayName == "Claude Sonnet 5.5", sonnet.DisplayName);
             Check("13b context json has null physiology", AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(ctx).Contains("\"physiological\":null"));
@@ -122,6 +148,13 @@ namespace AdaptiveAR.Physiology.Tests
     public static class Program
     {
         private static int _failed, _passed;
+
+        internal static string RepoRoot()
+        {
+            string d = AppContext.BaseDirectory;
+            while (d != null && !System.IO.File.Exists(System.IO.Path.Combine(d, "CLAUDE.md"))) d = System.IO.Path.GetDirectoryName(d);
+            return d ?? ".";
+        }
 
         private static void Check(string name, bool ok, string detail = "")
         {
