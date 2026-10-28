@@ -41,6 +41,10 @@ namespace AdaptiveAR.Decision
         public double RecoveryQuietMs = 20000;
         /// <summary>Oscillation guard: KEEP for this long after any level change on the step, ms. Placeholder.</summary>
         public double MinMsBetweenChanges = 20000;
+        /// <summary>After a level change on the step: counted errors SINCE that change at or above which support increases again. Placeholder.</summary>
+        public int ErrorsSinceChangeIncrease = 2;
+        /// <summary>After a level change on the step: placement attempts since that change, with no success since it, at or above which support increases again. Placeholder.</summary>
+        public int AttemptsSinceChangeIncrease = 4;
 
         public static ReferencePolicyConfig FromJson(Dictionary<string, object> o)
         {
@@ -58,6 +62,8 @@ namespace AdaptiveAR.Decision
             c.RecoverySuccessesForDecrease = MiniJson.GetInt(o, "recoverySuccessesForDecrease", c.RecoverySuccessesForDecrease);
             c.RecoveryQuietMs = MiniJson.GetDouble(o, "recoveryQuietMs", c.RecoveryQuietMs);
             c.MinMsBetweenChanges = MiniJson.GetDouble(o, "minMsBetweenChanges", c.MinMsBetweenChanges);
+            c.ErrorsSinceChangeIncrease = MiniJson.GetInt(o, "errorsSinceChangeIncrease", c.ErrorsSinceChangeIncrease);
+            c.AttemptsSinceChangeIncrease = MiniJson.GetInt(o, "attemptsSinceChangeIncrease", c.AttemptsSinceChangeIncrease);
             return c;
         }
 
@@ -66,7 +72,8 @@ namespace AdaptiveAR.Decision
             return $"name={Name};slowRatioIncrease={SlowRatioIncrease};errorsOnStepIncrease={ErrorsOnStepIncrease};attemptsOnStepIncrease={AttemptsOnStepIncrease};" +
                    $"fastRatioDecrease={FastRatioDecrease};minElapsedIncreaseMs={MinStepElapsedMsForIncrease};minElapsedDecreaseMs={MinStepElapsedMsForDecrease};" +
                    $"clampAtBoundaries={ClampAtBoundaries};fallbackExpectedMs={FallbackExpectedMs};" +
-                   $"recoverySuccessesForDecrease={RecoverySuccessesForDecrease};recoveryQuietMs={RecoveryQuietMs};minMsBetweenChanges={MinMsBetweenChanges};physiologyRule=none";
+                   $"recoverySuccessesForDecrease={RecoverySuccessesForDecrease};recoveryQuietMs={RecoveryQuietMs};minMsBetweenChanges={MinMsBetweenChanges};" +
+                   $"errorsSinceChangeIncrease={ErrorsSinceChangeIncrease};attemptsSinceChangeIncrease={AttemptsSinceChangeIncrease};physiologyRule=none";
         }
     }
 
@@ -90,26 +97,38 @@ namespace AdaptiveAR.Decision
                              : (_cfg.FallbackExpectedMs > 0 ? (double?)_cfg.FallbackExpectedMs : null);
             double? ratio = expected.HasValue ? (double?)(ctx.StepElapsedMs / expected.Value) : null;
 
-            // Until the level has changed on this step the cumulative counters govern; after a
-            // change, only what happened SINCE it counts, so a past escalation cannot keep
-            // re-firing and recovery can be seen. Bidirectional, one level per decision.
-            bool recentGoverns = ctx.SupportChangesOnStep > 0;
-            int errorsForIncrease = recentGoverns ? ctx.ErrorsSinceLastSupportChange : ctx.ErrorsOnStep;
+            // Causal interpretation (shared with the LLM contract): until the level has changed on
+            // this step the cumulative counters govern and may justify the FIRST escalation. After
+            // a change they are historical - the change already answered them - and only NEW
+            // difficulty since the change (errors / repeated unsuccessful attempts since it) can
+            // escalate again; sustained success since the change can de-escalate. Bidirectional,
+            // one level per decision, cooldown against oscillation.
+            bool recentGoverns = DecisionEvidence.SinceChangeGoverns(ctx);
             bool quietSinceError = !ctx.TimeSinceLastErrorMs.HasValue || ctx.TimeSinceLastErrorMs.Value >= _cfg.RecoveryQuietMs;
             bool recovered = ctx.SuccessfulActionsSinceLastSupportChange >= _cfg.RecoverySuccessesForDecrease
                              && ctx.ErrorsSinceLastSupportChange == 0 && quietSinceError;
+            bool newFailedAttempts = ctx.AttemptsSinceLastSupportChange >= _cfg.AttemptsSinceChangeIncrease
+                                     && ctx.SuccessfulActionsSinceLastSupportChange == 0;
 
             if (ctx.TimeSinceLastSupportChangeMs.HasValue && ctx.TimeSinceLastSupportChangeMs.Value < _cfg.MinMsBetweenChanges)
             { why.Add($"cooldown time_since_last_support_change={ctx.TimeSinceLastSupportChangeMs.Value:F0}<{_cfg.MinMsBetweenChanges}"); }
-            else if (errorsForIncrease >= _cfg.ErrorsOnStepIncrease)
-            { action = SupportAction.INCREASE_SUPPORT; why.Add($"{(recentGoverns ? "errors_since_last_support_change" : "errors_on_step")}={errorsForIncrease}>={_cfg.ErrorsOnStepIncrease}"); }
-            else if (!recentGoverns && ctx.AttemptsOnStep >= _cfg.AttemptsOnStepIncrease) { action = SupportAction.INCREASE_SUPPORT; why.Add($"attempts_on_step={ctx.AttemptsOnStep}>={_cfg.AttemptsOnStepIncrease}"); }
+            else if (!recentGoverns && ctx.ErrorsOnStep >= _cfg.ErrorsOnStepIncrease)
+            { action = SupportAction.INCREASE_SUPPORT; why.Add($"cumulative errors_on_step={ctx.ErrorsOnStep}>={_cfg.ErrorsOnStepIncrease} (no change on step yet)"); }
+            else if (!recentGoverns && ctx.AttemptsOnStep >= _cfg.AttemptsOnStepIncrease)
+            { action = SupportAction.INCREASE_SUPPORT; why.Add($"cumulative attempts_on_step={ctx.AttemptsOnStep}>={_cfg.AttemptsOnStepIncrease} (no change on step yet)"); }
             else if (!recentGoverns && ratio.HasValue && ctx.StepElapsedMs >= _cfg.MinStepElapsedMsForIncrease && ratio.Value >= _cfg.SlowRatioIncrease)
-            { action = SupportAction.INCREASE_SUPPORT; why.Add($"elapsed_ratio={ratio.Value:F2}>={_cfg.SlowRatioIncrease}"); }
+            { action = SupportAction.INCREASE_SUPPORT; why.Add($"cumulative elapsed_ratio={ratio.Value:F2}>={_cfg.SlowRatioIncrease} (no change on step yet)"); }
+            else if (recentGoverns && ctx.ErrorsSinceLastSupportChange >= _cfg.ErrorsSinceChangeIncrease)
+            { action = SupportAction.INCREASE_SUPPORT; why.Add($"new difficulty errors_since_last_support_change={ctx.ErrorsSinceLastSupportChange}>={_cfg.ErrorsSinceChangeIncrease}"); }
+            else if (recentGoverns && newFailedAttempts)
+            { action = SupportAction.INCREASE_SUPPORT; why.Add($"new difficulty attempts_since_last_support_change={ctx.AttemptsSinceLastSupportChange}>={_cfg.AttemptsSinceChangeIncrease} with no success since the change"); }
             else if (recovered)
             { action = SupportAction.DECREASE_SUPPORT; why.Add($"recovered successes_since_change={ctx.SuccessfulActionsSinceLastSupportChange}>={_cfg.RecoverySuccessesForDecrease},errors_since_change=0,quiet"); }
             else if (ratio.HasValue && ctx.StepElapsedMs >= _cfg.MinStepElapsedMsForDecrease && ratio.Value <= _cfg.FastRatioDecrease && ctx.ErrorsOnStep == 0 && ctx.AttemptsOnStep <= 1)
             { action = SupportAction.DECREASE_SUPPORT; why.Add($"elapsed_ratio={ratio.Value:F2}<={_cfg.FastRatioDecrease},clean"); }
+            else if (recentGoverns)
+            { why.Add($"no new difficulty since the change (errors_since={ctx.ErrorsSinceLastSupportChange},attempts_since={ctx.AttemptsSinceLastSupportChange},successes_since={ctx.SuccessfulActionsSinceLastSupportChange}); " +
+                      $"historical only: errors_on_step={ctx.ErrorsOnStep},attempts_on_step={ctx.AttemptsOnStep},elapsed_ratio={(ratio.HasValue ? ratio.Value.ToString("F2") : "n/a")} not eligible after a change"); }
             else why.Add(ratio.HasValue ? $"within_band ratio={ratio.Value:F2}" : "no_expected_duration");
 
             if (_cfg.ClampAtBoundaries && SupportLevels.WouldSaturate(ctx.CurrentSupportLevel, action))

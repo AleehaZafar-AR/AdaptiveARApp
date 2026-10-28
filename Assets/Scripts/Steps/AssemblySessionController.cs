@@ -159,6 +159,7 @@ namespace AdaptiveAR.Steps
 
         // Recent performance since the later of step entry / last level change (decision context).
         private int _errorsSinceChange;
+        private int _attemptsSinceChange;
         private int _successesSinceChange;
         private float _lastErrorStepMs = -1f;      // -1 = no error yet on this step
         private float _lastChangeStepMs = -1f;     // -1 = level unchanged since step entry
@@ -1060,6 +1061,7 @@ namespace AdaptiveAR.Steps
             _errorsOnStep = 0;
             _supportChangesOnStep = 0;
             _errorsSinceChange = 0;
+            _attemptsSinceChange = 0;
             _successesSinceChange = 0;
             _lastErrorStepMs = -1f;
             _lastChangeStepMs = -1f;
@@ -1128,6 +1130,7 @@ namespace AdaptiveAR.Steps
         {
             _attemptsOnStep++;
             _attemptsTotal++;
+            _attemptsSinceChange++;
 
             // Discrete error model: one counted error at most per deliberate placement attempt
             // (released near the target without fitting). Carrying the part in and out of the
@@ -1408,13 +1411,16 @@ namespace AdaptiveAR.Steps
             _supportChangesOnStep++;
             _supportChangesTotal++;
             _errorsSinceChange = 0;
+            _attemptsSinceChange = 0;
             _successesSinceChange = 0;
             _lastChangeStepMs = _stepMs;
 
             PushEnvelope();
 
+            // An AI-driven change carries the evidence it was decided on (set by ApplyDecision
+            // around the apply call); step defaults and manual changes carry none.
             if (logger != null)
-                logger.LogSupportChange(from, to, null, SourceFromReason(reason), reason, false);
+                logger.LogSupportChange(from, to, null, SourceFromReason(reason), reason, false, _pendingDecisionEvidence);
 
             RaiseStateChanged();
         }
@@ -1468,6 +1474,7 @@ namespace AdaptiveAR.Steps
                 SupportChangesTotal = _supportChangesTotal,
 
                 ErrorsSinceLastSupportChange = _errorsSinceChange,
+                AttemptsSinceLastSupportChange = _attemptsSinceChange,
                 SuccessfulActionsSinceLastSupportChange = _successesSinceChange,
                 TimeSinceLastErrorMs = _lastErrorStepMs >= 0f ? (float?)Mathf.Max(0f, _stepMs - _lastErrorStepMs) : null,
                 TimeSinceLastSupportChangeMs = _lastChangeStepMs >= 0f ? (float?)Mathf.Max(0f, _stepMs - _lastChangeStepMs) : null,
@@ -1525,11 +1532,14 @@ namespace AdaptiveAR.Steps
             }
 
             bool applied = false;
+            string evidence = DecisionEvidence.Summarise(context);
 
             if (response.Status == ConstraintStatus.Ok && supportLevel != null)
             {
                 bool saturates = SupportLevels.WouldSaturate(before, response.ParsedAction);
-                applied = supportLevel.ApplyAction(response.ParsedAction, "ai_decision");
+                _pendingDecisionEvidence = evidence;
+                try { applied = supportLevel.ApplyAction(response.ParsedAction, "ai_decision"); }
+                finally { _pendingDecisionEvidence = null; }
 
                 if (saturates)
                     response.Status = ConstraintStatus.SaturatedAtBoundary;
@@ -1543,6 +1553,10 @@ namespace AdaptiveAR.Steps
 
             if (logger != null)
                 logger.LogDecision(context, response, before, after, applied);
+
+            if (applied && after != before)
+                Debug.Log($"[Decision] {before} -> {after} by {response.ProviderId} ({response.ParsedAction}); evidence: {evidence}" +
+                          (string.IsNullOrEmpty(response.ProviderReason) ? "" : $"; provider_reason: {response.ProviderReason}"));
 
             // A real upward change only: the level moved, by an applied Ok decision.
             if (applied && (int)after > (int)before && response.Status == ConstraintStatus.Ok)

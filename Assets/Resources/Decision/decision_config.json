@@ -33,6 +33,8 @@
     "fallbackExpectedMs": 0,
     "recoverySuccessesForDecrease": 2,
     "recoveryQuietMs": 20000,
-    "minMsBetweenChanges": 20000
+    "minMsBetweenChanges": 20000,
+    "errorsSinceChangeIncrease": 2,
+    "attemptsSinceChangeIncrease": 4
   }
 }

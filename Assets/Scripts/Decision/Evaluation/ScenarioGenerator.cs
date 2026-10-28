@@ -49,7 +49,7 @@ namespace AdaptiveAR.Decision.Evaluation
                     StepExpectedMs = (float)expected,
                     AttemptsOnStep = att, ErrorsOnStep = err, ErrorsTotal = err + (n % 2),
                     CurrentSupportLevel = (SupportLevel)level, SupportChangesOnStep = 0, SupportChangesTotal = n % 3,
-                    ErrorsSinceLastSupportChange = err, SuccessfulActionsSinceLastSupportChange = n % 3,
+                    ErrorsSinceLastSupportChange = err, AttemptsSinceLastSupportChange = att, SuccessfulActionsSinceLastSupportChange = n % 3,
                     TimeSinceLastErrorMs = err > 0 ? (float?)(ratio * expected * 0.3) : null, TimeSinceLastSupportChangeMs = null,
                     Physiological = ph == "absent" ? null : new PhysiologicalSample
                     {
@@ -118,7 +118,7 @@ namespace AdaptiveAR.Decision.Evaluation
                 StepElapsedMs = c.StepElapsedMs, OverallElapsedMs = c.OverallElapsedMs, StepExpectedMs = c.StepExpectedMs,
                 AttemptsOnStep = c.AttemptsOnStep, ErrorsOnStep = c.ErrorsOnStep, ErrorsTotal = c.ErrorsTotal,
                 CurrentSupportLevel = c.CurrentSupportLevel, SupportChangesOnStep = c.SupportChangesOnStep, SupportChangesTotal = c.SupportChangesTotal,
-                ErrorsSinceLastSupportChange = c.ErrorsSinceLastSupportChange, SuccessfulActionsSinceLastSupportChange = c.SuccessfulActionsSinceLastSupportChange,
+                ErrorsSinceLastSupportChange = c.ErrorsSinceLastSupportChange, AttemptsSinceLastSupportChange = c.AttemptsSinceLastSupportChange, SuccessfulActionsSinceLastSupportChange = c.SuccessfulActionsSinceLastSupportChange,
                 TimeSinceLastErrorMs = c.TimeSinceLastErrorMs, TimeSinceLastSupportChangeMs = c.TimeSinceLastSupportChangeMs,
                 Physiological = c.Physiological == null ? null : new PhysiologicalSample
                 {

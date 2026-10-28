@@ -296,7 +296,7 @@ namespace AdaptiveAR.Logging
         }
 
         public void LogSupportChange(SupportLevel from, SupportLevel to, SupportAction? action,
-                                     SupportChangeSource source, string reason, bool saturated)
+                                     SupportChangeSource source, string reason, bool saturated, string evidence = null)
         {
             var w = NewLine(Events.SupportChange);
             w.Str("from_level", from.ToString());
@@ -307,6 +307,9 @@ namespace AdaptiveAR.Logging
             w.Str("source", source.ToString());
             w.Str("reason", reason);
             w.Bool("saturated", saturated);
+            // The since-change vs cumulative evidence the deciding provider was given (AI-driven
+            // changes only; null for step defaults and manual changes).
+            w.Str("evidence", evidence);
             Write(w);
         }
 
@@ -602,6 +605,7 @@ namespace AdaptiveAR.Logging
 
             WriteContext(w, context);
             w.Str("ai_input", context != null ? AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(context) : null);
+            w.Str("evidence", AdaptiveAR.Decision.DecisionEvidence.Summarise(context));
 
             w.BeginObject("response");
             if (response != null)
@@ -649,6 +653,7 @@ namespace AdaptiveAR.Logging
                 w.Num("support_changes_on_step", context.SupportChangesOnStep);
                 w.Num("support_changes_total", context.SupportChangesTotal);
                 w.Num("errors_since_last_support_change", context.ErrorsSinceLastSupportChange);
+                w.Num("attempts_since_last_support_change", context.AttemptsSinceLastSupportChange);
                 w.Num("successful_actions_since_last_support_change", context.SuccessfulActionsSinceLastSupportChange);
                 w.NumOrNull("time_since_last_error_ms", context.TimeSinceLastErrorMs);
                 w.NumOrNull("time_since_last_support_change_ms", context.TimeSinceLastSupportChangeMs);

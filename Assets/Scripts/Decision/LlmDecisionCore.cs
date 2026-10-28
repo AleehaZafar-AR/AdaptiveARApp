@@ -76,9 +76,14 @@ namespace AdaptiveAR.Decision
             "Missing, stale (large age_ms) or low-quality physiology is simply absent evidence: it must never count against the operator or be read as difficulty. " +
             "There is no fixed physiological threshold or stress cut-off; never treat any single physiological value as decisive. " +
             "Adaptation is bidirectional: a previous increase never locks the operator at a higher level. " +
-            "The cumulative counters (errors_on_step, attempts_on_step) describe the whole step; the recent fields " +
-            "(errors_since_last_support_change, successful_actions_since_last_support_change, time_since_last_error_ms, time_since_last_support_change_ms) " +
-            "describe what happened since the level last changed and are the evidence for recovery. " +
+            "Causal rule for escalation. While support_changes_on_step is 0, the cumulative step evidence (errors_on_step, attempts_on_step, elapsed time against step_expected_ms) may justify INCREASE_SUPPORT. " +
+            "Once the level has changed on this step (support_changes_on_step > 0), that cumulative evidence is historical: the earlier change already answered it, " +
+            "and errors_on_step, attempts_on_step and step_elapsed_ms must never by themselves justify a further INCREASE_SUPPORT, however large they are. " +
+            "A further increase requires NEW difficulty since that change, shown by the recent fields: errors_since_last_support_change > 0, " +
+            "repeated attempts_since_last_support_change without a success, or otherwise clear recent difficulty. " +
+            "If errors_since_last_support_change is 0 and successful_actions_since_last_support_change is growing, select KEEP_SUPPORT or, with sustained recovery, DECREASE_SUPPORT; never INCREASE_SUPPORT. " +
+            "The recent fields (errors_since_last_support_change, attempts_since_last_support_change, successful_actions_since_last_support_change, time_since_last_error_ms, time_since_last_support_change_ms) " +
+            "describe what happened since the level last changed and are the evidence for both further escalation and recovery. " +
             "When recent performance shows sustained recovery (several successful actions, no recent errors, a long time since the last error) select DECREASE_SUPPORT; " +
             "it moves exactly one level (L3_Assisted to L2_Guided, or L2_Guided to L1_Minimal), never two. " +
             "Never decrease while recent errors continue, never decrease on physiology alone, and avoid oscillation: do not reverse a change made a short time ago. " +
@@ -107,6 +112,7 @@ namespace AdaptiveAR.Decision
                 { "current_support_level", c.CurrentSupportLevel.ToString() }, { "current_support_level_num", (double)(int)c.CurrentSupportLevel },
                 { "support_changes_on_step", (double)c.SupportChangesOnStep }, { "support_changes_total", (double)c.SupportChangesTotal },
                 { "errors_since_last_support_change", (double)c.ErrorsSinceLastSupportChange },
+                { "attempts_since_last_support_change", (double)c.AttemptsSinceLastSupportChange },
                 { "successful_actions_since_last_support_change", (double)c.SuccessfulActionsSinceLastSupportChange },
                 { "time_since_last_error_ms", c.TimeSinceLastErrorMs.HasValue ? (object)(double)c.TimeSinceLastErrorMs.Value : null },
                 { "time_since_last_support_change_ms", c.TimeSinceLastSupportChangeMs.HasValue ? (object)(double)c.TimeSinceLastSupportChangeMs.Value : null },

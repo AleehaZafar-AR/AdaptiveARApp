@@ -161,6 +161,62 @@ namespace AdaptiveAR.Physiology.Tests
             var schedAc = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"onActionComplete\":false}"));
             Check("17k action-complete trigger config", new AdaptiveAR.Decision.DecisionScheduleConfig().OnActionComplete && !schedAc.OnActionComplete);
 
+            // 18 causal escalation rule: after a level change only NEW difficulty since it can escalate again
+            AdaptiveAR.Decision.DecisionContext RR(int level, float elapsed, int errorsOnStep, int attemptsOnStep, int errorsSince, int attemptsSince, int successesSince, float? sinceError, float? sinceChange, int changes)
+                => new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = (AdaptiveAR.Support.SupportLevel)level, StepElapsedMs = elapsed, StepExpectedMs = 60000f,
+                       ErrorsOnStep = errorsOnStep, AttemptsOnStep = attemptsOnStep, ErrorsSinceLastSupportChange = errorsSince, AttemptsSinceLastSupportChange = attemptsSince,
+                       SuccessfulActionsSinceLastSupportChange = successesSince, TimeSinceLastErrorMs = sinceError, TimeSinceLastSupportChangeMs = sinceChange, SupportChangesOnStep = changes };
+            // 18a many historical errors at L1 (no change on the step yet): cumulative evidence justifies the first escalation
+            var l18 = Step(RR(1, 45000, 6, 9, 6, 9, 0, 1500f, null, 0), "18a many historical L1 errors -> L2", AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            // 18b at L2 after that change: zero new errors and successes accruing -> never L3, whatever the cumulative counters and elapsed time say
+            bool neverL3 = true; string firstBad = null;
+            foreach (int successes in new[] { 1, 2, 3 })
+                foreach (float elapsed in new[] { 100000f, 200000f, 400000f })
+                    foreach (float sinceChange in new[] { 25000f, 60000f, 150000f })
+                    {
+                        var c = RR((int)l18, elapsed, 6, 9 + successes, 0, successes, successes, 60000f, sinceChange, 1);
+                        var r = refp.RequestDecision(c);
+                        var next = AdaptiveAR.Support.SupportLevels.Apply(c.CurrentSupportLevel, r.ParsedAction);
+                        if (r.ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT || next == AdaptiveAR.Support.SupportLevel.L3_Assisted)
+                        { neverL3 = false; firstBad = firstBad ?? $"successes={successes} elapsed={elapsed} sinceChange={sinceChange}: {r.ParsedAction} ({r.ProviderReason})"; }
+                    }
+            Check("18b zero new errors + successes at L2 -> never L3 (27 contexts)", neverL3, firstBad);
+            var keepHist = refp.RequestDecision(RR(2, 200000, 6, 10, 0, 1, 1, 60000f, 60000f, 1));
+            Check("18b2 reason names the historical-only evidence", keepHist.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT && keepHist.ProviderReason.Contains("historical only") && keepHist.ProviderReason.Contains("no new difficulty"), keepHist.ProviderReason);
+            // 18c new difficulty after the change makes L3 eligible: new counted errors, or repeated attempts with no success since the change
+            Step(RR(2, 120000, 8, 11, 2, 2, 0, 1000f, 30000f, 1), "18c new errors after L2 -> L3 eligible", AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L3_Assisted);
+            Step(RR(2, 120000, 6, 13, 0, 4, 0, 60000f, 30000f, 1), "18c2 repeated unsuccessful attempts after L2 -> L3 eligible", AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L3_Assisted);
+            Step(RR(2, 120000, 6, 13, 0, 4, 1, 60000f, 30000f, 1), "18c3 the same attempts WITH a success since the change -> not an increase", AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            // 18d cumulative elapsed time alone after an escalation cannot force L3 (ratio 6.7 against the expected duration)
+            Step(RR(2, 400000, 0, 1, 0, 0, 0, null, 60000f, 1), "18d elapsed time alone after escalation -> KEEP, not L3", AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            Step(RR(2, 400000, 6, 9, 0, 0, 0, 120000f, 120000f, 1), "18d2 old errors + long elapsed, nothing new -> KEEP, not L3", AdaptiveAR.Support.SupportAction.KEEP_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            // 18e recovery evidence still de-escalates, one level at a time
+            Step(RR(2, 150000, 6, 11, 0, 2, 2, 40000f, 40000f, 1), "18e recovery at L2 -> L1", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L1_Minimal);
+            Step(RR(3, 150000, 9, 14, 0, 2, 2, 40000f, 40000f, 2), "18e2 recovery at L3 -> L2 (never L1)", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
+            // 18f the LLM contract states the same causal rule
+            Check("18f prompt: cumulative evidence is historical after a change; new difficulty required",
+                  sys.Contains("support_changes_on_step > 0") && sys.Contains("historical") && sys.Contains("must never by themselves justify a further INCREASE_SUPPORT")
+                  && sys.Contains("errors_since_last_support_change > 0") && sys.Contains("attempts_since_last_support_change") && sys.Contains("never INCREASE_SUPPORT"), "");
+            // 18g the new field travels in ai_input and replays from a recorded line
+            string attJson = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(RR(2, 40000, 5, 8, 0, 3, 2, null, 20000f, 1));
+            var attReplay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { "{\"event\":\"decision_context_probe\",\"context\":{\"step_id\":\"s\",\"current_support_level\":\"L2_Guided\",\"support_changes_on_step\":1,\"errors_since_last_support_change\":0,\"attempts_since_last_support_change\":3,\"successful_actions_since_last_support_change\":2}}" });
+            Check("18g attempts_since_last_support_change in ai_input and replay", attJson.Contains("\"attempts_since_last_support_change\":3") && attReplay.Count == 1 && attReplay[0].Context.AttemptsSinceLastSupportChange == 3, attJson);
+            // 18h the evidence line states the regime and both evidence sets
+            string ev = AdaptiveAR.Decision.DecisionEvidence.Summarise(RR(2, 85000, 6, 9, 0, 3, 2, 25000f, 30000f, 1));
+            Check("18h evidence summary", ev.StartsWith("governs=since_change") && ev.Contains("errors=0 attempts=3 successes=2 last_error_ms=25000 last_change_ms=30000")
+                  && ev.Contains("historical after a change") && ev.Contains("errors_on_step=6") && ev.Contains("elapsed_ratio=1.42") && ev.Contains("physiology=missing"), ev);
+            Check("18h2 evidence before any change says cumulative governs", AdaptiveAR.Decision.DecisionEvidence.Summarise(RR(1, 20000, 2, 3, 2, 3, 0, 1000f, null, 0)).StartsWith("governs=cumulative"));
+            // 18i the thresholds are config keys, not constants
+            var rpCfg = AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").ReferencePolicy;
+            var rpOverride = AdaptiveAR.Decision.ReferencePolicyConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"errorsSinceChangeIncrease\":1,\"attemptsSinceChangeIncrease\":2}"));
+            Check("18i since-change thresholds from config", rpCfg.ErrorsSinceChangeIncrease == 2 && rpCfg.AttemptsSinceChangeIncrease == 4 && rpOverride.ErrorsSinceChangeIncrease == 1 && rpOverride.AttemptsSinceChangeIncrease == 2
+                  && rpCfg.Describe().Contains("errorsSinceChangeIncrease=2"), rpCfg.Describe());
+            var oneErr = new AdaptiveAR.Decision.ReferencePolicyProvider(rpOverride).RequestDecision(RR(2, 120000, 6, 10, 1, 1, 0, 1000f, 30000f, 1));
+            Check("18i2 override: one new error escalates", oneErr.ParsedAction == AdaptiveAR.Support.SupportAction.INCREASE_SUPPORT, oneErr.ProviderReason);
+            // 18j determinism of the rule under the same context
+            var detA = refp.RequestDecision(RR(2, 200000, 6, 10, 0, 1, 1, 60000f, 60000f, 1)); var detB = refp.RequestDecision(RR(2, 200000, 6, 10, 0, 1, 1, 60000f, 60000f, 1));
+            Check("18j same context, same decision and reason", detA.ParsedAction == detB.ParsedAction && detA.ProviderReason == detB.ProviderReason);
+
             // 16 replay from a recorded decision_context_probe line
             string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";
             var replay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { line, "not json", "" });

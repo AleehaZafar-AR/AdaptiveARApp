@@ -131,6 +131,8 @@ namespace AdaptiveAR.Decision
         // --- recent performance: what happened since the level last changed (or since step entry) ---
         // The cumulative counters above cannot show recovery inside a long step; these can.
         public int ErrorsSinceLastSupportChange;
+        /// <summary>Placement attempts (any outcome) since the level last changed on this step; with no success since the change, repeated attempts are new difficulty.</summary>
+        public int AttemptsSinceLastSupportChange;
         public int SuccessfulActionsSinceLastSupportChange;
         /// <summary>Milliseconds since the last counted/behavioural error on this step; null = no error yet on this step.</summary>
         public float? TimeSinceLastErrorMs;
