@@ -161,6 +161,22 @@ namespace AdaptiveAR.Steps
         private int _errorsSinceChange;
         private int _attemptsSinceChange;
         private int _successesSinceChange;
+
+        // The step's ordered task-event record and the temporal features derived from it.
+        // Objective only: the provider interprets them (never the application).
+        private readonly TaskEventLedger _ledger = new TaskEventLedger();
+        private float _recentWindowMs = 60000f;
+        private int _recentEventsMax = 12;
+
+        /// <summary>Decision config in force (DecisionScheduler pushes it at bind); inspector-free so a headset config file can tune it.</summary>
+        public void ConfigureRecentContext(float windowMs, int maxEvents)
+        {
+            _recentWindowMs = Mathf.Max(1000f, windowMs);
+            _recentEventsMax = Mathf.Max(1, maxEvents);
+        }
+
+        private string CurrentActionIdOrNull { get { return workflow != null && workflow.CurrentAction != null ? workflow.CurrentAction.Id : null; } }
+        private string CurrentLevelName { get { return supportLevel != null ? supportLevel.CurrentLevel.ToString() : null; } }
         private float _lastErrorStepMs = -1f;      // -1 = no error yet on this step
         private float _lastChangeStepMs = -1f;     // -1 = level unchanged since step entry
         private int _supportChangesTotal;
@@ -555,6 +571,7 @@ namespace AdaptiveAR.Steps
             _errorsOnStep++;
             _errorsTotal++;
             NoteRecentError();
+            _ledger.Add(TaskEventKind.WrongComponent, _stepMs, CurrentActionIdOrNull, CurrentLevelName);
             PushEnvelope();
 
             try { OnWrongComponentGrabbed?.Invoke(partKey); } catch (Exception e) { Debug.LogError("[Session] OnWrongComponentGrabbed handler threw: " + e); }
@@ -1023,6 +1040,7 @@ namespace AdaptiveAR.Steps
             if (action != null && (action.RequiresPhysicalValidation || reason == "tool_action"))
             {
                 _successesSinceChange++;
+                _ledger.Add(TaskEventKind.Success, _stepMs, action.Id, CurrentLevelName);
                 PushEnvelope();
                 try { OnActionCompleted?.Invoke(action); } catch (Exception e) { Debug.LogError("[Session] OnActionCompleted handler threw: " + e); }
             }
@@ -1065,6 +1083,7 @@ namespace AdaptiveAR.Steps
             _successesSinceChange = 0;
             _lastErrorStepMs = -1f;
             _lastChangeStepMs = -1f;
+            _ledger.Reset();
             _stepOpen = true;
 
             PushEnvelope();
@@ -1143,6 +1162,7 @@ namespace AdaptiveAR.Steps
                 _errorsTotal++;
                 NoteRecentError();
             }
+            if (!success) _ledger.Add(counted ? TaskEventKind.Error : TaskEventKind.FailedAttempt, _stepMs, CurrentActionIdOrNull, CurrentLevelName);
 
             PushEnvelope();
 
@@ -1414,6 +1434,7 @@ namespace AdaptiveAR.Steps
             _attemptsSinceChange = 0;
             _successesSinceChange = 0;
             _lastChangeStepMs = _stepMs;
+            if (to != from) _ledger.Add((int)to > (int)from ? TaskEventKind.SupportIncrease : TaskEventKind.SupportDecrease, _stepMs, CurrentActionIdOrNull, to.ToString());
 
             PushEnvelope();
 
@@ -1482,6 +1503,7 @@ namespace AdaptiveAR.Steps
                 Physiological = ResolvePhysiologicalSnapshot()
             };
 
+            _ledger.Fill(ctx, _stepMs, _recentWindowMs, _recentEventsMax);
             return ctx;
         }
 

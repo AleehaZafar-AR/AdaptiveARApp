@@ -217,6 +217,52 @@ namespace AdaptiveAR.Physiology.Tests
             var detA = refp.RequestDecision(RR(2, 200000, 6, 10, 0, 1, 1, 60000f, 60000f, 1)); var detB = refp.RequestDecision(RR(2, 200000, 6, 10, 0, 1, 1, 60000f, 60000f, 1));
             Check("18j same context, same decision and reason", detA.ParsedAction == detB.ParsedAction && detA.ProviderReason == detB.ProviderReason);
 
+            // 19 task-event ledger: objective temporal features, never a classification
+            var led = new AdaptiveAR.Decision.TaskEventLedger();
+            led.Add(AdaptiveAR.Decision.TaskEventKind.Error, 5000f, "a1", "L1_Minimal");
+            led.Add(AdaptiveAR.Decision.TaskEventKind.Error, 12000f, "a1", "L1_Minimal");
+            led.Add(AdaptiveAR.Decision.TaskEventKind.SupportIncrease, 13000f, "a1", "L2_Guided");
+            led.Add(AdaptiveAR.Decision.TaskEventKind.Error, 20000f, "a1", "L2_Guided");
+            led.Add(AdaptiveAR.Decision.TaskEventKind.Success, 30000f, "a1", "L2_Guided");
+            led.Add(AdaptiveAR.Decision.TaskEventKind.Success, 45000f, "a2", "L2_Guided");
+            var lc19 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L2_Guided };
+            led.Fill(lc19, 50000f, 60000f, 12);
+            Check("19a pattern error->error->increase->error->success->success: features",
+                  lc19.RecentErrorCount == 3 && lc19.RecentFailedAttemptCount == 3 && lc19.RecentWrongComponentCount == 0 && lc19.ConsecutiveSuccessfulActions == 2
+                  && lc19.ErrorsSinceLastSuccess == 0 && lc19.FailedAttemptsSinceLastSuccess == 0 && lc19.TimeSinceLastSuccessMs == 5000f && lc19.RecentEvents.Count == 6
+                  && lc19.RecentEvents[0].Kind == AdaptiveAR.Decision.TaskEventKind.Error && lc19.RecentEvents[0].AgeMs == 45000f && lc19.RecentEvents[5].Kind == AdaptiveAR.Decision.TaskEventKind.Success && lc19.RecentEvents[5].AgeMs == 5000f,
+                  AdaptiveAR.Decision.TaskEventLedger.Describe(lc19.RecentEvents));
+            var lc19b = new AdaptiveAR.Decision.DecisionContext(); led.Fill(lc19b, 50000f, 25000f, 3);
+            Check("19b window and history bounds", lc19b.RecentErrorCount == 0 && lc19b.RecentFailedAttemptCount == 0 && lc19b.RecentEvents.Count == 3
+                  && lc19b.RecentEvents[0].Kind == AdaptiveAR.Decision.TaskEventKind.Error && lc19b.ConsecutiveSuccessfulActions == 2, AdaptiveAR.Decision.TaskEventLedger.Describe(lc19b.RecentEvents));
+            led.Add(AdaptiveAR.Decision.TaskEventKind.WrongComponent, 52000f, "a2", "L2_Guided");
+            led.Add(AdaptiveAR.Decision.TaskEventKind.FailedAttempt, 54000f, "a2", "L2_Guided");
+            var lc19c = new AdaptiveAR.Decision.DecisionContext(); led.Fill(lc19c, 55000f, 60000f, 12);
+            Check("19c new difficulty after successes breaks the run; wrong part counts as an error, a near miss as a failed attempt only",
+                  lc19c.ConsecutiveSuccessfulActions == 0 && lc19c.ErrorsSinceLastSuccess == 1 && lc19c.FailedAttemptsSinceLastSuccess == 1 && lc19c.RecentErrorCount == 4
+                  && lc19c.RecentWrongComponentCount == 1 && lc19c.RecentFailedAttemptCount == 4 && lc19c.TimeSinceLastSuccessMs == 10000f, $"{lc19c.ErrorsSinceLastSuccess}/{lc19c.FailedAttemptsSinceLastSuccess}/{lc19c.RecentErrorCount}/{lc19c.RecentFailedAttemptCount}");
+            var lcEmpty = new AdaptiveAR.Decision.DecisionContext(); new AdaptiveAR.Decision.TaskEventLedger().Fill(lcEmpty, 1000f, 60000f, 12);
+            Check("19d empty ledger: zeros, null time since success, empty history", lcEmpty.RecentErrorCount == 0 && lcEmpty.ConsecutiveSuccessfulActions == 0 && !lcEmpty.TimeSinceLastSuccessMs.HasValue && lcEmpty.RecentEvents.Count == 0);
+            // 19e the features and the ordered history travel in ai_input and replay from a recorded line
+            string evJson = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(lc19);
+            var evReplay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { "{\"event\":\"decision_context_probe\"," + evJson.Substring(1) });
+            Check("19e temporal context in ai_input and replay", evJson.Contains("\"consecutive_successful_actions\":2") && evJson.Contains("\"recent_events\":[{\"type\":\"error\",\"age_ms\":45000,\"action_id\":\"a1\",\"level\":\"L1_Minimal\"}")
+                  && evJson.Contains("\"time_since_last_success_ms\":5000") && evReplay.Count == 1 && evReplay[0].Context.RecentEvents.Count == 6 && evReplay[0].Context.RecentEvents[2].Kind == AdaptiveAR.Decision.TaskEventKind.SupportIncrease
+                  && evReplay[0].Context.ConsecutiveSuccessfulActions == 2 && evReplay[0].Context.TimeSinceLastSuccessMs == 5000f && evReplay[0].Context.RecentWindowMs == 60000f, evJson);
+            // 19f the session log writer produces the same array shape (parseable, ordered)
+            var jw = new AdaptiveAR.Logging.JsonLineWriter(); jw.Str("a", "x"); jw.BeginArray("recent_events"); jw.BeginObject(); jw.Str("type", "error"); jw.Num("age_ms", 10f); jw.EndObject(); jw.BeginObject(); jw.Str("type", "success"); jw.Num("age_ms", 2f); jw.EndObject(); jw.EndArray(); jw.Bool("b", true);
+            var jwo = AdaptiveAR.Decision.MiniJson.ParseObject(jw.Build()); var jwl = AdaptiveAR.Decision.MiniJson.GetList(jwo, "recent_events");
+            Check("19f JsonLineWriter arrays", jwl != null && jwl.Count == 2 && AdaptiveAR.Decision.MiniJson.GetString((System.Collections.Generic.Dictionary<string, object>)jwl[1], "type", "") == "success" && AdaptiveAR.Decision.MiniJson.GetBool(jwo, "b", false), jw.Build());
+            // 19g synthetic scenarios carry consistent temporal features; clone keeps them; "missing" drops the history
+            var syn19 = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Synthetic(0, 1);
+            var withErr = syn19.Find(x => x.Context.ErrorsOnStep == 3);
+            var cl = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Clone(withErr.Context);
+            var pertMissing = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Perturb(withErr, 1).Find(x => x.Kind == "missing");
+            Check("19g synthetic temporal features", withErr.Context.RecentEvents.Count >= 3 && withErr.Context.ErrorsSinceLastSuccess + withErr.Context.ConsecutiveSuccessfulActions >= 0
+                  && cl.RecentEvents.Count == withErr.Context.RecentEvents.Count && !ReferenceEquals(cl.RecentEvents, withErr.Context.RecentEvents) && pertMissing.Context.RecentEvents == null && !pertMissing.Context.TimeSinceLastSuccessMs.HasValue);
+            Check("19h context config keys", AdaptiveAR.Decision.DecisionConfig.FromJson("{\"context\":{\"recentWindowMs\":30000,\"recentEventsMax\":5}}", "t").Context.RecentEventsMax == 5
+                  && AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").Context.RecentWindowMs == 60000);
+
             // 16 replay from a recorded decision_context_probe line
             string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";
             var replay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { line, "not json", "" });

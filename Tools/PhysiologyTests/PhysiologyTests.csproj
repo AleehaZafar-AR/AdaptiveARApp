@@ -24,6 +24,7 @@
     <Compile Include="..\..\Assets\Scripts\Decision\MiniJson.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\ReferencePolicy.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\DecisionEvidence.cs" />
+    <Compile Include="..\..\Assets\Scripts\Decision\TaskEventLedger.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\LlmDecisionCore.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\DecisionConfig.cs" />
     <Compile Include="..\..\Assets\Scripts\Decision\IAsyncDecisionProvider.cs" />

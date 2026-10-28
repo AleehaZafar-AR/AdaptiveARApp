@@ -41,6 +41,24 @@ namespace AdaptiveAR.Decision
         }
     }
 
+    /// <summary>How the temporal context is built: the window behind the recent_* counts and the length of the event history.</summary>
+    public sealed class DecisionContextConfig
+    {
+        public double RecentWindowMs = 60000;
+        public int RecentEventsMax = 12;
+
+        public static DecisionContextConfig FromJson(Dictionary<string, object> o)
+        {
+            var c = new DecisionContextConfig();
+            if (o == null) return c;
+            c.RecentWindowMs = MiniJson.GetDouble(o, "recentWindowMs", c.RecentWindowMs);
+            c.RecentEventsMax = MiniJson.GetInt(o, "recentEventsMax", c.RecentEventsMax);
+            return c;
+        }
+
+        public string Describe() { return $"recentWindowMs={RecentWindowMs};recentEventsMax={RecentEventsMax}"; }
+    }
+
     public sealed class DecisionConfig
     {
         public bool Enabled = true;
@@ -48,6 +66,7 @@ namespace AdaptiveAR.Decision
         public string Provider = "llm";
         public LlmConfig Llm = new LlmConfig();
         public DecisionScheduleConfig Schedule = new DecisionScheduleConfig();
+        public DecisionContextConfig Context = new DecisionContextConfig();
         public ReferencePolicyConfig ReferencePolicy = new ReferencePolicyConfig();
         public string SourceDescription = "defaults";
 
@@ -60,13 +79,14 @@ namespace AdaptiveAR.Decision
             c.Provider = (MiniJson.GetString(o, "provider", c.Provider) ?? "none").Trim().ToLowerInvariant();
             c.Llm = LlmConfig.FromJson(MiniJson.GetObject(o, "llm"));
             c.Schedule = DecisionScheduleConfig.FromJson(MiniJson.GetObject(o, "schedule"));
+            c.Context = DecisionContextConfig.FromJson(MiniJson.GetObject(o, "context"));
             c.ReferencePolicy = ReferencePolicyConfig.FromJson(MiniJson.GetObject(o, "referencePolicy"));
             return c;
         }
 
         public string Describe()
         {
-            return $"source={SourceDescription};enabled={Enabled};provider={Provider};llm={Llm.ProviderId},timeoutMs={Llm.TimeoutMs},maxTokens={Llm.MaxTokens};schedule[{Schedule.Describe()}];reference[{ReferencePolicy.Describe()}]";
+            return $"source={SourceDescription};enabled={Enabled};provider={Provider};llm={Llm.ProviderId},timeoutMs={Llm.TimeoutMs},maxTokens={Llm.MaxTokens};schedule[{Schedule.Describe()}];context[{Context.Describe()}];reference[{ReferencePolicy.Describe()}]";
         }
     }
 

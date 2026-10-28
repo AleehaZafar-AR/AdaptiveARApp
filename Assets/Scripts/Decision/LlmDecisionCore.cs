@@ -98,6 +98,22 @@ namespace AdaptiveAR.Decision
         private static readonly Regex TokenLike = new Regex(@"^[A-Z][A-Z_]{2,}$", RegexOptions.Compiled);
         private static readonly Regex VocabWord = new Regex(@"\b(KEEP_SUPPORT|INCREASE_SUPPORT|DECREASE_SUPPORT)\b", RegexOptions.Compiled);
 
+        /// <summary>The ordered recent history as JSON objects {type, age_ms, action_id, level}, oldest first; empty list when none.</summary>
+        public static List<object> EventsToList(List<TaskEvent> events)
+        {
+            var list = new List<object>();
+            if (events == null) return list;
+            foreach (TaskEvent e in events)
+            {
+                if (e == null) continue;
+                list.Add(new Dictionary<string, object>
+                {
+                    { "type", TaskEvent.Name(e.Kind) }, { "age_ms", (double)e.AgeMs }, { "action_id", e.ActionId }, { "level", e.Level }
+                });
+            }
+            return list;
+        }
+
         /// <summary>The exact AI input: the context as one JSON object (null fields written as null, never invented).</summary>
         public static string ContextToJson(DecisionContext c)
         {
@@ -116,6 +132,15 @@ namespace AdaptiveAR.Decision
                 { "successful_actions_since_last_support_change", (double)c.SuccessfulActionsSinceLastSupportChange },
                 { "time_since_last_error_ms", c.TimeSinceLastErrorMs.HasValue ? (object)(double)c.TimeSinceLastErrorMs.Value : null },
                 { "time_since_last_support_change_ms", c.TimeSinceLastSupportChangeMs.HasValue ? (object)(double)c.TimeSinceLastSupportChangeMs.Value : null },
+                { "recent_window_ms", (double)c.RecentWindowMs },
+                { "recent_error_count", (double)c.RecentErrorCount },
+                { "recent_failed_attempt_count", (double)c.RecentFailedAttemptCount },
+                { "recent_wrong_component_count", (double)c.RecentWrongComponentCount },
+                { "consecutive_successful_actions", (double)c.ConsecutiveSuccessfulActions },
+                { "errors_since_last_success", (double)c.ErrorsSinceLastSuccess },
+                { "failed_attempts_since_last_success", (double)c.FailedAttemptsSinceLastSuccess },
+                { "time_since_last_success_ms", c.TimeSinceLastSuccessMs.HasValue ? (object)(double)c.TimeSinceLastSuccessMs.Value : null },
+                { "recent_events", EventsToList(c.RecentEvents) },
                 { "allowed_actions", new List<object> { "KEEP_SUPPORT", "INCREASE_SUPPORT", "DECREASE_SUPPORT" } }
             };
             if (c.Physiological == null || c.Physiological.IsEmpty) o["physiological"] = null;

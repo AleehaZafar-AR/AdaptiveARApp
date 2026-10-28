@@ -8,6 +8,7 @@
 // evaluation (CLAUDE.md section 3).
 
 using System;
+using System.Collections.Generic;
 using AdaptiveAR.Support;
 
 namespace AdaptiveAR.Decision
@@ -138,6 +139,29 @@ namespace AdaptiveAR.Decision
         public float? TimeSinceLastErrorMs;
         /// <summary>Milliseconds since the level last changed on this step; null = unchanged since step entry.</summary>
         public float? TimeSinceLastSupportChangeMs;
+
+        // --- temporal features derived from the step's event ledger (TaskEventLedger) ---
+        // Objective descriptions of WHEN things happened. No field here classifies the
+        // operator; the provider interprets them together with the cumulative counters,
+        // the support history and the physiology.
+        /// <summary>The window, ms, behind the recent_* counts below.</summary>
+        public float RecentWindowMs;
+        /// <summary>Counted errors + wrong-component grabs inside the window.</summary>
+        public int RecentErrorCount;
+        /// <summary>Unsuccessful placement attempts (counted or not) inside the window.</summary>
+        public int RecentFailedAttemptCount;
+        /// <summary>Wrong-component grabs inside the window (a subset of RecentErrorCount).</summary>
+        public int RecentWrongComponentCount;
+        /// <summary>Trailing run of validated successes with no unsuccessful attempt or wrong part since.</summary>
+        public int ConsecutiveSuccessfulActions;
+        /// <summary>Counted errors + wrong-component grabs since the last validated success (or since step entry).</summary>
+        public int ErrorsSinceLastSuccess;
+        /// <summary>Unsuccessful placement attempts since the last validated success (or since step entry).</summary>
+        public int FailedAttemptsSinceLastSuccess;
+        /// <summary>Milliseconds since the last validated success on this step; null = none yet.</summary>
+        public float? TimeSinceLastSuccessMs;
+        /// <summary>The last N meaningful events on the step, oldest first, with ages; null/empty = none.</summary>
+        public List<TaskEvent> RecentEvents;
 
         // --- physiology (nullable throughout) ---
         public PhysiologicalSample Physiological;

@@ -11,6 +11,11 @@
     "minIntervalSeconds": 20,
     "firstDecisionAfterStepMs": 15000
   },
+  "context": {
+    "_comment": "Temporal context handed to the provider: recent_* counts cover recentWindowMs; recent_events keeps the newest recentEventsMax events of the step.",
+    "recentWindowMs": 60000,
+    "recentEventsMax": 12
+  },
   "llm": {
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",

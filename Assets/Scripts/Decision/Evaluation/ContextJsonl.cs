@@ -50,6 +50,25 @@ namespace AdaptiveAR.Decision.Evaluation
             };
             double? exp = MiniJson.GetNullableDouble(c, "step_expected_ms");
             ctx.StepExpectedMs = exp.HasValue ? (float?)exp.Value : null;
+            ctx.RecentWindowMs = (float)MiniJson.GetDouble(c, "recent_window_ms", 0);
+            ctx.RecentErrorCount = MiniJson.GetInt(c, "recent_error_count", 0);
+            ctx.RecentFailedAttemptCount = MiniJson.GetInt(c, "recent_failed_attempt_count", 0);
+            ctx.RecentWrongComponentCount = MiniJson.GetInt(c, "recent_wrong_component_count", 0);
+            ctx.ConsecutiveSuccessfulActions = MiniJson.GetInt(c, "consecutive_successful_actions", 0);
+            ctx.ErrorsSinceLastSuccess = MiniJson.GetInt(c, "errors_since_last_success", 0);
+            ctx.FailedAttemptsSinceLastSuccess = MiniJson.GetInt(c, "failed_attempts_since_last_success", 0);
+            ctx.TimeSinceLastSuccessMs = F(MiniJson.GetNullableDouble(c, "time_since_last_success_ms"));
+            List<object> ev = MiniJson.GetList(c, "recent_events");
+            if (ev != null)
+            {
+                ctx.RecentEvents = new List<TaskEvent>();
+                foreach (object item in ev)
+                {
+                    var eo = item as Dictionary<string, object>;
+                    if (eo == null || !TaskEvent.TryParse(MiniJson.GetString(eo, "type", ""), out TaskEventKind kind)) continue;
+                    ctx.RecentEvents.Add(new TaskEvent { Kind = kind, AgeMs = (float)MiniJson.GetDouble(eo, "age_ms", 0), ActionId = MiniJson.GetString(eo, "action_id"), Level = MiniJson.GetString(eo, "level") });
+                }
+            }
             string lvl = MiniJson.GetString(c, "current_support_level", null);
             ctx.CurrentSupportLevel = ParseLevel(lvl, MiniJson.GetInt(c, "current_support_level_num", 1));
             Dictionary<string, object> p = MiniJson.GetObject(c, "physiological");

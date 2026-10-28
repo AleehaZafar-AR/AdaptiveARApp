@@ -111,6 +111,7 @@ namespace AdaptiveAR.Decision
             _session = FindAnyObjectByType<AssemblySessionController>(FindObjectsInactive.Include);
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
             if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; _session.OnWrongComponentGrabbed += HandleWrongComponent; _session.OnActionCompleted += HandleActionCompleted; }
+            if (_session != null && Config != null) _session.ConfigureRecentContext((float)Config.Context.RecentWindowMs, Config.Context.RecentEventsMax);
             _inFlight = false;
             _nextPeriodicAt = Config != null && Config.Schedule.PeriodicSeconds > 0 ? Time.realtimeSinceStartup + (float)Config.Schedule.PeriodicSeconds : 1e9f;
             if (_logger != null) _logger.LogDecisionConfig(Config != null ? Config.Describe() : "none", Status, ProviderId);

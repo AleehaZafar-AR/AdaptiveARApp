@@ -100,6 +100,31 @@ namespace AdaptiveAR.Logging
             return this;
         }
 
+        /// <summary>Opens a nested array. Must be closed with EndArray(). Elements are objects opened with BeginObject().</summary>
+        public JsonLineWriter BeginArray(string key)
+        {
+            Separator(key);
+            _sb.Append('[');
+            _hasField = false;
+            return this;
+        }
+
+        public JsonLineWriter EndArray()
+        {
+            _sb.Append(']');
+            _hasField = true;
+            return this;
+        }
+
+        /// <summary>Opens an unkeyed object: an element of the open array.</summary>
+        public JsonLineWriter BeginObject()
+        {
+            if (_hasField) _sb.Append(',');
+            _sb.Append('{');
+            _hasField = false;
+            return this;
+        }
+
         /// <summary>Writes a nested object as null, for an absent sub-record.</summary>
         public JsonLineWriter NullObject(string key)
         {

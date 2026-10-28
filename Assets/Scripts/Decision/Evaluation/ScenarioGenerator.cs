@@ -57,6 +57,13 @@ namespace AdaptiveAR.Decision.Evaluation
                         Quality = 0.9f, AgeMs = 2000f, Source = "synthetic"
                     }
                 };
+                // Temporal features from a synthetic ledger consistent with the counters: the
+                // errors first (spaced), then the successes; all inside the 60 s window.
+                var ledger = new TaskEventLedger();
+                float now = ctx.StepElapsedMs;
+                for (int e = 0; e < err; e++) ledger.Add(TaskEventKind.Error, System.Math.Max(0f, now - 50000f + e * 8000f), "synthetic_action", ((SupportLevel)level).ToString());
+                for (int sIdx = 0; sIdx < n % 3; sIdx++) ledger.Add(TaskEventKind.Success, System.Math.Max(0f, now - 20000f + sIdx * 6000f), "synthetic_action", ((SupportLevel)level).ToString());
+                ledger.Fill(ctx, now, 60000f, 12);
                 grid.Add(new Scenario { Id = $"syn_{n:D3}_L{level}_r{ratio}_e{err}_a{att}_{ph}", Kind = "base", BaseId = null, Context = ctx });
             }
             foreach (Scenario s in grid) s.BaseId = s.Id;
@@ -93,6 +100,8 @@ namespace AdaptiveAR.Decision.Evaluation
             missing.StepExpectedMs = null;
             missing.TimeSinceLastErrorMs = null;
             missing.TimeSinceLastSupportChangeMs = null;
+            missing.TimeSinceLastSuccessMs = null;
+            missing.RecentEvents = null;
             list.Add(new Scenario { Id = b.Id + "__missing", Kind = "missing", BaseId = b.Id, Context = missing });
 
             DecisionContext adv = Clone(b.Context);
@@ -120,6 +129,10 @@ namespace AdaptiveAR.Decision.Evaluation
                 CurrentSupportLevel = c.CurrentSupportLevel, SupportChangesOnStep = c.SupportChangesOnStep, SupportChangesTotal = c.SupportChangesTotal,
                 ErrorsSinceLastSupportChange = c.ErrorsSinceLastSupportChange, AttemptsSinceLastSupportChange = c.AttemptsSinceLastSupportChange, SuccessfulActionsSinceLastSupportChange = c.SuccessfulActionsSinceLastSupportChange,
                 TimeSinceLastErrorMs = c.TimeSinceLastErrorMs, TimeSinceLastSupportChangeMs = c.TimeSinceLastSupportChangeMs,
+                RecentWindowMs = c.RecentWindowMs, RecentErrorCount = c.RecentErrorCount, RecentFailedAttemptCount = c.RecentFailedAttemptCount, RecentWrongComponentCount = c.RecentWrongComponentCount,
+                ConsecutiveSuccessfulActions = c.ConsecutiveSuccessfulActions, ErrorsSinceLastSuccess = c.ErrorsSinceLastSuccess, FailedAttemptsSinceLastSuccess = c.FailedAttemptsSinceLastSuccess,
+                TimeSinceLastSuccessMs = c.TimeSinceLastSuccessMs,
+                RecentEvents = c.RecentEvents == null ? null : c.RecentEvents.ConvertAll(e => new TaskEvent { Kind = e.Kind, AgeMs = e.AgeMs, ActionId = e.ActionId, Level = e.Level }),
                 Physiological = c.Physiological == null ? null : new PhysiologicalSample
                 {
                     RmssdMs = c.Physiological.RmssdMs, HeartRateBpm = c.Physiological.HeartRateBpm, MeanIbiMs = c.Physiological.MeanIbiMs,
