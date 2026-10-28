@@ -1,8 +1,10 @@
 // File: ReferencePolicy.cs
 // The deterministic reference policy: a configurable, researcher-authored rule set that
-// maps a DecisionContext to one constrained action. It is (a) the offline reference the
-// evaluation measures agreement against, and (b) a drop-in provider for sessions run
-// without a model. Every number comes from the JSON config; the defaults below are
+// maps a DecisionContext to one constrained action. It is (a) the offline COMPARATOR the
+// evaluation measures agreement against, and (b) a drop-in provider for bench sessions run
+// without a model. It is not the live decision-maker and it does not replace the model's
+// role of interpreting the operator from the full multimodal context; its rules are a
+// transparent baseline. Every number comes from the JSON config; the defaults below are
 // PLACEHOLDERS to be replaced from the literature review (CLAUDE.md section 2.2), and the
 // config name is recorded in every decision so runs stay interpretable.
 //
@@ -103,7 +105,7 @@ namespace AdaptiveAR.Decision
             // difficulty since the change (errors / repeated unsuccessful attempts since it) can
             // escalate again; sustained success since the change can de-escalate. Bidirectional,
             // one level per decision, cooldown against oscillation.
-            bool recentGoverns = DecisionEvidence.SinceChangeGoverns(ctx);
+            bool recentGoverns = ctx.SupportChangesOnStep > 0;   // comparator rule only; the live provider is not pre-classified
             bool quietSinceError = !ctx.TimeSinceLastErrorMs.HasValue || ctx.TimeSinceLastErrorMs.Value >= _cfg.RecoveryQuietMs;
             bool recovered = ctx.SuccessfulActionsSinceLastSupportChange >= _cfg.RecoverySuccessesForDecrease
                              && ctx.ErrorsSinceLastSupportChange == 0 && quietSinceError;

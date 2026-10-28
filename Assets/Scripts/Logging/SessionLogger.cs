@@ -599,7 +599,8 @@ namespace AdaptiveAR.Logging
         /// set, how long it took, and which level was actually applied afterwards.
         /// </summary>
         public void LogDecision(DecisionContext context, DecisionResponse response,
-                                SupportLevel levelBefore, SupportLevel levelAfter, bool applied)
+                                SupportLevel levelBefore, SupportLevel levelAfter, bool applied,
+                                System.Collections.Generic.IList<string> allowedActions = null, string appliedAction = null, string constraintApplied = null)
         {
             var w = NewLine(Events.Decision);
 
@@ -626,6 +627,12 @@ namespace AdaptiveAR.Logging
             w.Str("level_after", levelAfter.ToString());
             w.Num("level_after_num", (int)levelAfter);
             w.Bool("applied", applied);
+            // The structural action set at the moment of the decision, the action finally
+            // applied, and which structural constraint (if any) stood between the model's
+            // parsed action and the applied one: null, "boundary_clamp" or "fallback:<status>".
+            w.StrArray("allowed_actions", allowedActions);
+            w.Str("applied_action", appliedAction);
+            w.Str("constraint_applied", constraintApplied);
 
             Write(w);
         }

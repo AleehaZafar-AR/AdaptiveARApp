@@ -116,6 +116,23 @@ namespace AdaptiveAR.Logging
             return this;
         }
 
+        /// <summary>Writes an array of strings (null -> null).</summary>
+        public JsonLineWriter StrArray(string key, System.Collections.Generic.IEnumerable<string> values)
+        {
+            Separator(key);
+            if (values == null) { _sb.Append("null"); return this; }
+            _sb.Append('[');
+            bool first = true;
+            foreach (string v in values)
+            {
+                if (!first) _sb.Append(',');
+                first = false;
+                if (v == null) _sb.Append("null"); else Escape(v);
+            }
+            _sb.Append(']');
+            return this;
+        }
+
         /// <summary>Opens an unkeyed object: an element of the open array.</summary>
         public JsonLineWriter BeginObject()
         {

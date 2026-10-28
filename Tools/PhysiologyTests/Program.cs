@@ -157,7 +157,7 @@ namespace AdaptiveAR.Physiology.Tests
             string recentJson = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(R(2, 40000, 5, 0, 2, null, 20000f, 1));
             Check("17i recent fields in ai_input", recentJson.Contains("\"errors_since_last_support_change\":0") && recentJson.Contains("\"successful_actions_since_last_support_change\":2")
                   && recentJson.Contains("\"time_since_last_error_ms\":null") && recentJson.Contains("\"time_since_last_support_change_ms\":20000"), recentJson);
-            Check("17j prompt states bidirectional rules", sys.Contains("bidirectional") && sys.Contains("DECREASE_SUPPORT") && sys.Contains("exactly one level") && sys.Contains("never decrease on physiology alone") && sys.Contains("recent errors continue"), "");
+            Check("17j prompt states bidirectional rules", sys.Contains("bidirectional") && sys.Contains("DECREASE_SUPPORT") && sys.Contains("exactly one level") && sys.Contains("must never by itself cause a support change") && sys.Contains("recent errors continue"), "");
             var schedAc = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"onActionComplete\":false}"));
             Check("17k action-complete trigger config", new AdaptiveAR.Decision.DecisionScheduleConfig().OnActionComplete && !schedAc.OnActionComplete);
 
@@ -193,19 +193,18 @@ namespace AdaptiveAR.Physiology.Tests
             // 18e recovery evidence still de-escalates, one level at a time
             Step(RR(2, 150000, 6, 11, 0, 2, 2, 40000f, 40000f, 1), "18e recovery at L2 -> L1", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L1_Minimal);
             Step(RR(3, 150000, 9, 14, 0, 2, 2, 40000f, 40000f, 2), "18e2 recovery at L3 -> L2 (never L1)", AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, AdaptiveAR.Support.SupportLevel.L2_Guided);
-            // 18f the LLM contract states the same causal rule
-            Check("18f prompt: cumulative evidence is historical after a change; new difficulty required",
-                  sys.Contains("support_changes_on_step > 0") && sys.Contains("historical") && sys.Contains("must never by themselves justify a further INCREASE_SUPPORT")
-                  && sys.Contains("errors_since_last_support_change > 0") && sys.Contains("attempts_since_last_support_change") && sys.Contains("never INCREASE_SUPPORT"), "");
+            // 18f (v2) the LLM contract hands the model the since-change fields and leaves the interpretation to it: no hard escalation rule in the prompt
+            Check("18f prompt names the since-change fields and no hard escalation rule",
+                  sys.Contains("errors_since_last_support_change") && sys.Contains("attempts_since_last_support_change") && sys.Contains("successful_actions_since_last_support_change")
+                  && !sys.Contains("must never by themselves justify") && !sys.Contains("never INCREASE_SUPPORT"), "");
             // 18g the new field travels in ai_input and replays from a recorded line
             string attJson = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(RR(2, 40000, 5, 8, 0, 3, 2, null, 20000f, 1));
             var attReplay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { "{\"event\":\"decision_context_probe\",\"context\":{\"step_id\":\"s\",\"current_support_level\":\"L2_Guided\",\"support_changes_on_step\":1,\"errors_since_last_support_change\":0,\"attempts_since_last_support_change\":3,\"successful_actions_since_last_support_change\":2}}" });
             Check("18g attempts_since_last_support_change in ai_input and replay", attJson.Contains("\"attempts_since_last_support_change\":3") && attReplay.Count == 1 && attReplay[0].Context.AttemptsSinceLastSupportChange == 3, attJson);
-            // 18h the evidence line states the regime and both evidence sets
+            // 18h the evidence line restates every evidence set without naming a regime or a verdict
             string ev = AdaptiveAR.Decision.DecisionEvidence.Summarise(RR(2, 85000, 6, 9, 0, 3, 2, 25000f, 30000f, 1));
-            Check("18h evidence summary", ev.StartsWith("governs=since_change") && ev.Contains("errors=0 attempts=3 successes=2 last_error_ms=25000 last_change_ms=30000")
-                  && ev.Contains("historical after a change") && ev.Contains("errors_on_step=6") && ev.Contains("elapsed_ratio=1.42") && ev.Contains("physiology=missing"), ev);
-            Check("18h2 evidence before any change says cumulative governs", AdaptiveAR.Decision.DecisionEvidence.Summarise(RR(1, 20000, 2, 3, 2, 3, 0, 1000f, null, 0)).StartsWith("governs=cumulative"));
+            Check("18h evidence summary", ev.StartsWith("cumulative: errors_on_step=6 attempts_on_step=9 step_elapsed_ms=85000 elapsed_ratio=1.42 level=L2_Guided changes_on_step=1; since_change: errors=0 attempts=3 successes=2 last_change_ms=30000; recent(")
+                  && ev.Contains("last_error_ms=25000") && ev.Contains("events: (none)") && ev.Contains("physiology=missing") && !ev.Contains("governs") && !ev.Contains("historical"), ev);
             // 18i the thresholds are config keys, not constants
             var rpCfg = AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").ReferencePolicy;
             var rpOverride = AdaptiveAR.Decision.ReferencePolicyConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"errorsSinceChangeIncrease\":1,\"attemptsSinceChangeIncrease\":2}"));
@@ -311,6 +310,29 @@ namespace AdaptiveAR.Physiology.Tests
               var so = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"minCallIntervalSeconds\":2,\"changeCooldownMs\":5000,\"minEventsPerRequest\":3,\"pendingFlushMs\":4000,\"successOnlyBackoff\":false,\"successOnlyBackoffMax\":4,\"firstDecisionAfterStepMs\":2000}"));
               Check("20k schedule config keys", sc.MinCallIntervalSeconds == 4 && sc.ChangeCooldownMs == 15000 && sc.MinEventsPerRequest == 2 && sc.PendingFlushMs == 8000 && sc.SuccessOnlyBackoff && sc.SuccessOnlyBackoffMax == 8 && sc.FirstDecisionAfterStepMs == 10000
                     && so.MinCallIntervalSeconds == 2 && so.ChangeCooldownMs == 5000 && so.MinEventsPerRequest == 3 && so.PendingFlushMs == 4000 && !so.SuccessOnlyBackoff && so.SuccessOnlyBackoffMax == 4 && so.FirstDecisionAfterStepMs == 2000 && sc.Describe().Contains("changeCooldownMs=15000"), sc.Describe()); }
+
+            // 21 v2 contract: the model interprets; the application supplies evidence and structural constraints only
+            Check("21a prompt: reasoning instruction, model owns the interpretation, temporal fields and events named",
+                  sys.Contains("You are responsible for interpreting whether the operator is currently struggling, recovering or adequately supported")
+                  && sys.Contains("consider the complete task history") && sys.Contains("Prioritise recent performance") && sys.Contains("lose weight when they are followed by sustained successful performance")
+                  && sys.Contains("Recent repeated failures indicate unresolved difficulty") && sys.Contains("could eventually be reduced") && sys.Contains("together with the task events, never on its own")
+                  && sys.Contains("recent_events") && sys.Contains("consecutive_successful_actions") && sys.Contains("time_since_last_success_ms") && sys.Contains("allowed_actions")
+                  && sys.Contains("exactly one of these three tokens"), "");
+            Check("21b allowed_actions are structural (boundaries only)",
+                  string.Join(",", AdaptiveAR.Decision.DecisionConstraints.AllowedActions(AdaptiveAR.Support.SupportLevel.L1_Minimal)) == "KEEP_SUPPORT,INCREASE_SUPPORT"
+                  && string.Join(",", AdaptiveAR.Decision.DecisionConstraints.AllowedActions(AdaptiveAR.Support.SupportLevel.L2_Guided)) == "KEEP_SUPPORT,INCREASE_SUPPORT,DECREASE_SUPPORT"
+                  && string.Join(",", AdaptiveAR.Decision.DecisionConstraints.AllowedActions(AdaptiveAR.Support.SupportLevel.L3_Assisted)) == "KEEP_SUPPORT,DECREASE_SUPPORT");
+            string aiL1 = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(RR(1, 20000, 6, 9, 6, 9, 0, 1500f, null, 0)); string aiL3 = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(RR(3, 20000, 0, 0, 0, 0, 2, null, 30000f, 2));
+            Check("21c ai_input allowed_actions follow the level, never the task state", aiL1.Contains("\"allowed_actions\":[\"KEEP_SUPPORT\",\"INCREASE_SUPPORT\"]") && aiL3.Contains("\"allowed_actions\":[\"KEEP_SUPPORT\",\"DECREASE_SUPPORT\"]"), aiL1);
+            var evCtx = RR(2, 85000, 6, 9, 0, 3, 2, 25000f, 30000f, 1); led.Fill(evCtx, 55000f, 60000f, 12);
+            string ev2 = AdaptiveAR.Decision.DecisionEvidence.Summarise(evCtx);
+            Check("21d evidence carries the temporal features and the ordered events", ev2.Contains("recent(60000ms): errors=4 failed_attempts=4 wrong=1 consecutive_successes=0 errors_since_success=1") && ev2.Contains("events: error@50000ms -> error@43000ms -> support_increase@42000ms -> error@35000ms -> success@25000ms -> success@10000ms -> wrong_component@3000ms -> failed_attempt@1000ms"), ev2);
+            var jw2 = new AdaptiveAR.Logging.JsonLineWriter(); jw2.StrArray("allowed_actions", new[] { "KEEP_SUPPORT", "DECREASE_SUPPORT" }); jw2.StrArray("none", null); jw2.Str("applied_action", "KEEP_SUPPORT");
+            Check("21e JsonLineWriter string arrays", jw2.Build() == "{\"allowed_actions\":[\"KEEP_SUPPORT\",\"DECREASE_SUPPORT\"],\"none\":null,\"applied_action\":\"KEEP_SUPPORT\"}", jw2.Build());
+            Check("21f no deterministic operator classification in the decision assembly",
+                  !System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Scripts", "Decision", "DecisionEvidence.cs")).Contains("SinceChangeGoverns")
+                  && !System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Scripts", "Decision", "TaskEventLedger.cs")).ToLowerInvariant().Contains("struggling =")
+                  && !System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Scripts", "Decision", "RequestGate.cs")).Contains("ReferencePolicy"));
 
             // 16 replay from a recorded decision_context_probe line
             string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";

@@ -1556,6 +1556,11 @@ namespace AdaptiveAR.Steps
 
             bool applied = false;
             string evidence = DecisionEvidence.Summarise(context);
+            // Structural constraints only: the valid action set (enforced by the parser), the
+            // level boundaries, and the fallback for a violation. Nothing about the task state
+            // or physiology removes an action here.
+            System.Collections.Generic.List<string> allowed = DecisionConstraints.AllowedActions(before);
+            string constraintApplied = null;
 
             if (response.Status == ConstraintStatus.Ok && supportLevel != null)
             {
@@ -1565,17 +1570,25 @@ namespace AdaptiveAR.Steps
                 finally { _pendingDecisionEvidence = null; }
 
                 if (saturates)
+                {
                     response.Status = ConstraintStatus.SaturatedAtBoundary;
+                    constraintApplied = "boundary_clamp";
+                }
+            }
+            else if (response.Status != ConstraintStatus.Ok)
+            {
+                constraintApplied = "fallback:" + response.Status;
             }
             // Any non-Ok status leaves the level untouched: KEEP_SUPPORT is the fallback.
 
             SupportLevel after = supportLevel != null ? supportLevel.CurrentLevel : before;
+            string appliedAction = (applied && after != before ? response.ParsedAction : SupportAction.KEEP_SUPPORT).ToString();
 
             LastDecisionResponse = response;
             _decisionIndex++;
 
             if (logger != null)
-                logger.LogDecision(context, response, before, after, applied);
+                logger.LogDecision(context, response, before, after, applied, allowed, appliedAction, constraintApplied);
 
             if (applied && after != before)
                 Debug.Log($"[Decision] {before} -> {after} by {response.ProviderId} ({response.ParsedAction}); evidence: {evidence}" +
