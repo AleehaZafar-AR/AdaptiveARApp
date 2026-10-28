@@ -282,10 +282,34 @@ namespace AdaptiveAR.Steps
         /// As above, with extra ghost keys the validator accepts for this action (both free
         /// bolt/nut positions), so every valid target is visible.
         /// </summary>
+        private bool _introGate;
+
+        /// <summary>
+        /// Step introduction (before Continue): the step's text and level are presented, parts
+        /// are dimmed and not grabbable, and no action ghost, stage ghost or arrow is shown.
+        /// PresentAction lifts the gate and restores the level's arrows with the action.
+        /// </summary>
+        public void PresentStepIntro()
+        {
+            _extraGhostKeys = null;
+            _currentAction = null;
+            _introGate = true;
+            if (_attention != null) _attention.SetRead(true);
+            DeactivateAll(_activatedArrows);
+            ApplyGhosts();
+            if (logPresentation) Debug.Log($"[StepPresenter] step introduction: guidance withheld until Continue ({(_presentedStep != null ? _presentedStep.StepIdentifier : "-")}, {CurrentLevel()}).");
+        }
+
         public void PresentAction(AssemblyAction action, IEnumerable<string> extraGhostKeys)
         {
             _extraGhostKeys = extraGhostKeys != null ? new List<string>(extraGhostKeys).ToArray() : null;
             _currentAction = action;
+
+            if (_introGate)
+            {
+                _introGate = false;
+                if (_presentedStep != null) PresentArrows(_presentedStep, _presentedStep.GetContent(CurrentLevel()));
+            }
 
             // READ state: parts dimmed and not grabbable, no ghost, no arrow. INTERACT state:
             // everything back, ghost up.
@@ -432,6 +456,10 @@ namespace AdaptiveAR.Steps
             if (!_levelShowsGhosts)
                 return;
 
+            // Step introduction: nothing until Continue (synchronised with action activation).
+            if (_introGate)
+                return;
+
             // Reading: the target is not shown until the participant presses Continue.
             if (_currentAction != null && _currentAction.enabled && !_currentAction.RequiresPhysicalValidation)
                 return;
@@ -459,6 +487,7 @@ namespace AdaptiveAR.Steps
 
         private void PresentArrows(StepData step, StepSupportContent content)
         {
+            if (_introGate) return;
             ActivateByKeys(content != null ? content.arrowKeys : null, _activatedArrows);
 
             GameObject[] prefabs = (content != null && HasItems(content.arrowPrefabs))

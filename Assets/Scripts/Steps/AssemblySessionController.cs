@@ -53,6 +53,13 @@ namespace AdaptiveAR.Steps
         [Tooltip("Close the session automatically when the last step is completed.")]
         [SerializeField] private bool endSessionOnComplete = true;
 
+        [Header("Step entry")]
+        [Tooltip("A newly entered step shows its introduction and waits for Continue before its first " +
+                 "physical action becomes active: nothing is armed, parts are dimmed and not grabbable, no " +
+                 "action ghost or arrow is shown and no action audio plays until then. Steps whose first " +
+                 "action is an instruction (READ) already behave this way.")]
+        [SerializeField] private bool gateFirstActionBehindContinue = true;
+
         [Header("Support transition cue")]
         [Tooltip("When an AI decision raises the support level (L1->L2, L2->L3): a short neutral " +
                  "message on the participant card, a soft tone, then the current action's " +
@@ -739,6 +746,10 @@ namespace AdaptiveAR.Steps
         /// </summary>
         private bool RequestAdvance(string requestedBy, string reason)
         {
+            // The step introduction is acknowledged by the same Continue: it activates the
+            // first action and nothing else.
+            if (_stepIntroPending) { EndStepIntro(requestedBy); return true; }
+
             AssemblyAction a = workflow != null ? workflow.CurrentAction : null;
             ActionType type = CurrentActionType;
             string id = a != null ? a.Id : "<none>";
@@ -769,6 +780,7 @@ namespace AdaptiveAR.Steps
             get
             {
                 if (!SessionActive || SequenceFinished || workflow == null) return false;
+                if (_stepIntroPending) return true;                      // the introduction reads like an instruction: Continue shown
                 AssemblyAction a = workflow.CurrentAction;
                 return a != null && a.enabled && !a.RequiresPhysicalValidation;
             }
@@ -1064,7 +1076,16 @@ namespace AdaptiveAR.Steps
             {
                 workflow.SetPhase(WorkflowPhase.Assembly);
                 workflow.EnterStage(index);
-                EnterAction(0);
+                _stepIntroPending = false; _stepIntroActionIndex = -1;
+
+                // Support level is already the step's (StepRunner set it before announcing the
+                // step). The first PHYSICAL/AUTO action waits for Continue; a READ first action is
+                // its own introduction and gates itself.
+                int first = step.NextEnabledActionIndex(0);
+                AssemblyAction firstAction = first >= 0 && step.actions != null && first < step.actions.Count ? step.actions[first] : null;
+                bool gate = gateFirstActionBehindContinue && firstAction != null && firstAction.RequiresPhysicalValidation;
+                if (gate) BeginStepIntro(step, first);
+                else EnterAction(0);
             }
             else if (validator != null)
             {
@@ -1253,6 +1274,36 @@ namespace AdaptiveAR.Steps
         }
 
         private bool _autoCompleted;
+
+        // ---------------- step introduction gate ----------------
+
+        private bool _stepIntroPending;
+        private int _stepIntroActionIndex = -1;
+
+        /// <summary>True between step entry and the Continue press that activates its first action.</summary>
+        public bool StepIntroPending { get { return _stepIntroPending; } }
+
+        private void BeginStepIntro(StepData stage, int firstActionIndex)
+        {
+            _stepIntroPending = true;
+            _stepIntroActionIndex = firstActionIndex;
+            _currentActionArmed = false;
+            try { if (validator != null) validator.Clear(); } catch (Exception e) { Debug.LogError("[Session] validator.Clear threw at step intro: " + e); }
+            try { if (presenter != null) presenter.PresentStepIntro(); } catch (Exception e) { Debug.LogError("[Session] presenter.PresentStepIntro threw: " + e); }
+            if (logger != null) logger.LogNote("step_intro_enter:" + stage.StepIdentifier);
+            Debug.Log($"[Session] step '{stage.StepIdentifier}' introduced at {(supportLevel != null ? supportLevel.CurrentLevel.ToString() : "?")}: first action #{firstActionIndex} waits for Continue.");
+        }
+
+        private void EndStepIntro(string requestedBy)
+        {
+            _stepIntroPending = false;
+            int index = _stepIntroActionIndex;
+            _stepIntroActionIndex = -1;
+            if (logger != null) logger.LogNote("step_intro_continue:" + (_currentStep != null ? _currentStep.StepIdentifier : "") + ":" + requestedBy);
+            Debug.Log($"[Progression] step intro acknowledged by {requestedBy}: entering action #{index}.");
+            EnterAction(index);
+            RaiseStateChanged();
+        }
 
         private int CountBoundKits()
         {
