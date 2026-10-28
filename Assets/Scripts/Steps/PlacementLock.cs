@@ -52,8 +52,17 @@ namespace AdaptiveAR.Steps
             {
                 if (_repositionable == value) return;
                 _repositionable = value;
-                if (isLocked && disableInteraction) SetInteractionEnabled(!value ? false : true);
-                if (!value && isLocked) { RefreshLockedPose(); FreezeBody(); }
+                if (!value && isLocked)
+                {
+                    // Installing a repositionable subassembly: same capture / release / restore order as Lock().
+                    _body = GetComponent<Rigidbody>();
+                    Vector3 pos = transform.position; Quaternion rot = transform.rotation; Vector3 scale = transform.localScale; Transform parent = transform.parent;
+                    if (disableInteraction) SetInteractionEnabled(false);
+                    RestoreAccepted("Repositionable=OFF", parent, pos, rot, scale);
+                    FreezeBody();
+                    RefreshLockedPose();
+                }
+                else if (isLocked && disableInteraction) SetInteractionEnabled(true);
                 PartWatch.Log(value ? "PlacementLock.Repositionable=ON" : "PlacementLock.Repositionable=OFF", transform);
             }
         }
@@ -101,11 +110,20 @@ namespace AdaptiveAR.Steps
             if (isLocked) return;
             isLocked = true;
             _corrections = 0;
-
-            RefreshLockedPose();
-
             _body = GetComponent<Rigidbody>();
-            FreezeBody();
+
+            // ORDER MATTERS. The accepted pose is captured first. Releasing the SDK's grab
+            // (disabling the interactables and the Grabbable) runs the SDK's release cascade
+            // synchronously: every selecting point is cancelled, the interactors unselect, the
+            // kinematic locker restores the pre-grab (dynamic) body state and the throw logic
+            // writes velocities. On a Quest run (2026-10-28) that cascade left the crankshaft
+            // and a connecting rod at a non-finite position - active, rendered, invisible -
+            // because the lock used to freeze and capture BEFORE the cascade and then enforce
+            // what the cascade had changed. Now: capture, release, restore, freeze, capture.
+            Vector3 acceptedPos = transform.position;
+            Quaternion acceptedRot = transform.rotation;
+            Vector3 acceptedScale = transform.localScale;
+            Transform acceptedParent = transform.parent;
 
             if (collidersToTriggers)
             {
@@ -116,7 +134,57 @@ namespace AdaptiveAR.Steps
             if (disableInteraction && !_repositionable && !ForwardedToHandle)
                 SetInteractionEnabled(false);
 
-            PartWatch.Log("PlacementLock.Lock", transform);
+            RestoreAccepted("Lock", acceptedParent, acceptedPos, acceptedRot, acceptedScale);
+            FreezeBody();
+            RefreshLockedPose();
+
+            PartWatch.Log("PlacementLock.Lock", transform, _repositionable ? "repositionable (interaction kept)" : (ForwardedToHandle ? "forwarded (interaction kept)" : "interaction released"));
+        }
+
+        /// <summary>True while an SDK interactor selects this part (the part is in a hand).</summary>
+        public bool IsHeld { get { return IsHeldNow(); } }
+
+        private static bool Finite(Vector3 v) { return !(float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z) || float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z)); }
+        private static bool Finite(Quaternion q) { return !(float.IsNaN(q.x) || float.IsNaN(q.y) || float.IsNaN(q.z) || float.IsNaN(q.w)) && (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 1e-6f; }
+
+        /// <summary>
+        /// Puts the part back exactly where it was accepted, whatever the release cascade did
+        /// to it (late Move/Unselect, throw velocity, kinematic restore, a non-finite write),
+        /// and reports loudly when that was necessary.
+        /// </summary>
+        private void RestoreAccepted(string phase, Transform parent, Vector3 pos, Quaternion rot, Vector3 scale)
+        {
+            if (!Finite(pos) || !Finite(rot))
+            {
+                Debug.LogError($"[PlacementLock] '{name}' {phase}: the ACCEPTED pose was already non-finite (pos={pos}, rot={rot}); keeping the current transform.");
+                return;
+            }
+            bool parentChanged = transform.parent != parent;
+            bool moved = !Finite(transform.position) || !Finite(transform.rotation)
+                         || (transform.position - pos).sqrMagnitude > 1e-8f || Quaternion.Angle(transform.rotation, rot) > 0.01f
+                         || (transform.localScale - scale).sqrMagnitude > 1e-8f;
+            if (parentChanged) transform.SetParent(parent, false);
+            if (moved || parentChanged)
+            {
+                if (_body != null)
+                {
+                    bool wasKinematic = _body.isKinematic;
+                    _body.isKinematic = true;                 // position/rotation writes on a dynamic body are deferred to the physics step
+                    _body.linearVelocity = Vector3.zero; _body.angularVelocity = Vector3.zero;
+                    transform.SetPositionAndRotation(pos, rot);
+                    transform.localScale = scale;
+                    _body.position = pos; _body.rotation = rot;
+                    if (!freezePhysics) _body.isKinematic = wasKinematic;
+                }
+                else
+                {
+                    transform.SetPositionAndRotation(pos, rot);
+                    transform.localScale = scale;
+                }
+                Debug.LogError($"[PlacementLock] '{name}' {phase}: the release cascade changed the transform after acceptance " +
+                               $"(parentChanged={parentChanged}, nowFinite={Finite(transform.position)}) - restored to the accepted pose {pos}.");
+                PartWatch.Log("PlacementLock." + phase + "(restored after release)", transform, null);
+            }
         }
 
         public void Unlock()
@@ -134,9 +202,16 @@ namespace AdaptiveAR.Steps
             PartWatch.Log("PlacementLock.Unlock", transform);
         }
 
-        /// <summary>Re-reads the pose the lock holds, in LOCAL space of the current parent.</summary>
+        /// <summary>Re-reads the pose the lock holds, in LOCAL space of the current parent. A non-finite pose is never adopted.</summary>
         public void RefreshLockedPose()
         {
+            if (!Finite(transform.localPosition) || !Finite(transform.localRotation))
+            {
+                Debug.LogError($"[PlacementLock] '{name}' refused to adopt a non-finite pose (localPos={transform.localPosition}); keeping the previous locked pose.");
+                if (_lockedParent == transform.parent && Finite(_lockedLocalPosition) && Finite(_lockedLocalRotation))
+                { transform.localPosition = _lockedLocalPosition; transform.localRotation = _lockedLocalRotation; }
+                return;
+            }
             _lockedParent = transform.parent;
             _lockedLocalPosition = transform.localPosition;
             _lockedLocalRotation = transform.localRotation;
@@ -201,12 +276,20 @@ namespace AdaptiveAR.Steps
                 return;
             }
 
-            bool moved = (transform.localPosition - _lockedLocalPosition).sqrMagnitude > 1e-10f
+            bool nonFinite = !Finite(transform.localPosition) || !Finite(transform.localRotation);
+            bool moved = nonFinite
+                         || (transform.localPosition - _lockedLocalPosition).sqrMagnitude > 1e-10f
                          || Quaternion.Angle(transform.localRotation, _lockedLocalRotation) > 0.01f;
             if (moved)
             {
                 transform.localPosition = _lockedLocalPosition;
                 transform.localRotation = _lockedLocalRotation;
+                if (_body != null) { _body.position = transform.position; _body.rotation = transform.rotation; }
+                if (nonFinite)
+                {
+                    Debug.LogError($"[PlacementLock] '{name}' had a NON-FINITE transform in {phase} (a late SDK release/move after the lock) - restored.");
+                    PartWatch.Log("PlacementLock.Enforce(non-finite restored)", transform, phase);
+                }
             }
 
             if ((fixedBody || moved) && logCorrections && _corrections < 20)

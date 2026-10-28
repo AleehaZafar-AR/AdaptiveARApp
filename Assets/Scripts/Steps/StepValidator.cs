@@ -2534,7 +2534,11 @@ namespace AdaptiveAR.Steps
                     Debug.LogError($"{tag} the placed part had been RE-PARENTED to '{part.parent.name}' - returned under '{expectedParent.name}'.");
                     PartWatch.Reparent("WatchPlacedPart(return)", part, expectedParent, false, "unexpected parent");
                 }
-                if (part.parent == expectedParent)
+                // A repositionable lock (the loose subassembly on the mat) lets the hand own the
+                // pose while it is held and re-locks on release; restoring the snap pose every
+                // frame against that hand is a fight, not a guard. Yield while held.
+                bool heldByDesign = padlock != null && padlock.IsLocked && padlock.Repositionable && padlock.IsHeld;
+                if (part.parent == expectedParent && !heldByDesign)
                 {
                     float drift = Vector3.Distance(part.localPosition, lockedLocalPos);
                     if (drift > 0.02f / Mathf.Max(0.001f, part.parent != null ? part.parent.lossyScale.x : 1f) || Quaternion.Angle(part.localRotation, lockedLocalRot) > 3f)
