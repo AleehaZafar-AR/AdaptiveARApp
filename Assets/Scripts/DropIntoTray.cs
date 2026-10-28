@@ -401,6 +401,7 @@ public class DropIntoTray : MonoBehaviour
         transform.localRotation = authoredLocalRotation;
 
         recoveryCount++;
+        AdaptiveAR.Steps.PartWatch.Log("DropIntoTray.Recover(after)", transform, "recovery #" + recoveryCount);
 
         // Let it settle naturally the first few times. If it keeps escaping there is a real
         // gap in the colliders, so freeze it rather than loop forever.

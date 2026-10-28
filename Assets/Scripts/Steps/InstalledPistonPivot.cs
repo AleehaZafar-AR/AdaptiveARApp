@@ -75,7 +75,7 @@ namespace AdaptiveAR.Steps
             };
             pivot._grabbable.InjectOptionalOneGrabTransformer(rot);
 
-            head.SetParent(go.transform, true);
+            PartWatch.Reparent("PistonPivot.Create(head)", head, go.transform, true, kit);
             var headLock = head.GetComponent<PlacementLock>();
             if (headLock != null) { headLock.RefreshLockedPose(); headLock.ForwardedToHandle = true; }
             if (ghostGroup != null) ghostGroup.SetParent(go.transform, true);
@@ -138,6 +138,7 @@ namespace AdaptiveAR.Steps
         public void ForwardSubassemblyGrabs(Transform root)
         {
             if (Locked || _grabbable == null || root == null) return;
+            PartWatch.Log("PistonPivot.ForwardSubassemblyGrabs", root, Kit);
             foreach (var h in root.GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
             { h.InjectOptionalPointableElement(_grabbable); h.enabled = true; if (!_forwarded.Contains(h)) _forwarded.Add(h); }
             foreach (var g in root.GetComponentsInChildren<Oculus.Interaction.GrabInteractable>(true))

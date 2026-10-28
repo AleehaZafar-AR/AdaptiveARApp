@@ -90,6 +90,9 @@ namespace AdaptiveAR.Logging
 
             // --- participant-facing cue after an applied upward AI support change (message, tone, instruction replay) ---
             public const string SupportTransitionCue = "support_transition_cue";
+
+            // --- diagnostic snapshot of a part at a snap / lock / join / hand-over / guard event (PartWatch) ---
+            public const string PartLifecycle = "part_lifecycle";
         }
 
         /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
@@ -688,6 +691,33 @@ namespace AdaptiveAR.Logging
             w.Str("tone", tone);
             w.Str("instruction_replay", replay);
             w.Num("decision_index", decisionIndex);
+            Write(w);
+        }
+
+        /// <summary>
+        /// Part snapshot at a lifecycle event. parent_before is written only when the event
+        /// changed the parent; renderers_on / renderers_total cover the part's whole subtree.
+        /// </summary>
+        public void LogPartLifecycle(string where, string partName, int instanceId, bool activeSelf, bool activeInHierarchy,
+                                     int renderersOn, int renderersTotal, string parent, string parentBefore, string parentName,
+                                     Vector3 worldPos, string kinematic, string note)
+        {
+            var w = NewLine(Events.PartLifecycle);
+            w.Str("where", where);
+            w.Str("part", partName);
+            w.Num("instance_id", instanceId);
+            w.Str("action_id", _actionId);
+            w.Bool("active_self", activeSelf);
+            w.Bool("active_in_hierarchy", activeInHierarchy);
+            w.Num("renderers_on", renderersOn);
+            w.Num("renderers_total", renderersTotal);
+            w.Str("parent", parent);
+            w.Str("parent_before", parentBefore);
+            w.Num("world_x_m", worldPos.x);
+            w.Num("world_y_m", worldPos.y);
+            w.Num("world_z_m", worldPos.z);
+            w.Str("kinematic", kinematic);
+            w.Str("note", note);
             Write(w);
         }
 

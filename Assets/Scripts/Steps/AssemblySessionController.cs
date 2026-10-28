@@ -419,6 +419,8 @@ namespace AdaptiveAR.Steps
 
         private void OnEnable()
         {
+            PartWatch.Logger = logger;   // part_lifecycle lines go into the session JSONL beside the decision data
+
             if (stepRunner != null)
             {
                 stepRunner.OnStepChanged += HandleStepChanged;

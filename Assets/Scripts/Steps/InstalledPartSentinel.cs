@@ -115,6 +115,7 @@ namespace AdaptiveAR.Steps
             if (Quiet || !Application.isPlaying) return;
             string who = InactiveAncestor();
             Debug.LogError($"[HolderHideAttempt] object={name}#{gameObject.GetInstanceID()} caller=OnDisable blocked=false {Tag} DEACTIVATED (activeSelf={gameObject.activeSelf}, inactive={who}) - re-activating next frame. Stack:\n{Environment.StackTrace}");
+            PartWatch.Log("Sentinel.OnDisable", transform, "inactive ancestor " + who);
             if (Application.isPlaying) EnsureRunner().StartCoroutine(Reactivate(who));
         }
 
@@ -129,11 +130,13 @@ namespace AdaptiveAR.Steps
                 if (!t.gameObject.activeSelf) { t.gameObject.SetActive(true); _restores++; Debug.LogError($"{Tag} re-activated '{t.name}' (it had been switched off: {who})."); }
                 t = t.parent;
             }
+            PartWatch.Log("Sentinel.Reactivate(after)", transform, who);
         }
 
         private void OnTransformParentChanged()
         {
             Debug.LogError($"{Tag} RE-PARENTED '{name}' to '{(transform.parent != null ? transform.parent.name : "<root>")}'. Stack:\n{Environment.StackTrace}");
+            PartWatch.Log("Sentinel.OnTransformParentChanged", transform, null);
         }
 
         private void OnBecameInvisible()
@@ -149,16 +152,19 @@ namespace AdaptiveAR.Steps
         {
             if (_renderers == null) return;
             foreach (Renderer r in _renderers)
-                if (r != null && !r.enabled) { r.enabled = true; _restores++; Debug.LogError($"{Tag} renderer '{r.name}' had been DISABLED - re-enabled."); }
+                if (r != null && !r.enabled) { PartWatch.Log("Sentinel.Update(renderer off)", transform, r.name); r.enabled = true; _restores++; Debug.LogError($"{Tag} renderer '{r.name}' had been DISABLED - re-enabled."); }
             if (transform.localScale.sqrMagnitude < _localScale.sqrMagnitude * 0.25f)
-            { transform.localScale = _localScale; _restores++; Debug.LogError($"{Tag} scale had COLLAPSED - restored."); }
+            { PartWatch.Log("Sentinel.Update(scale collapsed)", transform, null); transform.localScale = _localScale; _restores++; Debug.LogError($"{Tag} scale had COLLAPSED - restored."); }
         }
 
         private void OnDestroy()
         {
             _all.Remove(this);
             if (!Quiet && Application.isPlaying && gameObject.scene.isLoaded)
+            {
                 Debug.LogError($"{Tag} '{name}' DESTROYED. Stack:\n{Environment.StackTrace}");
+                PartWatch.Gone("Sentinel.OnDestroy", name + "#" + gameObject.GetInstanceID(), Tag);
+            }
         }
     }
 }

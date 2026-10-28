@@ -2340,7 +2340,7 @@ namespace AdaptiveAR.Steps
             bool snapped = false, locked = false;
             PlacementLock padlock = null;
 
-            PartWatch.Log("Succeed(before snap)", _active.tf);
+            PartWatch.Log("Succeed(before snap)", _active.tf, _active.key);
             try
             {
                 SnapToTarget(_active);
@@ -2362,7 +2362,7 @@ namespace AdaptiveAR.Steps
                 locked = padlock.IsLocked;
             }
             catch (Exception e) { Debug.LogError($"{tag} lock threw: {e}"); }
-            PartWatch.Log("Succeed(after lock)", _active.tf);
+            PartWatch.Log("Succeed(after lock)", _active.tf, $"{_active.key} snapped={snapped} locked={locked}");
 
             try
             {
@@ -2377,7 +2377,7 @@ namespace AdaptiveAR.Steps
                 ReturnPistonIfComplete();
             }
             catch (Exception e) { Debug.LogError($"{tag} join threw: {e}"); }
-            PartWatch.Log("Succeed(after join)", _active.tf);
+            PartWatch.Log("Succeed(after join)", _active.tf, _active.key);
 
             // Collisions with the assembly stay ignored for this part: it lives inside it now.
             _assistFor = null;
@@ -2500,7 +2500,7 @@ namespace AdaptiveAR.Steps
             bool handleMovedLogged = false;
             while (Time.time - start <= guardSeconds + 0.05f)
             {
-                if (part == null) { Debug.LogError($"{tag} the placed part was DESTROYED."); yield break; }
+                if (part == null) { Debug.LogError($"{tag} the placed part was DESTROYED."); PartWatch.Gone("WatchPlacedPart", tag, "destroyed"); yield break; }
                 var padlock = part.GetComponent<PlacementLock>();
                 var body = part.GetComponent<Rigidbody>();
 
@@ -2517,20 +2517,22 @@ namespace AdaptiveAR.Steps
                     }
                     Debug.LogError($"{tag} the kit handle '{handle.name}' MOVED {Vector3.Distance(handle.position, handleStart) * 100f:F1} cm since success " +
                                    $"(subassembly carried away) selectedBy=[{string.Join(", ", holders)}] handleLock={(handle.GetComponent<PlacementLock>() != null ? (handle.GetComponent<PlacementLock>().Repositionable ? "repositionable" : "fixed") : "none")}");
+                    PartWatch.Log("WatchPlacedPart(handle moved)", handle, $"{Vector3.Distance(handle.position, handleStart) * 100f:F1} cm; selectedBy=[{string.Join(", ", holders)}]");
                 }
 
                 // --- guard ---
                 if (!part.gameObject.activeSelf)
                 {
                     Debug.LogError($"{tag} the placed part had been DEACTIVATED (SetActive(false) by someone) - re-activated.");
+                    PartWatch.Log("WatchPlacedPart(deactivated)", part, "re-activating");
                     part.gameObject.SetActive(true);
                 }
                 foreach (Renderer rr in renderers)
-                    if (rr != null && !rr.enabled) { Debug.LogError($"{tag} renderer '{rr.name}' had been DISABLED - re-enabled."); rr.enabled = true; }
+                    if (rr != null && !rr.enabled) { Debug.LogError($"{tag} renderer '{rr.name}' had been DISABLED - re-enabled."); PartWatch.Log("WatchPlacedPart(renderer off)", part, rr.name); rr.enabled = true; }
                 if (expectedParent != null && part.parent != expectedParent && part.parent != null && !part.IsChildOf(expectedParent))
                 {
                     Debug.LogError($"{tag} the placed part had been RE-PARENTED to '{part.parent.name}' - returned under '{expectedParent.name}'.");
-                    part.SetParent(expectedParent, false);
+                    PartWatch.Reparent("WatchPlacedPart(return)", part, expectedParent, false, "unexpected parent");
                 }
                 if (part.parent == expectedParent)
                 {
@@ -2538,6 +2540,7 @@ namespace AdaptiveAR.Steps
                     if (drift > 0.02f / Mathf.Max(0.001f, part.parent != null ? part.parent.lossyScale.x : 1f) || Quaternion.Angle(part.localRotation, lockedLocalRot) > 3f)
                     {
                         Debug.LogError($"{tag} the placed part had MOVED {Vector3.Distance(part.position, snapPos) * 100f:F1} cm from its snap pose (kinematic={(body != null ? body.isKinematic.ToString() : "n/a")}) - restored.");
+                        PartWatch.Log("WatchPlacedPart(moved)", part, $"{Vector3.Distance(part.position, snapPos) * 100f:F1} cm from snap; restoring");
                         part.localPosition = lockedLocalPos; part.localRotation = lockedLocalRot; part.localScale = lockedLocalScale;
                         if (body != null) { body.isKinematic = true; body.linearVelocity = Vector3.zero; body.angularVelocity = Vector3.zero; }
                         if (padlock != null) padlock.RefreshLockedPose();
@@ -2606,7 +2609,7 @@ namespace AdaptiveAR.Steps
             if (!guidanceRegistry.TryGetKitHandle(kit, out Transform handle) || handle == null) return;
             if (handle == c.tf || c.tf.IsChildOf(handle)) return;
 
-            c.tf.SetParent(handle, true);
+            PartWatch.Reparent("BindAndJoin", c.tf, handle, true, c.key);
             ForwardGrabsToHandle(c.tf, handle);
             if (!c.tf.gameObject.activeSelf)
             {
@@ -2723,6 +2726,23 @@ namespace AdaptiveAR.Steps
             yield return WaitForHandsWithdrawn(child, handleGrabbable, PlacedTagFor(child));
             if (child == null || handle == null || handleGrabbable == null) yield break;
 
+            // The subassembly may have been INSTALLED while this hand-over was still waiting
+            // (part joined, lifted and fitted to the crankshaft before the hand withdrew 12 cm).
+            // Pointing the joined part's grabs at the head's free Grabbable now would override
+            // the pivot forwarding done at installation: the next grab on the rod or pin would
+            // drag the whole installed piston off the crankshaft. Re-check and route correctly.
+            if (handleLock != null && handleLock.IsLocked && !handleLock.Repositionable)
+            {
+                handleLock.RepositionSuspended = false;
+                var pivot = handle.GetComponentInParent<InstalledPistonPivot>();
+                string route;
+                if (pivot != null && !pivot.Locked) { pivot.ForwardSubassemblyGrabs(child); route = "forwarded to the installed piston's pivot"; }
+                else route = "kept fully locked (no pivot" + (pivot != null ? ", pivot locked" : "") + ")";
+                Debug.Log($"[StepValidator] '{child.name}' hand-over completed AFTER '{handle.name}' was installed: {route} instead of the head's free Grabbable.");
+                PartWatch.Log("ForwardWhenHandsOpen(post-install)", child, route);
+                yield break;
+            }
+
             int n = 0;
             foreach (var hgi in child.GetComponentsInChildren<Oculus.Interaction.HandGrab.HandGrabInteractable>(true))
             { hgi.InjectOptionalPointableElement(handleGrabbable); hgi.enabled = true; n++; }
@@ -2734,6 +2754,7 @@ namespace AdaptiveAR.Steps
             if (handleLock != null) handleLock.RepositionSuspended = false;
             GrabParity.ReassertBroadcasters(child.gameObject, "forwarded to handle", false);
             if (logEvaluations) Debug.Log($"[StepValidator] '{child.name}' joined: hands open, {n} grab interactable(s) now move the subassembly via '{handle.name}'.");
+            PartWatch.Log("ForwardWhenHandsOpen(loose)", child, $"{n} grab(s) -> '{handle.name}'");
         }
 
         // =====================================================================

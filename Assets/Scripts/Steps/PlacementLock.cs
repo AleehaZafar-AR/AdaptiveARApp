@@ -191,10 +191,13 @@ namespace AdaptiveAR.Steps
                 fixedBody = true;
             }
 
-            // A re-parent done by the assembly join is legitimate: adopt it.
+            // A re-parent done by the assembly join is legitimate: adopt it (and record it:
+            // a stray SetParent from anywhere becomes permanent here).
             if (transform.parent != _lockedParent)
             {
+                string was = _lockedParent != null ? _lockedParent.name + "#" + _lockedParent.GetInstanceID() : "<root>";
                 RefreshLockedPose();
+                PartWatch.Log("PlacementLock.Enforce(adopted new parent)", transform, "was " + was);
                 return;
             }
 
@@ -250,19 +253,64 @@ namespace AdaptiveAR.Steps
     /// Diagnostic snapshot of a real part's visibility and hierarchy, written at every
     /// mutation point on the success path. Remove or silence once the Quest run is clean.
     /// </summary>
+    /// <summary>
+    /// Snapshot of a part at every snap / lock / join / hand-over / guard event, to logcat
+    /// ([PartWatch]) and, when a session logger is attached, to the session JSONL as
+    /// part_lifecycle lines. One device reproduction of a "vanished" part then shows the
+    /// last event at which it was still active, rendered, correctly parented and in place.
+    /// </summary>
     public static class PartWatch
     {
         public static bool Enabled = true;
 
-        public static void Log(string where, Transform t)
+        /// <summary>Set by AssemblySessionController; null = logcat only.</summary>
+        public static AdaptiveAR.Logging.SessionLogger Logger;
+
+        public static void Log(string where, Transform t) { Log(where, t, null); }
+
+        public static void Log(string where, Transform t, string note)
         {
-            if (!Enabled || t == null) return;
-            var r = t.GetComponentInChildren<Renderer>(true);
+            if (!Enabled) return;
+            if (t == null) { Gone(where, "<null>", note); return; }
+            Emit(where, t, ParentName(t.parent), note);
+        }
+
+        /// <summary>Re-parents and records parent-before / parent-after in one line.</summary>
+        public static void Reparent(string where, Transform t, Transform newParent, bool worldPositionStays, string note)
+        {
+            if (t == null) return;
+            string before = ParentName(t.parent);
+            t.SetParent(newParent, worldPositionStays);
+            if (!Enabled) return;
+            Emit(where, t, before, note);
+        }
+
+        /// <summary>The part no longer exists (destroyed) or was never found.</summary>
+        public static void Gone(string where, string name, string note)
+        {
+            if (!Enabled) return;
+            Debug.LogError($"[PartWatch] {where}: '{name}' GONE (destroyed or null) {note}");
+            var l = Logger;
+            if (l != null) l.LogPartLifecycle(where, name, 0, false, false, 0, 0, null, null, null, Vector3.zero, null, "gone: " + (note ?? ""));
+        }
+
+        private static string ParentName(Transform p) { return p != null ? p.name + "#" + p.GetInstanceID() : "<root>"; }
+
+        private static void Emit(string where, Transform t, string parentBefore, string note)
+        {
+            int on = 0, total = 0;
+            foreach (Renderer r in t.GetComponentsInChildren<Renderer>(true)) { total++; if (r != null && r.enabled) on++; }
             var rb = t.GetComponent<Rigidbody>();
+            string parentNow = ParentName(t.parent);
+            string kin = rb != null ? rb.isKinematic.ToString() : "n/a";
             Debug.Log($"[PartWatch] {where}: '{t.name}'#{t.GetInstanceID()} activeSelf={t.gameObject.activeSelf} " +
-                      $"activeInHierarchy={t.gameObject.activeInHierarchy} renderer={(r != null ? r.enabled.ToString() : "none")} " +
-                      $"parent={(t.parent != null ? t.parent.name : "<root>")} pos={t.position} rot={t.rotation.eulerAngles} " +
-                      $"kinematic={(rb != null ? rb.isKinematic.ToString() : "n/a")}");
+                      $"activeInHierarchy={t.gameObject.activeInHierarchy} renderers={on}/{total} " +
+                      $"parent={parentNow}{(parentBefore != parentNow ? " (was " + parentBefore + ")" : "")} pos={t.position} rot={t.rotation.eulerAngles} " +
+                      $"scale={t.lossyScale.x:F3} kinematic={kin}{(note != null ? " note=" + note : "")}");
+            var l = Logger;
+            if (l != null)
+                l.LogPartLifecycle(where, t.name, t.GetInstanceID(), t.gameObject.activeSelf, t.gameObject.activeInHierarchy, on, total,
+                                   parentNow, parentBefore != parentNow ? parentBefore : null, t.parent != null ? t.parent.name : null, t.position, kin, note);
         }
     }
 }
