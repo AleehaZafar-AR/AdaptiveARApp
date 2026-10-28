@@ -15,7 +15,6 @@
     "endpoint": "https://api.anthropic.com/v1/messages",
     "apiVersion": "2023-06-01",
     "maxTokens": 64,
-    "temperature": 0,
     "timeoutMs": 8000,
     "systemPrompt": null
   },

@@ -17,7 +17,7 @@ Status 2026-10-27: implemented on branch `hrv-integration`; compiles; headless t
 | `Assets/Scripts/Decision/LlmDecisionCore.cs` | prompt + request building (the exact AI input), strict response parsing — shared by headset and harness |
 | `Assets/Scripts/Decision/LlmDecisionProvider.cs` | Unity transport (UnityWebRequest coroutine), `IAsyncDecisionProvider` |
 | `Assets/Scripts/Decision/DecisionConfig.cs` | `decision_config.json` model; `SecretStore` (key file reader, fingerprint only) |
-| `Assets/Scripts/Decision/DecisionScheduler.cs` | when to request (action entry / counted error / periodic, min interval, min time on step); owns the provider; HUD row; `DecisionBootstrap` creates it |
+| `Assets/Scripts/Decision/DecisionScheduler.cs` | when to request (action entry / counted error / periodic, min interval, min time on step); owns the provider; `DecisionBootstrap` creates it. `ResearcherHud` reads its `Status` / `ProviderDisplayName` / `LastResponse` |
 | `Assets/Scripts/Decision/Evaluation/*` | `ScenarioGenerator` (seeded synthetic grid + noise / missing / adversarial perturbations), `ContextJsonl` (replay recorded contexts), `EvaluationRunner` (metrics + outputs) |
 | `Tools/DecisionEval/` | headless console runner (HttpClient transport) |
 | `Tools/PhysiologyTests/` | headless tests incl. policy rules, parser strictness, generator determinism, harness metrics, replay |
@@ -30,7 +30,7 @@ Status 2026-10-27: implemented on branch `hrv-integration`; compiles; headless t
 
 - `enabled`, `provider`: `llm` | `reference` | `none`
 - `schedule`: `onActionEnter`, `onCountedError`, `periodicSeconds` (0 = off), `minIntervalSeconds`, `firstDecisionAfterStepMs`
-- `llm`: `provider` (anthropic), `model`, `endpoint`, `apiVersion`, `maxTokens`, `temperature` (0 for consistency), `timeoutMs`, `systemPrompt` (null = built-in)
+- `llm`: `provider` (anthropic), `model`, `endpoint`, `apiVersion`, `maxTokens`, `timeoutMs`, `systemPrompt` (null = built-in). No sampling parameters are sent: `temperature` is rejected by `claude-sonnet-5-5` (HTTP 400, found on the 2026-10-27 Quest run) and the request builder never emits it; a `temperature` key in a config file is ignored.
 - `referencePolicy`: `name`, `slowRatioIncrease`, `errorsOnStepIncrease`, `attemptsOnStepIncrease`, `fastRatioDecrease`, `minStepElapsedMsForIncrease`, `minStepElapsedMsForDecrease`, `clampAtBoundaries`, `fallbackExpectedMs` — **placeholders pending the literature review**; the `name` is written into every decision and evaluation output.
 
 **API key** (never in git, never logged):
@@ -63,6 +63,6 @@ Smoke results: reference policy against itself: consistency 100 %, agreement 100
 
 ## Not done / next
 
-- A Quest run with the key: `decision_config` → `decision_trigger` → `decision` lines with `provider_id=anthropic:…`, HUD row `AI llm … KEEP_SUPPORT Ok 800ms`.
+- A Quest run with the key: `decision_config` → `decision_trigger` → `decision` lines with `provider_id=anthropic:…`, Research Panel row `AI  Claude Sonnet 5.5 | KEEP_SUPPORT | Ok | 800 ms`.
 - The reference-policy numbers from the literature review (replace `placeholder_v0`).
 - Run the full evaluation with the model and keep the `eval_out` folders with the dissertation data.

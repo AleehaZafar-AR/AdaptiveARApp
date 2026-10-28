@@ -1,9 +1,9 @@
 // File: StatusHud.cs
 // Drives the existing StatusCanvas, which was laid out but had no script behind it.
 //
-// This is also the on-device state readout CLAUDE.md 4.3 asks for: step, support
-// level, elapsed time, errors and progress, all visible in the headset without a
-// cable or the Editor.
+// Participant-facing only: stage, elapsed time, errors, attempts and progress.
+// Support level, physiology and the decision layer are research instrumentation
+// and live on the ResearcherHud (the CLAUDE.md 4.3 readout), never here.
 //
 // Every field is optional. Leave one unassigned and that part of the HUD is simply
 // skipped, so the same component works against a partially wired canvas.
@@ -60,16 +60,14 @@ namespace AdaptiveAR.UI
         [SerializeField] private float refreshInterval = 0.1f;
 
         private float _timer;
-        private TextMeshProUGUI _stepValue, _levelValue, _attemptsValue, _elapsedValue, _physioValue, _aiValue;
-        private string _physioText = "no source";
-        private string _aiText = "AI off";
+        private TextMeshProUGUI _stepValue, _attemptsValue;
         private bool _resolved;
 
         /// <summary>
         /// The StatusCanvas was laid out by hand and some of its value fields were never
         /// wired (ErrorValue - the "Placement Retries" that never updated). Resolve every
         /// field by name under the panel, retitle the labels for the discrete attempt/error
-        /// model, and add the two rows the panel has room for (support level, attempts).
+        /// model, and add the one extra participant row (attempts this step).
         /// </summary>
         private void ResolveFields()
         {
@@ -90,18 +88,11 @@ namespace AdaptiveAR.UI
             var timeLabel = T("TimeLabel");       if (timeLabel != null) timeLabel.text = "ELAPSED TIME  (total / step)";
             var errorLabel = T("ErrorLabel");     if (errorLabel != null) errorLabel.text = "TOTAL ERRORS";
 
-            // Two more rows below the errors, cloned from the error row so they match.
+            // One more row below the errors, cloned from the error row so they match.
             var errorValueRt = errorValueText != null ? errorValueText.rectTransform : null;
             if (errorLabel != null && errorValueRt != null)
-            {
-                _levelValue = CloneRow(panel, errorLabel, errorValueText, "SUPPORT LEVEL", 64f);
-                _attemptsValue = CloneRow(panel, errorLabel, errorValueText, "ATTEMPTS THIS STEP", 128f);
-                _physioValue = CloneRow(panel, errorLabel, errorValueText, "PHYSIOLOGY (BLE / HR / PPI / RMSSD)", 192f);
-                if (_physioValue != null) { _physioValue.fontSize = _physioValue.fontSize * 0.8f; _physioValue.text = _physioText; }
-                _aiValue = CloneRow(panel, errorLabel, errorValueText, "DECISION LAYER", 256f);
-                if (_aiValue != null) { _aiValue.fontSize = _aiValue.fontSize * 0.8f; _aiValue.text = _aiText; }
-            }
-            Debug.Log($"[StatusHud] fields resolved: step={(supportLevelText != null)} progress={(progressValueText != null)} time={(timeValueText != null)} errors={(errorValueText != null)} level={(_levelValue != null)} attempts={(_attemptsValue != null)}");
+                _attemptsValue = CloneRow(panel, errorLabel, errorValueText, "ATTEMPTS THIS STEP", 64f);
+            Debug.Log($"[StatusHud] fields resolved: step={(supportLevelText != null)} progress={(progressValueText != null)} time={(timeValueText != null)} errors={(errorValueText != null)} attempts={(_attemptsValue != null)}");
         }
 
         private static TextMeshProUGUI CloneRow(Transform panel, TextMeshProUGUI label, TextMeshProUGUI value, string title, float down)
@@ -138,20 +129,6 @@ namespace AdaptiveAR.UI
             Refresh();
         }
 
-        /// <summary>Researcher-facing physiology status; pushed by PhysiologicalStateProvider. Never shown on participant panels.</summary>
-        /// <summary>Decision-layer status (provider, last action / status / latency); pushed by DecisionScheduler.</summary>
-        public void SetAi(string text)
-        {
-            _aiText = text ?? "";
-            if (_aiValue != null) _aiValue.text = _aiText;
-        }
-
-        public void SetPhysiology(string text)
-        {
-            _physioText = text ?? "";
-            if (_physioValue != null) _physioValue.text = _physioText;
-        }
-
         private void Refresh()
         {
             ResolveFields();
@@ -163,11 +140,9 @@ namespace AdaptiveAR.UI
             UpdateExtraRows();
         }
 
-        /// <summary>Support level (L1/L2/L3) and discrete attempts on the current step.</summary>
+        /// <summary>Discrete attempts on the current step.</summary>
         private void UpdateExtraRows()
         {
-            if (_levelValue != null)
-                _levelValue.text = supportLevel != null ? FriendlyLevel(supportLevel.CurrentLevel) : "-";
             if (_attemptsValue != null)
                 _attemptsValue.text = session != null ? session.AttemptsOnStep.ToString() : "-";
         }
@@ -187,17 +162,6 @@ namespace AdaptiveAR.UI
 
             supportLevelText.text = string.IsNullOrEmpty(stage.displayName)
                 ? stage.stepTitle : stage.displayName;
-        }
-
-        private static string FriendlyLevel(SupportLevel level)
-        {
-            switch (level)
-            {
-                case SupportLevel.L1_Minimal: return "L1 Minimal";
-                case SupportLevel.L2_Guided: return "L2 Guided";
-                case SupportLevel.L3_Assisted: return "L3 Assisted";
-                default: return level.ToString();
-            }
         }
 
         private void UpdateTime()

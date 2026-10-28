@@ -13,6 +13,7 @@
 using System.Text;
 using AdaptiveAR.Decision;
 using AdaptiveAR.Logging;
+using AdaptiveAR.Physiology;
 using AdaptiveAR.Steps;
 using AdaptiveAR.Support;
 using TMPro;
@@ -55,6 +56,8 @@ namespace AdaptiveAR.UI
         private float _timer;
         private readonly StringBuilder _sb = new StringBuilder(512);
         private StepManager _stepManager;
+        private PhysiologicalStateProvider _physiology;
+        private float _physiologyLookupAt = -1e9f;
 
         private void Awake()
         {
@@ -176,22 +179,31 @@ namespace AdaptiveAR.UI
                 _sb.Append("<b>PLACEMENT</b>  inactive\n");
             }
 
-            // --- physiology, explicitly absent until a source exists ---
-            PhysiologicalSample phys = session != null ? session.LatestPhysiological : null;
-            _sb.Append("<b>HRV</b>  ");
-            if (phys == null || phys.IsEmpty)
+            // --- physiology: the live provider's readout (connection / HR / PPI / RMSSD / n / quality) ---
+            if (_physiology == null && Time.realtimeSinceStartup - _physiologyLookupAt > 2f)
             {
-                _sb.Append(Colorize("no source", MrTheme.TextMuted));
+                _physiologyLookupAt = Time.realtimeSinceStartup;
+                _physiology = FindAnyObjectByType<PhysiologicalStateProvider>(FindObjectsInactive.Include);
+            }
+            _sb.Append("<b>PHYSIOLOGY</b>  ");
+            if (_physiology != null)
+            {
+                _sb.Append(_physiology.StatusText);
             }
             else
             {
-                _sb.Append(phys.RmssdMs.HasValue ? $"RMSSD {phys.RmssdMs.Value:F0} ms" : "RMSSD -");
-                if (phys.HeartRateBpm.HasValue) _sb.Append($"   HR {phys.HeartRateBpm.Value:F0}");
+                PhysiologicalSample phys = session != null ? session.LatestPhysiological : null;
+                if (phys == null || phys.IsEmpty) _sb.Append(Colorize("no source", MrTheme.TextMuted));
+                else
+                {
+                    _sb.Append(phys.RmssdMs.HasValue ? $"RMSSD {phys.RmssdMs.Value:F0} ms" : "RMSSD -");
+                    if (phys.HeartRateBpm.HasValue) _sb.Append($"   HR {phys.HeartRateBpm.Value:F0}");
+                }
             }
             _sb.Append('\n');
 
-            // --- decision layer, not implemented yet ---
-            _sb.Append("<b>AI</b>  ").Append(Colorize("no provider", MrTheme.TextMuted)).Append('\n');
+            // --- decision layer: the provider actually in force, then the latest exchange ---
+            _sb.Append("<b>AI</b>  ").Append(DescribeDecisionLayer()).Append('\n');
 
             // --- logging ---
             _sb.Append("<b>LOG</b>  ");
@@ -201,6 +213,35 @@ namespace AdaptiveAR.UI
                 _sb.Append(Colorize("not recording", MrTheme.Warning));
 
             readoutText.text = _sb.ToString();
+        }
+
+        /// <summary>
+        /// "Claude Sonnet 5.5", then "| ACTION | status | latency" once a request has returned.
+        /// Reads DecisionScheduler state directly, so it cannot go stale. Never shows the key or
+        /// anything derived from it.
+        /// </summary>
+        private static string DescribeDecisionLayer()
+        {
+            DecisionScheduler d = DecisionScheduler.Instance;
+            if (d == null) return Colorize("no scheduler", MrTheme.TextMuted);
+            string name = d.ProviderDisplayName;
+            if (name == null)
+            {
+                return d.Status == "no key" ? Colorize("no key (llm)", MrTheme.Warning)
+                     : d.Status == "off" ? Colorize("off", MrTheme.TextMuted)
+                     : Colorize(d.Status, MrTheme.Warning);
+            }
+            var sb = new StringBuilder(name);
+            DecisionResponse r = d.LastResponse;
+            if (r != null)
+            {
+                bool ok = r.Status == ConstraintStatus.Ok;
+                sb.Append(" | ").Append(r.ParsedAction)
+                  .Append(" | ").Append(Colorize(r.Status.ToString(), ok ? MrTheme.Success : MrTheme.Warning))
+                  .Append(" | ").Append(r.LatencyMs.ToString("F0")).Append(" ms");
+            }
+            else if (d.Requests > 0) sb.Append(" | ").Append(Colorize("request in flight", MrTheme.TextMuted));
+            return sb.ToString();
         }
 
         private static string Colorize(string s, Color c)

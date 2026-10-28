@@ -11,7 +11,6 @@ using System;
 using System.Collections.Generic;
 using AdaptiveAR.Logging;
 using AdaptiveAR.Steps;
-using AdaptiveAR.UI;
 using UnityEngine;
 
 namespace AdaptiveAR.Physiology
@@ -42,7 +41,6 @@ namespace AdaptiveAR.Physiology
         private PhysiologyWindow _window;
         private SessionLogger _logger;
         private AssemblySessionController _session;
-        private StatusHud _hud;
         private StepValidator _validator;
         private float _nextWindowLog;
         private int _heldParts;
@@ -113,7 +111,6 @@ namespace AdaptiveAR.Physiology
         {
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
             _session = FindAnyObjectByType<AssemblySessionController>(FindObjectsInactive.Include);
-            _hud = FindAnyObjectByType<StatusHud>(FindObjectsInactive.Include);
             UnhookValidator();
             _validator = FindAnyObjectByType<StepValidator>(FindObjectsInactive.Include);
             if (_validator != null) { _validator.OnPartGrabbed += OnGrab; _validator.OnPartReleased += OnRelease; }
@@ -127,7 +124,7 @@ namespace AdaptiveAR.Physiology
                 _logger.PhysioBridgeVersion = "BleBridge " + BridgeVersion();
                 LogConfigIfOpen();
             }
-            Debug.Log($"[Physio] rebound: logger={(_logger != null ? _logger.GetInstanceID().ToString() : "none")} hud={(_hud != null)} validator={(_validator != null)} source={SourceId} rules={_window.Config.Describe()}");
+            Debug.Log($"[Physio] rebound: logger={(_logger != null ? _logger.GetInstanceID().ToString() : "none")} validator={(_validator != null)} source={SourceId} rules={_window.Config.Describe()}");
             if (_logger != null) _logger.LogPhysioConnection("rebind", $"source={SourceId} logger={_logger.GetInstanceID()}", DeviceName());
         }
 
@@ -241,16 +238,18 @@ namespace AdaptiveAR.Physiology
 
         // ------------------------------------------------------------------ HUD
 
+        /// <summary>One-line researcher readout (connection, HR, last PPI, RMSSD, accepted count, quality); read by ResearcherHud.</summary>
+        public string StatusText { get; private set; } = "no source";
+
         private void PushHud()
         {
-            if (_hud == null) return;
             PhysioSummary s = LatestSummary;
             string hr = s != null && s.LastDeviceHrBpm.HasValue && s.LastDeviceHrBpm.Value > 0 ? s.LastDeviceHrBpm.Value.ToString() : "--";
             string ppi = s != null && s.LastPpiMs.HasValue ? $"{s.LastPpiMs.Value:F0}" : "--";
             string rmssd = s != null && s.Available && s.RmssdMs.HasValue ? $"{s.RmssdMs.Value:F0}" : "--";
             string q = s != null && s.Quality.HasValue ? $"{s.Quality.Value:F2}" : "n/a";
             string n = s != null ? s.NAccepted.ToString() : "0";
-            _hud.SetPhysiology($"{ConnectionState}  HR {hr}  PPI {ppi}  RMSSD {rmssd}  n {n}  q {q}");
+            StatusText = $"{ConnectionState}  HR {hr}  PPI {ppi}  RMSSD {rmssd}  n {n}  q {q}";
         }
     }
 }

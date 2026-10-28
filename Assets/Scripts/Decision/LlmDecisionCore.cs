@@ -10,7 +10,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Text.RegularExpressions;
 using AdaptiveAR.Support;
 
@@ -23,7 +22,6 @@ namespace AdaptiveAR.Decision
         public string Endpoint = "https://api.anthropic.com/v1/messages";
         public string ApiVersion = "2023-06-01";
         public int MaxTokens = 64;
-        public double Temperature = 0;
         public int TimeoutMs = 8000;
         /// <summary>Null = LlmDecisionCore.DefaultSystemPrompt.</summary>
         public string SystemPrompt;
@@ -37,13 +35,16 @@ namespace AdaptiveAR.Decision
             c.Endpoint = MiniJson.GetString(o, "endpoint", c.Endpoint);
             c.ApiVersion = MiniJson.GetString(o, "apiVersion", c.ApiVersion);
             c.MaxTokens = MiniJson.GetInt(o, "maxTokens", c.MaxTokens);
-            c.Temperature = MiniJson.GetDouble(o, "temperature", c.Temperature);
             c.TimeoutMs = MiniJson.GetInt(o, "timeoutMs", c.TimeoutMs);
             c.SystemPrompt = MiniJson.GetString(o, "systemPrompt", null);
             return c;
         }
 
-        public string ProviderId { get { return Provider + ":" + Model + ":t" + Temperature.ToString(CultureInfo.InvariantCulture); } }
+        /// <summary>Stable identity written into every decision and evaluation record.</summary>
+        public string ProviderId { get { return Provider + ":" + Model; } }
+
+        /// <summary>Human-readable model name for the researcher panel, e.g. "claude-sonnet-5-5" -> "Claude Sonnet 5.5".</summary>
+        public string DisplayName { get { return LlmDecisionCore.FriendlyModelName(Model); } }
     }
 
     public sealed class HttpRequestSpec
@@ -105,6 +106,29 @@ namespace AdaptiveAR.Decision
             return MiniJson.Serialize(o);
         }
 
+        /// <summary>"claude-sonnet-5-5" -> "Claude Sonnet 5.5"; words capitalised, consecutive numeric parts joined with '.'.</summary>
+        public static string FriendlyModelName(string model)
+        {
+            if (string.IsNullOrEmpty(model)) return "-";
+            string[] parts = model.Split('-');
+            var sb = new System.Text.StringBuilder();
+            bool prevNumeric = false;
+            foreach (string raw in parts)
+            {
+                if (raw.Length == 0) continue;
+                bool numeric = true; foreach (char ch in raw) if (ch < '0' || ch > '9') { numeric = false; break; }
+                if (sb.Length > 0) sb.Append(numeric && prevNumeric ? '.' : ' ');
+                sb.Append(numeric ? raw : char.ToUpperInvariant(raw[0]) + raw.Substring(1));
+                prevNumeric = numeric;
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// The exact request the headset and the headless harness both send. No sampling
+        /// parameters: "temperature" is rejected (HTTP 400) by claude-sonnet-5-5 and is
+        /// deliberately absent; consistency is measured, not configured.
+        /// </summary>
         public static HttpRequestSpec BuildRequest(LlmConfig cfg, string apiKey, DecisionContext ctx)
         {
             if (cfg == null) throw new ArgumentNullException("cfg");
@@ -114,7 +138,6 @@ namespace AdaptiveAR.Decision
             {
                 { "model", cfg.Model },
                 { "max_tokens", (double)cfg.MaxTokens },
-                { "temperature", cfg.Temperature },
                 { "system", string.IsNullOrEmpty(cfg.SystemPrompt) ? DefaultSystemPrompt : cfg.SystemPrompt },
                 { "messages", new List<object> { new Dictionary<string, object> { { "role", "user" }, { "content", ContextToJson(ctx) } } } }
             };

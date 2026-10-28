@@ -61,7 +61,16 @@ namespace AdaptiveAR.Physiology.Tests
             var ctx = C(2, 30000, 60000, 1, 2); ctx.StepId = "step_02"; ctx.Physiological = null;
             var spec = AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(lc, "sk-test-SECRET", ctx);
             Check("13 request spec", spec.Headers["x-api-key"] == "sk-test-SECRET" && !spec.Body.Contains("SECRET") && spec.Body.Contains("\"model\":\"" + lc.Model + "\"")
-                  && spec.Body.Contains("step_02") && spec.Body.Contains("physiological_missing") && spec.Body.Contains("\"temperature\":0"), spec.Body);
+                  && spec.Body.Contains("step_02") && spec.Body.Contains("physiological_missing") && !spec.Body.Contains("temperature"), spec.Body);
+            // 13c the Sonnet 5.5 request must not carry "temperature" (HTTP 400 on device), even when a config file still names it
+            var sonnet = AdaptiveAR.Decision.LlmConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"model\":\"claude-sonnet-5-5\",\"temperature\":0,\"maxTokens\":64}"));
+            var sonnetSpec = AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(sonnet, "k", ctx);
+            var sonnetBody = AdaptiveAR.Decision.MiniJson.ParseObject(sonnetSpec.Body);
+            Check("13c sonnet-5-5 request has no temperature", sonnet.Model == "claude-sonnet-5-5" && !sonnetBody.ContainsKey("temperature") && !sonnetSpec.Body.Contains("temperature")
+                  && sonnetBody.ContainsKey("model") && sonnetBody.ContainsKey("max_tokens") && sonnetBody.ContainsKey("system") && sonnetBody.ContainsKey("messages"), sonnetSpec.Body);
+            Check("13d provider id has no sampling suffix", sonnet.ProviderId == "anthropic:claude-sonnet-5-5", sonnet.ProviderId);
+            Check("13e friendly model name", AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-sonnet-5-5") == "Claude Sonnet 5.5"
+                  && AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-opus-5-5") == "Claude Opus 5.5" && sonnet.DisplayName == "Claude Sonnet 5.5", sonnet.DisplayName);
             Check("13b context json has null physiology", AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(ctx).Contains("\"physiological\":null"));
 
             // 14 scenario generator determinism + perturbations

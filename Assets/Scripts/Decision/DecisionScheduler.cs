@@ -9,14 +9,13 @@
 // Config: persistentDataPath/AdaptiveAR/config/decision_config.json overrides
 // Resources/Decision/decision_config.json. API key: persistentDataPath/AdaptiveAR/config/
 // ai_provider.local.json, else Resources/Decision/ai_provider.local (untracked). Without a
-// key the model provider is off and the HUD says so; nothing silently substitutes.
+// key the model provider is off and the ResearcherHud says so; nothing silently substitutes.
 
 using System;
 using System.IO;
 using AdaptiveAR.Logging;
 using AdaptiveAR.Steps;
 using AdaptiveAR.Support;
-using AdaptiveAR.UI;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -39,7 +38,6 @@ namespace AdaptiveAR.Decision
         private IAsyncDecisionProvider _asyncProvider;
         private AssemblySessionController _session;
         private SessionLogger _logger;
-        private StatusHud _hud;
         private bool _inFlight;
         private float _lastRequestAt = -1e9f;
         private float _nextPeriodicAt = 1e9f;
@@ -112,13 +110,11 @@ namespace AdaptiveAR.Decision
             if (_session != null) { _session.OnActionEntered -= HandleActionEntered; _session.OnCountedError -= HandleCountedError; }
             _session = FindAnyObjectByType<AssemblySessionController>(FindObjectsInactive.Include);
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
-            _hud = FindAnyObjectByType<StatusHud>(FindObjectsInactive.Include);
             if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; }
             _inFlight = false;
             _nextPeriodicAt = Config != null && Config.Schedule.PeriodicSeconds > 0 ? Time.realtimeSinceStartup + (float)Config.Schedule.PeriodicSeconds : 1e9f;
             if (_logger != null) _logger.LogDecisionConfig(Config != null ? Config.Describe() : "none", Status, ProviderId);
-            Debug.Log($"[Decision] bound: session={(_session != null)} logger={(_logger != null)} hud={(_hud != null)} status={Status} provider={ProviderId ?? "none"}");
-            PushHud();
+            Debug.Log($"[Decision] bound: session={(_session != null)} logger={(_logger != null)} status={Status} provider={ProviderId ?? "none"}");
         }
 
         private void HandleActionEntered(AssemblyAction action)
@@ -174,7 +170,6 @@ namespace AdaptiveAR.Decision
         {
             _inFlight = false;
             LastResponse = response;
-            PushHud();
         }
 
         private string Skip(string trigger, string why)
@@ -183,11 +178,15 @@ namespace AdaptiveAR.Decision
             return why;
         }
 
-        private void PushHud()
+        /// <summary>Researcher-panel name of the provider in force; never derived from the key. Null when decisions are off.</summary>
+        public string ProviderDisplayName
         {
-            if (_hud == null) return;
-            string last = LastResponse != null ? $"{LastResponse.ParsedAction} {LastResponse.Status} {LastResponse.LatencyMs:F0}ms" : "-";
-            _hud.SetAi($"AI {Status}{(ProviderId != null ? " " + ProviderId : "")} #{Requests} {last}");
+            get
+            {
+                if (_asyncProvider != null && Config != null) return Config.Llm.DisplayName;
+                if (_syncProvider != null && Config != null) return "reference policy " + Config.ReferencePolicy.Name;
+                return null;
+            }
         }
     }
 
