@@ -685,6 +685,36 @@ namespace AdaptiveAR.Logging
                         w.EndObject();
                     }
                 w.EndArray();
+                AdaptiveAR.Decision.SupportEpisode ep = context.CurrentSupportEpisode;
+                if (ep == null) w.NullObject("current_support_episode");
+                else
+                {
+                    w.BeginObject("current_support_episode");
+                    w.Str("level", ep.Level);
+                    w.Str("started_by", ep.StartedBy);
+                    w.Num("duration_ms", ep.DurationMs);
+                    w.Num("errors", ep.Errors);
+                    w.Num("failed_attempts", ep.FailedAttempts);
+                    w.Num("wrong_components", ep.WrongComponents);
+                    w.Num("successes", ep.Successes);
+                    w.Num("consecutive_successes", ep.ConsecutiveSuccesses);
+                    w.NumOrNull("time_since_last_error_ms", ep.TimeSinceLastErrorMs);
+                    w.NumOrNull("time_since_last_failed_attempt_ms", ep.TimeSinceLastFailedAttemptMs);
+                    w.BeginArray("events");
+                    if (ep.Events != null)
+                        foreach (AdaptiveAR.Decision.TaskEvent e in ep.Events)
+                        {
+                            if (e == null) continue;
+                            w.BeginObject();
+                            w.Str("type", AdaptiveAR.Decision.TaskEvent.Name(e.Kind));
+                            w.Num("age_ms", e.AgeMs);
+                            w.Str("action_id", e.ActionId);
+                            w.Str("level", e.Level);
+                            w.EndObject();
+                        }
+                    w.EndArray();
+                    w.EndObject();
+                }
                 w.Bool("physiological_missing", context.PhysiologicalMissing);
                 WritePhysiological(w, "physiological", context.Physiological);
             }

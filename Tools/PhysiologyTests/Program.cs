@@ -334,6 +334,67 @@ namespace AdaptiveAR.Physiology.Tests
                   && !System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Scripts", "Decision", "TaskEventLedger.cs")).ToLowerInvariant().Contains("struggling =")
                   && !System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Scripts", "Decision", "RequestGate.cs")).Contains("ReferencePolicy"));
 
+            // 22 current_support_episode: objective segmentation at the most recent applied support change
+            var el = new AdaptiveAR.Decision.TaskEventLedger();
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Error, 5000f, "a1", "L1_Minimal");
+            el.Add(AdaptiveAR.Decision.TaskEventKind.WrongComponent, 8000f, "a1", "L1_Minimal");
+            el.Add(AdaptiveAR.Decision.TaskEventKind.FailedAttempt, 9000f, "a1", "L1_Minimal");
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Error, 12000f, "a1", "L1_Minimal");
+            var ec0 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L1_Minimal }; el.Fill(ec0, 14000f, 60000f, 12);
+            Check("22a no change on the step: the episode is the whole step, started by step_entry",
+                  ec0.CurrentSupportEpisode.StartedBy == "step_entry" && ec0.CurrentSupportEpisode.Level == "L1_Minimal" && ec0.CurrentSupportEpisode.DurationMs == 14000f
+                  && ec0.CurrentSupportEpisode.Errors == 3 && ec0.CurrentSupportEpisode.WrongComponents == 1 && ec0.CurrentSupportEpisode.FailedAttempts == 3 && ec0.CurrentSupportEpisode.Successes == 0
+                  && ec0.CurrentSupportEpisode.Events.Count == 4 && ec0.CurrentSupportEpisode.TimeSinceLastErrorMs == 2000f && ec0.CurrentSupportEpisode.TimeSinceLastFailedAttemptMs == 2000f);
+            el.Add(AdaptiveAR.Decision.TaskEventKind.SupportIncrease, 13000f, "a1", "L2_Guided");
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Success, 30000f, "a1", "L2_Guided");
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Success, 45000f, "a2", "L2_Guided");
+            var ec1 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L2_Guided }; el.Fill(ec1, 50000f, 60000f, 12);
+            var ep1 = ec1.CurrentSupportEpisode;
+            Check("22b after an applied increase the episode resets: only the events after the change, pre-change errors excluded while the 60 s window still holds them",
+                  ep1.StartedBy == "support_increase" && ep1.Level == "L2_Guided" && ep1.DurationMs == 37000f && ep1.Errors == 0 && ep1.FailedAttempts == 0 && ep1.WrongComponents == 0
+                  && ep1.Successes == 2 && ep1.ConsecutiveSuccesses == 2 && !ep1.TimeSinceLastErrorMs.HasValue && !ep1.TimeSinceLastFailedAttemptMs.HasValue
+                  && ep1.Events.Count == 2 && ep1.Events[0].Kind == AdaptiveAR.Decision.TaskEventKind.Success && ep1.Events[0].AgeMs == 20000f
+                  && ec1.RecentErrorCount == 3 && ec1.RecentEvents.Count == 7, AdaptiveAR.Decision.TaskEventLedger.Describe(ep1.Events) + " recentErrors=" + ec1.RecentErrorCount);
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Error, 52000f, "a2", "L2_Guided");
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Success, 60000f, "a2", "L2_Guided");
+            var ec2 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L2_Guided }; el.Fill(ec2, 61000f, 60000f, 12);
+            Check("22c new difficulty under the current level is counted in the episode",
+                  ec2.CurrentSupportEpisode.Errors == 1 && ec2.CurrentSupportEpisode.Successes == 3 && ec2.CurrentSupportEpisode.ConsecutiveSuccesses == 1
+                  && ec2.CurrentSupportEpisode.TimeSinceLastErrorMs == 9000f && ec2.CurrentSupportEpisode.Events.Count == 4);
+            el.Add(AdaptiveAR.Decision.TaskEventKind.SupportDecrease, 62000f, "a2", "L1_Minimal");
+            var ec3 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L1_Minimal }; el.Fill(ec3, 65000f, 60000f, 12);
+            Check("22d a second applied change (decrease) starts a fresh, empty episode; only the latest change counts",
+                  ec3.CurrentSupportEpisode.StartedBy == "support_decrease" && ec3.CurrentSupportEpisode.Level == "L1_Minimal" && ec3.CurrentSupportEpisode.DurationMs == 3000f
+                  && ec3.CurrentSupportEpisode.Errors == 0 && ec3.CurrentSupportEpisode.Successes == 0 && ec3.CurrentSupportEpisode.Events.Count == 0 && ec3.RecentEvents.Count == 10);
+            var ec4 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L1_Minimal }; el.Fill(ec4, 65000f, 60000f, 2);
+            el.Add(AdaptiveAR.Decision.TaskEventKind.Success, 66000f, "a3", "L1_Minimal"); el.Add(AdaptiveAR.Decision.TaskEventKind.Success, 67000f, "a3", "L1_Minimal"); el.Add(AdaptiveAR.Decision.TaskEventKind.Success, 68000f, "a3", "L1_Minimal");
+            var ec5 = new AdaptiveAR.Decision.DecisionContext { CurrentSupportLevel = AdaptiveAR.Support.SupportLevel.L1_Minimal }; el.Fill(ec5, 69000f, 60000f, 2);
+            Check("22e the episode event list is capped to the newest, counts are not", ec4.CurrentSupportEpisode.Events.Count == 0 && ec5.CurrentSupportEpisode.Events.Count == 2 && ec5.CurrentSupportEpisode.Successes == 3 && ec5.CurrentSupportEpisode.ConsecutiveSuccesses == 3);
+            // 22f ai_input, log shape and replay carry the block
+            string epJson = AdaptiveAR.Decision.LlmDecisionCore.ContextToJson(ec1);
+            var epReplay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { "{\"event\":\"decision_context_probe\"," + epJson.Substring(1) });
+            var rep1 = epReplay[0].Context.CurrentSupportEpisode;
+            Check("22f episode in ai_input and replay", epJson.Contains("\"current_support_episode\":{\"level\":\"L2_Guided\",\"started_by\":\"support_increase\",\"duration_ms\":37000,\"errors\":0,\"failed_attempts\":0,\"wrong_components\":0,\"successes\":2,\"consecutive_successes\":2,\"time_since_last_error_ms\":null,\"time_since_last_failed_attempt_ms\":null,\"events\":[{\"type\":\"success\"")
+                  && rep1 != null && rep1.StartedBy == "support_increase" && rep1.Successes == 2 && rep1.ConsecutiveSuccesses == 2 && !rep1.TimeSinceLastErrorMs.HasValue && rep1.Events.Count == 2 && rep1.DurationMs == 37000f, epJson);
+            var nullEp = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { "{\"event\":\"decision_context_probe\",\"context\":{\"current_support_level\":\"L2_Guided\",\"current_support_episode\":null}}" });
+            Check("22f2 absent episode replays as null, never invented", nullEp.Count == 1 && nullEp[0].Context.CurrentSupportEpisode == null);
+            // 22g synthetic scenarios: above L1 with errors the episode holds only the post-increase successes; clone is deep; "missing" drops it
+            var synEp = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Synthetic(0, 1).Find(x => x.Context.CurrentSupportLevel == AdaptiveAR.Support.SupportLevel.L2_Guided && x.Context.ErrorsOnStep == 3 && x.Context.SuccessfulActionsSinceLastSupportChange == 2);
+            var synClone = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Clone(synEp.Context);
+            var synMissing = AdaptiveAR.Decision.Evaluation.ScenarioGenerator.Perturb(synEp, 1).Find(x => x.Kind == "missing");
+            Check("22g synthetic episode", synEp.Context.CurrentSupportEpisode.StartedBy == "support_increase" && synEp.Context.CurrentSupportEpisode.Errors == 0 && synEp.Context.CurrentSupportEpisode.Successes == 2
+                  && synEp.Context.RecentErrorCount == 3 && synEp.Context.SupportChangesOnStep == 1 && synEp.Context.ErrorsSinceLastSupportChange == 0
+                  && synClone.CurrentSupportEpisode.Successes == 2 && !ReferenceEquals(synClone.CurrentSupportEpisode, synEp.Context.CurrentSupportEpisode) && synMissing.Context.CurrentSupportEpisode == null,
+                  AdaptiveAR.Decision.DecisionEvidence.Summarise(synEp.Context));
+            // 22h the prompt states the causal interpretation and the evidence line shows the episode
+            Check("22h prompt: episode is the strongest evidence for the current level; pre-change errors are not its failures; minimum support; no automatic KEEP",
+                  sys.Contains("current_support_episode") && sys.Contains("strongest evidence for whether the CURRENT level remains necessary") && sys.Contains("not failures of the current level")
+                  && sys.Contains("accomplished its purpose") && sys.Contains("automatic reason to keep it indefinitely") && sys.Contains("minimum level of support currently needed")
+                  && sys.Contains("increase again later if genuine new difficulty appears") && sys.Contains("New failures under the current level are evidence for retaining or increasing support")
+                  && sys.Contains("never by itself justify a decrease") && !sys.Contains("RECOVERING") && !sys.Contains("STRUGGLING"), "");
+            string evEp = AdaptiveAR.Decision.DecisionEvidence.Summarise(ec1);
+            Check("22h2 evidence line carries the episode", evEp.Contains("episode(L2_Guided via support_increase for 37000ms): errors=0 failed_attempts=0 wrong=0 successes=2 consecutive_successes=2 last_error_ms=null last_failed_attempt_ms=null events: success@20000ms -> success@5000ms"), evEp);
+
             // 16 replay from a recorded decision_context_probe line
             string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";
             var replay = AdaptiveAR.Decision.Evaluation.ContextJsonl.Read(new[] { line, "not json", "" });

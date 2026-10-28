@@ -48,9 +48,9 @@ namespace AdaptiveAR.Decision.Evaluation
                     StepElapsedMs = (float)(ratio * expected), OverallElapsedMs = (float)(ratio * expected + 120000),
                     StepExpectedMs = (float)expected,
                     AttemptsOnStep = att, ErrorsOnStep = err, ErrorsTotal = err + (n % 2),
-                    CurrentSupportLevel = (SupportLevel)level, SupportChangesOnStep = 0, SupportChangesTotal = n % 3,
-                    ErrorsSinceLastSupportChange = err, AttemptsSinceLastSupportChange = att, SuccessfulActionsSinceLastSupportChange = n % 3,
-                    TimeSinceLastErrorMs = err > 0 ? (float?)(ratio * expected * 0.3) : null, TimeSinceLastSupportChangeMs = null,
+                    CurrentSupportLevel = (SupportLevel)level, SupportChangesOnStep = level > 1 && err > 0 ? 1 : 0, SupportChangesTotal = n % 3,
+                    ErrorsSinceLastSupportChange = level > 1 && err > 0 ? 0 : err, AttemptsSinceLastSupportChange = level > 1 && err > 0 ? n % 3 : att, SuccessfulActionsSinceLastSupportChange = n % 3,
+                    TimeSinceLastErrorMs = err > 0 ? (float?)(ratio * expected * 0.3) : null, TimeSinceLastSupportChangeMs = level > 1 && err > 0 ? (float?)24000f : null,
                     Physiological = ph == "absent" ? null : new PhysiologicalSample
                     {
                         RmssdMs = ph == "typical" ? 45f : 18f, HeartRateBpm = ph == "typical" ? 72f : 96f, MeanIbiMs = ph == "typical" ? 833f : 625f,
@@ -62,6 +62,9 @@ namespace AdaptiveAR.Decision.Evaluation
                 var ledger = new TaskEventLedger();
                 float now = ctx.StepElapsedMs;
                 for (int e = 0; e < err; e++) ledger.Add(TaskEventKind.Error, System.Math.Max(0f, now - 50000f + e * 8000f), "synthetic_action", ((SupportLevel)level).ToString());
+                // Above L1 with errors: the level was raised after them, so the episode under the
+                // current level holds only the successes (the recovery shape seen on device).
+                if (level > 1 && err > 0) ledger.Add(TaskEventKind.SupportIncrease, System.Math.Max(0f, now - 24000f), "synthetic_action", ((SupportLevel)level).ToString());
                 for (int sIdx = 0; sIdx < n % 3; sIdx++) ledger.Add(TaskEventKind.Success, System.Math.Max(0f, now - 20000f + sIdx * 6000f), "synthetic_action", ((SupportLevel)level).ToString());
                 ledger.Fill(ctx, now, 60000f, 12);
                 grid.Add(new Scenario { Id = $"syn_{n:D3}_L{level}_r{ratio}_e{err}_a{att}_{ph}", Kind = "base", BaseId = null, Context = ctx });
@@ -102,6 +105,7 @@ namespace AdaptiveAR.Decision.Evaluation
             missing.TimeSinceLastSupportChangeMs = null;
             missing.TimeSinceLastSuccessMs = null;
             missing.RecentEvents = null;
+            missing.CurrentSupportEpisode = null;
             list.Add(new Scenario { Id = b.Id + "__missing", Kind = "missing", BaseId = b.Id, Context = missing });
 
             DecisionContext adv = Clone(b.Context);
@@ -133,6 +137,7 @@ namespace AdaptiveAR.Decision.Evaluation
                 ConsecutiveSuccessfulActions = c.ConsecutiveSuccessfulActions, ErrorsSinceLastSuccess = c.ErrorsSinceLastSuccess, FailedAttemptsSinceLastSuccess = c.FailedAttemptsSinceLastSuccess,
                 TimeSinceLastSuccessMs = c.TimeSinceLastSuccessMs,
                 RecentEvents = c.RecentEvents == null ? null : c.RecentEvents.ConvertAll(e => new TaskEvent { Kind = e.Kind, AgeMs = e.AgeMs, ActionId = e.ActionId, Level = e.Level }),
+                CurrentSupportEpisode = c.CurrentSupportEpisode == null ? null : c.CurrentSupportEpisode.Clone(),
                 Physiological = c.Physiological == null ? null : new PhysiologicalSample
                 {
                     RmssdMs = c.Physiological.RmssdMs, HeartRateBpm = c.Physiological.HeartRateBpm, MeanIbiMs = c.Physiological.MeanIbiMs,

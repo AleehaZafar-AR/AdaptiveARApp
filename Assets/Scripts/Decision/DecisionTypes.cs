@@ -163,6 +163,13 @@ namespace AdaptiveAR.Decision
         /// <summary>The last N meaningful events on the step, oldest first, with ages; null/empty = none.</summary>
         public List<TaskEvent> RecentEvents;
 
+        /// <summary>
+        /// Objective segmentation of the step's history at the most recent applied support
+        /// change: what happened WITH the current support level, as opposed to the evidence
+        /// that led to it. Null only when absent (e.g. a replayed line without it).
+        /// </summary>
+        public SupportEpisode CurrentSupportEpisode;
+
         // --- physiology (nullable throughout) ---
         public PhysiologicalSample Physiological;
 

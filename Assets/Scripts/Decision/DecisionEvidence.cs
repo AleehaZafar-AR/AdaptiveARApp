@@ -42,6 +42,13 @@ namespace AdaptiveAR.Decision
                  + " last_error_ms=" + Ms(c.TimeSinceLastErrorMs)
                  + " last_success_ms=" + Ms(c.TimeSinceLastSuccessMs)
                  + "; events: " + TaskEventLedger.Describe(c.RecentEvents)
+                 + "; episode(" + (c.CurrentSupportEpisode != null ? c.CurrentSupportEpisode.Level + " via " + c.CurrentSupportEpisode.StartedBy + " for " + c.CurrentSupportEpisode.DurationMs.ToString("F0", ci) + "ms" : "absent") + "): "
+                 + (c.CurrentSupportEpisode == null ? "n/a"
+                    : "errors=" + c.CurrentSupportEpisode.Errors.ToString(ci) + " failed_attempts=" + c.CurrentSupportEpisode.FailedAttempts.ToString(ci)
+                    + " wrong=" + c.CurrentSupportEpisode.WrongComponents.ToString(ci) + " successes=" + c.CurrentSupportEpisode.Successes.ToString(ci)
+                    + " consecutive_successes=" + c.CurrentSupportEpisode.ConsecutiveSuccesses.ToString(ci)
+                    + " last_error_ms=" + Ms(c.CurrentSupportEpisode.TimeSinceLastErrorMs) + " last_failed_attempt_ms=" + Ms(c.CurrentSupportEpisode.TimeSinceLastFailedAttemptMs)
+                    + " events: " + TaskEventLedger.Describe(c.CurrentSupportEpisode.Events))
                  + "; physiology=" + (c.PhysiologicalMissing ? "missing" : "present") + " (context only, never a trigger)";
         }
 
