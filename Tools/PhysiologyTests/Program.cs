@@ -100,8 +100,8 @@ namespace AdaptiveAR.Physiology.Tests
                   && sys.Contains("no fixed physiological threshold") && !sys.ToLowerInvariant().Contains("stress level"), sys);
             // 13i schedule config: wrong-component trigger is on by default and configurable
             var schedDefault = new AdaptiveAR.Decision.DecisionScheduleConfig();
-            var schedOff = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"onWrongComponent\":false,\"minIntervalSeconds\":30}"));
-            Check("13i wrong-component trigger config", schedDefault.OnWrongComponent && !schedOff.OnWrongComponent && schedOff.MinIntervalSeconds == 30 && schedDefault.Describe().Contains("onWrongComponent=True"), schedDefault.Describe());
+            var schedOff = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"onWrongComponent\":false,\"minCallIntervalSeconds\":30,\"minIntervalSeconds\":99}"));
+            Check("13i wrong-component trigger config (legacy minIntervalSeconds ignored)", schedDefault.OnWrongComponent && !schedOff.OnWrongComponent && schedOff.MinCallIntervalSeconds == 30 && schedDefault.Describe().Contains("onWrongComponent=True") && !schedDefault.Describe().Contains("minIntervalSeconds"), schedDefault.Describe());
             Check("13g default config asset uses the token budget", AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").Llm.MaxTokens == 16);
             Check("13e friendly model name", AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-sonnet-5-5") == "Claude Sonnet 5.5"
                   && AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-opus-5-5") == "Claude Opus 5.5" && sonnet.DisplayName == "Claude Sonnet 5.5", sonnet.DisplayName);
@@ -262,6 +262,55 @@ namespace AdaptiveAR.Physiology.Tests
                   && cl.RecentEvents.Count == withErr.Context.RecentEvents.Count && !ReferenceEquals(cl.RecentEvents, withErr.Context.RecentEvents) && pertMissing.Context.RecentEvents == null && !pertMissing.Context.TimeSinceLastSuccessMs.HasValue);
             Check("19h context config keys", AdaptiveAR.Decision.DecisionConfig.FromJson("{\"context\":{\"recentWindowMs\":30000,\"recentEventsMax\":5}}", "t").Context.RecentEventsMax == 5
                   && AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").Context.RecentWindowMs == 60000);
+
+            // 20 request gate: evidence accrues between calls; call protection and change hysteresis are separate; no KEEP call per success
+            var gcfg = new AdaptiveAR.Decision.DecisionScheduleConfig();   // 4 s calls, 15 s cooldown, 2 events, 8 s flush, backoff 2/4/8, first look at 10 s
+            AdaptiveAR.Decision.RequestGate G() => new AdaptiveAR.Decision.RequestGate(gcfg);
+            var L1 = AdaptiveAR.Support.SupportLevel.L1_Minimal; var L2 = AdaptiveAR.Support.SupportLevel.L2_Guided;
+            // 20a a long clean run at L2: successes every 5 s for 100 s -> requests after 2, then 4 more, then 8 more; never one per success
+            { var g = G(); int fired = 0; var at = new System.Collections.Generic.List<int>();
+              for (int i = 1; i <= 20; i++) { double t = i * 5.0; g.NoteSuccess(t); var qr = g.Evaluate("action_complete:a" + i, t, 60000 + t * 1000, L2); if (qr.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire) { fired++; at.Add(i); g.OnApplied(false, t); } }
+              Check("20a clean run at L2 -> 3 requests in 20 successes (after #2, #6, #14), backoff 2/4/8", fired == 3 && at[0] == 2 && at[1] == 6 && at[2] == 14 && g.SuccessOnlyRequired == 8, string.Join(",", at)); }
+            // 20b the same run at L1: no decrease is structurally available -> no request at all
+            { var g = G(); int fired = 0;
+              for (int i = 1; i <= 20; i++) { double t = i * 5.0; g.NoteSuccess(t); if (g.Evaluate("action_complete:a" + i, t, 60000 + t * 1000, L1).Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire) fired++; }
+              Check("20b clean run at L1 -> zero requests", fired == 0); }
+            // 20c two errors a second apart on a young step: the first accrues, the second fires (error batches ignore the step minimum)
+            { var g = G(); g.NoteError(1.0); var q1 = g.Evaluate("counted_error", 1.0, 1000, L1); g.NoteError(2.0); var q2 = g.Evaluate("counted_error", 2.0, 2000, L1);
+              Check("20c two errors -> one request, promptly", q1.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Skipped && q2.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire && q2.PendingErrors == 2 && q2.Trigger == "counted_error+2ev(2err,0ok)", q1.Reason + " | " + q2.Trigger); }
+            // 20d a lone error is not a call; it flushes after pendingFlushMs
+            { var g = G(); g.NoteError(10.0); var q1 = g.Evaluate("counted_error", 10.0, 30000, L1); bool f5 = g.NeedsFlush(15.0), f9 = g.NeedsFlush(18.5); var q2 = g.Evaluate("pending_flush", 18.5, 38500, L1);
+              Check("20d lone error flushes after 8 s", q1.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Skipped && !f5 && f9 && q2.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire && q2.Trigger == "pending_flush+1ev(1err,0ok)", q2.Trigger); }
+            // 20e hysteresis: after an applied change, a new error pair is deferred (not dropped, not KEEP) and fires when the cooldown ends
+            { var g = G(); g.NoteError(1); g.NoteError(2); var q0 = g.Evaluate("counted_error", 2, 2000, L1); g.OnApplied(true, 3);
+              g.NoteError(5); g.NoteError(6); var q1 = g.Evaluate("counted_error", 6, 6000, L2); var q2 = g.Evaluate(g.Deferred, 17.9, 17900, L2); var q3 = g.Evaluate(g.Deferred, 18.1, 18100, L2);
+              Check("20e change cooldown defers then fires", q0.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire && q1.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Deferred && q1.Reason.Contains("cooldown")
+                    && q2.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Deferred && q3.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire && q3.DeferredFrom == "counted_error" && q3.PendingErrors == 2, q1.Reason + " | " + q3.Trigger); }
+            // 20f call protection is separate from hysteresis: a KEEP result sets no cooldown; the next batch waits only for the 4 s call interval
+            { var g = G(); g.NoteError(1); g.NoteError(2); g.Evaluate("counted_error", 2, 2000, L1); g.OnApplied(false, 2.5);
+              g.NoteError(3); g.NoteError(3.5); var q1 = g.Evaluate("counted_error", 3.5, 3500, L1); var q2 = g.Evaluate(g.Deferred, 6.1, 6100, L1);
+              Check("20f call protection 4 s, no cooldown after KEEP", q1.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Deferred && q1.Reason.Contains("call protection") && q2.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire, q1.Reason); }
+            // 20g in flight: deferred until the answer arrives
+            { var g = G(); g.NoteError(1); g.NoteError(2); g.Evaluate("counted_error", 2, 2000, L1); g.InFlight = true; g.NoteError(3); g.NoteError(4); var q1 = g.Evaluate("counted_error", 4, 4000, L1);
+              g.OnApplied(false, 5); var q2 = g.Evaluate(g.Deferred, 6.5, 6500, L1);
+              Check("20g in-flight defers; fires after the answer", q1.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Deferred && q2.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire && q2.PendingErrors == 2); }
+            // 20h an error ends the clean-run backoff; an applied change ends it too
+            { var g = G(); for (int i = 1; i <= 6; i++) { g.NoteSuccess(i * 5.0); if (g.Evaluate("action_complete", i * 5.0, 60000, L2).Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire) g.OnApplied(false, i * 5.0); }
+              int before = g.SuccessOnlyRequired; g.NoteError(31); int after = g.SuccessOnlyRequired;
+              var g2 = G(); g2.NoteSuccess(5); g2.NoteSuccess(10); g2.Evaluate("action_complete", 10, 60000, L2); g2.OnApplied(true, 10);
+              Check("20h backoff reset by an error and by an applied change", before == 8 && after == 2 && g2.SuccessOnlyRequired == 2, $"{before}->{after}, {g2.SuccessOnlyRequired}"); }
+            // 20i first look: an action entry with nothing pending asks once per step after firstDecisionAfterStepMs, and not again
+            { var g = G(); var q1 = g.Evaluate("action_enter:a1", 1, 500, L1); var q2 = g.Evaluate(g.Deferred, 11, 10500, L1); var q3 = g.Evaluate("action_enter:a2", 40, 40000, L1); g.ResetForStep(); var r4 = g.Evaluate("action_enter:b1", 60, 12000, L1);
+              Check("20i one first look per step", q1.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Deferred && q1.Reason.Contains("too young") && q2.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire
+                    && q3.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Skipped && r4.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Fire, q1.Reason + " | " + q3.Reason); }
+            // 20j successes pending at L1 do not make the next single error a call; the error batch counts error-like events only
+            { var g = G(); g.NoteSuccess(5); g.NoteSuccess(10); g.NoteSuccess(15); g.NoteError(20); var qr = g.Evaluate("counted_error", 20, 20000, L1);
+              Check("20j one error after successes still accrues", qr.Verdict == AdaptiveAR.Decision.RequestGate.Verdict.Skipped && g.PendingEvents == 4, qr.Reason); }
+            // 20k the keys are config, the defaults are the documented ones
+            { var sc = AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").Schedule;
+              var so = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"minCallIntervalSeconds\":2,\"changeCooldownMs\":5000,\"minEventsPerRequest\":3,\"pendingFlushMs\":4000,\"successOnlyBackoff\":false,\"successOnlyBackoffMax\":4,\"firstDecisionAfterStepMs\":2000}"));
+              Check("20k schedule config keys", sc.MinCallIntervalSeconds == 4 && sc.ChangeCooldownMs == 15000 && sc.MinEventsPerRequest == 2 && sc.PendingFlushMs == 8000 && sc.SuccessOnlyBackoff && sc.SuccessOnlyBackoffMax == 8 && sc.FirstDecisionAfterStepMs == 10000
+                    && so.MinCallIntervalSeconds == 2 && so.ChangeCooldownMs == 5000 && so.MinEventsPerRequest == 3 && so.PendingFlushMs == 4000 && !so.SuccessOnlyBackoff && so.SuccessOnlyBackoffMax == 4 && so.FirstDecisionAfterStepMs == 2000 && sc.Describe().Contains("changeCooldownMs=15000"), sc.Describe()); }
 
             // 16 replay from a recorded decision_context_probe line
             string line = "{\"schema\":\"adaptivear.session.v2\",\"seq\":5,\"event\":\"decision_context_probe\",\"participant_id\":\"P1\",\"session_id\":\"S\",\"where\":\"x\",\"context\":{\"decision_index\":0,\"step_index\":2,\"step_id\":\"st\",\"step_count\":6,\"task_complexity\":2,\"operator_experience\":\"novice\",\"step_elapsed_ms\":12345,\"overall_elapsed_ms\":50000,\"step_expected_ms\":null,\"attempts_on_step\":1,\"errors_on_step\":0,\"errors_total\":1,\"current_support_level\":\"L2_Guided\",\"current_support_level_num\":2,\"support_changes_on_step\":0,\"support_changes_total\":1,\"physiological_missing\":false,\"physiological\":{\"rmssd_ms\":41.5,\"heart_rate_bpm\":70,\"mean_ibi_ms\":850,\"quality\":0.9,\"age_ms\":300,\"source\":\"Polar\"}}}";

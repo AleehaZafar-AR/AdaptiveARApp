@@ -1,10 +1,11 @@
 // File: DecisionScheduler.cs
-// WHEN a decision is requested in the live session, under a config-driven policy: on action
-// entry, after a counted error, periodically, with a minimum interval and a minimum time on
-// the step. It owns the provider (reference policy or model) and the API key, and hands every
-// request to the session's existing seam (BuildDecisionContext -> provider -> ApplyDecision),
-// which enforces the constrained action set and logs the decision. The scheduler never
-// touches the support level itself.
+// WHEN a decision is requested in the live session. The policy lives in RequestGate (plain
+// C#, headlessly tested): evidence accrues between calls, provider-call protection and
+// support-change hysteresis are separate, and deferred requests are re-evaluated here in
+// Update. The scheduler owns the provider (reference policy or model) and the API key, and
+// hands every request to the session's existing seam (BuildDecisionContext -> provider ->
+// ApplyDecision), which enforces the constrained action set and logs the decision. The
+// scheduler never touches the support level and never interprets the operator.
 //
 // Config: persistentDataPath/AdaptiveAR/config/decision_config.json overrides
 // Resources/Decision/decision_config.json. API key: persistentDataPath/AdaptiveAR/config/
@@ -38,10 +39,18 @@ namespace AdaptiveAR.Decision
         private IAsyncDecisionProvider _asyncProvider;
         private AssemblySessionController _session;
         private SessionLogger _logger;
-        private bool _inFlight;
-        private float _lastRequestAt = -1e9f;
+        private RequestGate _gate;
+        private int _boundStepIndex = -1;
+        private SupportLevel _levelAtRequest;
         private float _nextPeriodicAt = 1e9f;
+        private float _nextDeferredCheckAt;
+        private string _lastHoldReason;
         private string _keyFingerprint = "none";
+
+        /// <summary>The gate in force (diagnostics / tests).</summary>
+        public RequestGate Gate { get { return _gate; } }
+
+        private static float Now { get { return Time.realtimeSinceStartup; } }
 
         private void Awake()
         {
@@ -112,7 +121,8 @@ namespace AdaptiveAR.Decision
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
             if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; _session.OnWrongComponentGrabbed += HandleWrongComponent; _session.OnActionCompleted += HandleActionCompleted; }
             if (_session != null && Config != null) _session.ConfigureRecentContext((float)Config.Context.RecentWindowMs, Config.Context.RecentEventsMax);
-            _inFlight = false;
+            _gate = new RequestGate(Config != null ? Config.Schedule : new DecisionScheduleConfig());
+            _boundStepIndex = _session != null ? _session.CurrentStepIndex : -1;
             _nextPeriodicAt = Config != null && Config.Schedule.PeriodicSeconds > 0 ? Time.realtimeSinceStartup + (float)Config.Schedule.PeriodicSeconds : 1e9f;
             if (_logger != null) _logger.LogDecisionConfig(Config != null ? Config.Describe() : "none", Status, ProviderId);
             Debug.Log($"[Decision] bound: session={(_session != null)} logger={(_logger != null)} status={Status} provider={ProviderId ?? "none"}");
@@ -120,60 +130,89 @@ namespace AdaptiveAR.Decision
 
         private void HandleActionEntered(AssemblyAction action)
         {
-            if (Config != null && Config.Schedule.OnActionEnter) TryRequest("action_enter:" + (action != null ? action.Id : "?"), ignoreStepMinimum: false);
+            if (Config == null || !Config.Schedule.OnActionEnter) return;
+            Evaluate("action_enter:" + (action != null ? action.Id : "?"));
         }
 
         private void HandleCountedError()
         {
-            if (Config != null && Config.Schedule.OnCountedError) TryRequest("counted_error", ignoreStepMinimum: true);
+            if (Config == null || !Config.Schedule.OnCountedError || _gate == null) return;
+            _gate.NoteError(Now);
+            Evaluate("counted_error");
         }
 
-        /// <summary>
-        /// Wrong-component selection is behavioural evidence of needing guidance. It goes
-        /// through the same gate as every trigger: one request in flight, the minimum
-        /// interval, and the minimum time on the step, so repeated wrong grabs can never
-        /// spam the provider. The context carries the cumulative error/attempt counts.
-        /// </summary>
-        /// <summary>Success is evidence too (recovery). Same gate: never a request per success without throttling.</summary>
-        private void HandleActionCompleted(AssemblyAction action)
-        {
-            if (Config != null && Config.Schedule.OnActionComplete) TryRequest("action_complete:" + (action != null ? action.Id : "?"), ignoreStepMinimum: false);
-        }
-
+        /// <summary>A wrong component in the hand is behavioural evidence; it accrues like a counted error.</summary>
         private void HandleWrongComponent(string partKey)
         {
-            if (Config != null && Config.Schedule.OnWrongComponent) TryRequest("wrong_component_grabbed:" + (partKey ?? "?"), ignoreStepMinimum: false);
+            if (Config == null || !Config.Schedule.OnWrongComponent || _gate == null) return;
+            _gate.NoteError(Now);
+            Evaluate("wrong_component_grabbed:" + (partKey ?? "?"));
+        }
+
+        /// <summary>A validated success is evidence too; the gate decides whether it is worth a call now.</summary>
+        private void HandleActionCompleted(AssemblyAction action)
+        {
+            if (Config == null || !Config.Schedule.OnActionComplete || _gate == null) return;
+            _gate.NoteSuccess(Now);
+            Evaluate("action_complete:" + (action != null ? action.Id : "?"));
         }
 
         private void Update()
         {
-            if (Config == null || Config.Schedule.PeriodicSeconds <= 0) return;
-            if (Time.realtimeSinceStartup < _nextPeriodicAt) return;
-            _nextPeriodicAt = Time.realtimeSinceStartup + (float)Config.Schedule.PeriodicSeconds;
-            TryRequest("periodic", ignoreStepMinimum: false);
+            if (Config == null || _gate == null || _session == null) return;
+
+            // A new step: its events belong to the new ledger (the hysteresis of an applied change is kept).
+            int idx = _session.CurrentStepIndex;
+            if (idx != _boundStepIndex) { _boundStepIndex = idx; _gate.ResetForStep(); _lastHoldReason = null; }
+
+            if (Config.Schedule.PeriodicSeconds > 0 && Now >= _nextPeriodicAt)
+            {
+                _nextPeriodicAt = Now + (float)Config.Schedule.PeriodicSeconds;
+                Evaluate("periodic");
+                return;
+            }
+
+            // Deferred requests and lone-event flushes are re-tried a few times a second.
+            if (Now < _nextDeferredCheckAt) return;
+            _nextDeferredCheckAt = Now + 0.25f;
+            if (_gate.HasDeferred) Evaluate(_gate.Deferred, quiet: true);
+            else if (_gate.NeedsFlush(Now)) Evaluate("pending_flush");
         }
 
         // ------------------------------------------------------------------ requests
 
-        /// <summary>Requests one decision through the session seam if the policy allows it now. Returns why not otherwise.</summary>
+        /// <summary>Researcher control: asks now regardless of accrued evidence (the structural protections still apply).</summary>
         public string TryRequest(string trigger, bool ignoreStepMinimum)
         {
-            if (_session == null) return Skip(trigger, "no session");
-            if (_syncProvider == null && _asyncProvider == null) return Skip(trigger, "provider off (" + Status + ")");
-            if (!_session.AssemblyRunning) return Skip(trigger, "assembly not running");
-            if (_inFlight) return Skip(trigger, "request in flight");
-            float since = Time.realtimeSinceStartup - _lastRequestAt;
-            if (since < Config.Schedule.MinIntervalSeconds) return Skip(trigger, $"min interval ({since:F1}s < {Config.Schedule.MinIntervalSeconds}s)");
-            if (!ignoreStepMinimum && _session.StepElapsedMs < Config.Schedule.FirstDecisionAfterStepMs) return Skip(trigger, $"step too young ({_session.StepElapsedMs:F0}ms < {Config.Schedule.FirstDecisionAfterStepMs}ms)");
+            return Evaluate(trigger, force: ignoreStepMinimum);
+        }
 
-            _lastRequestAt = Time.realtimeSinceStartup;
+        /// <summary>Runs the gate for a trigger; fires one request through the session seam when it says so. Returns why not otherwise.</summary>
+        private string Evaluate(string trigger, bool force = false, bool quiet = false)
+        {
+            if (_session == null) return Skip(trigger, "no session", quiet);
+            if (_syncProvider == null && _asyncProvider == null) return Skip(trigger, "provider off (" + Status + ")", quiet);
+            if (!_session.AssemblyRunning) return Skip(trigger, "assembly not running", quiet);
+            if (_gate == null) _gate = new RequestGate(Config != null ? Config.Schedule : new DecisionScheduleConfig());
+
+            RequestGate.Result r = _gate.Evaluate(trigger, Now, _session.StepElapsedMs, _session.CurrentSupportLevel, force);
+            if (r.Verdict == RequestGate.Verdict.Skipped) return Skip(trigger, r.Reason, quiet);
+            if (r.Verdict == RequestGate.Verdict.Deferred)
+            {
+                // One line per distinct hold, not one per frame.
+                if (_lastHoldReason != r.Reason) { _lastHoldReason = r.Reason; Debug.Log($"[Decision] deferred trigger={trigger}: {r.Reason}"); }
+                return r.Reason;
+            }
+            _lastHoldReason = null;
+
             Requests++;
-            if (_logger != null) _logger.LogDecisionTrigger(trigger, ProviderId, Requests);
-            Debug.Log($"[Decision] request #{Requests} trigger={trigger} provider={ProviderId}");
+            _levelAtRequest = _session.CurrentSupportLevel;
+            if (_logger != null) _logger.LogDecisionTrigger(r.Trigger, ProviderId, Requests, r.PendingEvents, r.PendingErrors, r.PendingSuccesses, r.DeferredFrom);
+            Debug.Log($"[Decision] request #{Requests} trigger={r.Trigger} provider={ProviderId}" + (r.DeferredFrom != null ? $" (deferred from {r.DeferredFrom})" : ""));
 
             if (_asyncProvider != null)
             {
-                _inFlight = true;
+                _gate.InFlight = true;
                 StartCoroutine(_session.RequestAndApplyDecisionRoutine(_asyncProvider, OnApplied));
             }
             else
@@ -186,13 +225,15 @@ namespace AdaptiveAR.Decision
 
         private void OnApplied(DecisionResponse response, SupportLevel level)
         {
-            _inFlight = false;
+            bool changed = level != _levelAtRequest;
+            if (_gate != null) _gate.OnApplied(changed, Now);
             LastResponse = response;
+            if (changed) Debug.Log($"[Decision] level changed {_levelAtRequest} -> {level}: change cooldown {(Config != null ? Config.Schedule.ChangeCooldownMs : 0):F0} ms (requests deferred, not dropped).");
         }
 
-        private string Skip(string trigger, string why)
+        private string Skip(string trigger, string why, bool quiet)
         {
-            Debug.Log($"[Decision] skip trigger={trigger}: {why}");
+            if (!quiet) Debug.Log($"[Decision] skip trigger={trigger}: {why}");
             return why;
         }
 

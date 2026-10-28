@@ -694,12 +694,19 @@ namespace AdaptiveAR.Logging
         }
 
         /// <summary>A decision was requested by the scheduler (the 'decision' line follows when it completes).</summary>
-        public void LogDecisionTrigger(string trigger, string providerId, int requestNumber)
+        public void LogDecisionTrigger(string trigger, string providerId, int requestNumber,
+                                       int pendingEvents = 0, int pendingErrors = 0, int pendingSuccesses = 0, string deferredFrom = null)
         {
             var w = NewLine(Events.DecisionTrigger);
             w.Str("trigger", trigger);
             w.Str("provider_id", providerId);
             w.Num("request_number", requestNumber);
+            // What had accrued since the previous request, and whether this request had been
+            // held back by a protection (call interval, in-flight, change cooldown).
+            w.Num("pending_events", pendingEvents);
+            w.Num("pending_errors", pendingErrors);
+            w.Num("pending_successes", pendingSuccesses);
+            w.Str("deferred_from", deferredFrom);
             Write(w);
         }
 

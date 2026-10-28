@@ -122,6 +122,7 @@ namespace AdaptiveAR.Steps
 
         public float OverallElapsedMs { get { return _overallMs; } }
         public float StepElapsedMs { get { return _stepMs; } }
+        public int CurrentStepIndex { get { return _currentIndex; } }
         public int AttemptsOnStep { get { return _attemptsOnStep; } }
         public int AttemptsTotal { get { return _attemptsTotal; } }
         private int _attemptsTotal;

@@ -8,8 +8,14 @@
     "onWrongComponent": true,
     "onActionComplete": true,
     "periodicSeconds": 0,
-    "minIntervalSeconds": 20,
-    "firstDecisionAfterStepMs": 15000
+    "_gating": "Provider-call protection (minCallIntervalSeconds, one in flight) is separate from support-change hysteresis (changeCooldownMs, requests deferred not dropped). Error-like events accrue to minEventsPerRequest (a lone one flushes after pendingFlushMs); success-only evidence asks only above L1 and backs off (2, 4, 8 successes) while nothing changes.",
+    "minCallIntervalSeconds": 4,
+    "changeCooldownMs": 15000,
+    "minEventsPerRequest": 2,
+    "pendingFlushMs": 8000,
+    "successOnlyBackoff": true,
+    "successOnlyBackoffMax": 8,
+    "firstDecisionAfterStepMs": 10000
   },
   "context": {
     "_comment": "Temporal context handed to the provider: recent_* counts cover recentWindowMs; recent_events keeps the newest recentEventsMax events of the step.",

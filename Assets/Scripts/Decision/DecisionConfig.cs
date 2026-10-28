@@ -17,9 +17,18 @@ namespace AdaptiveAR.Decision
         public bool OnActionComplete = true;
         /// <summary>0 = no periodic requests.</summary>
         public double PeriodicSeconds = 0;
-        public double MinIntervalSeconds = 20;
-        /// <summary>No request before this much time on a step (the context is empty before it).</summary>
-        public double FirstDecisionAfterStepMs = 15000;
+        /// <summary>Provider-call protection: least time between two requests, seconds. Not a hysteresis.</summary>
+        public double MinCallIntervalSeconds = 4;
+        /// <summary>Support-change hysteresis: after an APPLIED level change, requests are deferred this long, ms.</summary>
+        public double ChangeCooldownMs = 15000;
+        /// <summary>Error-like events (counted error, wrong component) that must accrue before a request; a lone one is flushed after pendingFlushMs.</summary>
+        public int MinEventsPerRequest = 2;
+        public double PendingFlushMs = 8000;
+        /// <summary>Clean-run backoff: after a success-only request that changed nothing, the successes required double (up to successOnlyBackoffMax).</summary>
+        public bool SuccessOnlyBackoff = true;
+        public int SuccessOnlyBackoffMax = 8;
+        /// <summary>No success-only or first-look request before this much time on a step (error batches ignore it).</summary>
+        public double FirstDecisionAfterStepMs = 10000;
 
         public static DecisionScheduleConfig FromJson(Dictionary<string, object> o)
         {
@@ -30,14 +39,23 @@ namespace AdaptiveAR.Decision
             c.OnWrongComponent = MiniJson.GetBool(o, "onWrongComponent", c.OnWrongComponent);
             c.OnActionComplete = MiniJson.GetBool(o, "onActionComplete", c.OnActionComplete);
             c.PeriodicSeconds = MiniJson.GetDouble(o, "periodicSeconds", c.PeriodicSeconds);
-            c.MinIntervalSeconds = MiniJson.GetDouble(o, "minIntervalSeconds", c.MinIntervalSeconds);
+            c.MinCallIntervalSeconds = MiniJson.GetDouble(o, "minCallIntervalSeconds", c.MinCallIntervalSeconds);
+            c.ChangeCooldownMs = MiniJson.GetDouble(o, "changeCooldownMs", c.ChangeCooldownMs);
+            c.MinEventsPerRequest = MiniJson.GetInt(o, "minEventsPerRequest", c.MinEventsPerRequest);
+            c.PendingFlushMs = MiniJson.GetDouble(o, "pendingFlushMs", c.PendingFlushMs);
+            c.SuccessOnlyBackoff = MiniJson.GetBool(o, "successOnlyBackoff", c.SuccessOnlyBackoff);
+            c.SuccessOnlyBackoffMax = MiniJson.GetInt(o, "successOnlyBackoffMax", c.SuccessOnlyBackoffMax);
             c.FirstDecisionAfterStepMs = MiniJson.GetDouble(o, "firstDecisionAfterStepMs", c.FirstDecisionAfterStepMs);
+            // The pre-v2 single gate ("minIntervalSeconds") is deliberately not read: a stale
+            // headset override must not reinstate the 20 s request interval.
             return c;
         }
 
         public string Describe()
         {
-            return $"onActionEnter={OnActionEnter};onCountedError={OnCountedError};onWrongComponent={OnWrongComponent};onActionComplete={OnActionComplete};periodicSeconds={PeriodicSeconds};minIntervalSeconds={MinIntervalSeconds};firstDecisionAfterStepMs={FirstDecisionAfterStepMs}";
+            return $"onActionEnter={OnActionEnter};onCountedError={OnCountedError};onWrongComponent={OnWrongComponent};onActionComplete={OnActionComplete};periodicSeconds={PeriodicSeconds};" +
+                   $"minCallIntervalSeconds={MinCallIntervalSeconds};changeCooldownMs={ChangeCooldownMs};minEventsPerRequest={MinEventsPerRequest};pendingFlushMs={PendingFlushMs};" +
+                   $"successOnlyBackoff={SuccessOnlyBackoff};successOnlyBackoffMax={SuccessOnlyBackoffMax};firstDecisionAfterStepMs={FirstDecisionAfterStepMs}";
         }
     }
 
