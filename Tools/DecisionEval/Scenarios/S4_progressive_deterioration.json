@@ -1,0 +1,148 @@
+{
+ "id": "S4_progressive_deterioration",
+ "title": "Progressive deterioration",
+ "description": "Starts clean (crankshaft, head), then failed attempts and errors become more frequent action by action within the same step.",
+ "expected": "support responds to the emerging difficulty rather than only to cumulative history.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 26
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 14
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 9
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 9
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit002.PistonHead"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 10
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

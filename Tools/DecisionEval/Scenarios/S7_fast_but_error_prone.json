@@ -1,0 +1,197 @@
+{
+ "id": "S7_fast_but_error_prone",
+ "title": "Fast but error-prone",
+ "description": "Many attempts in short periods with repeated counted errors; actions still complete quickly.",
+ "expected": "difficulty reaches the model promptly through the existing event scheduler.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 3
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 1
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 3
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit003.ConnectingRod"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 3
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 1
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 3
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

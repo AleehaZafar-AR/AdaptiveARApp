@@ -1,0 +1,163 @@
+{
+ "id": "S2_initial_difficulty_then_recovery",
+ "title": "Initial difficulty then recovery",
+ "description": "The crankshaft goes in cleanly. On the first piston the head-on-mat action produces failed attempts, two counted errors and a wrong part at L1 within a short burst (one counted error and one failed attempt may still fall after a first support increase); from the head success on, the remaining actions of the step and the next piston are clean.",
+ "expected": "reasonable upward adaptation during the difficulty; later KEEP or DECREASE decisions interpretable from the clean current support episode. No exact decrease point is asserted.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 30
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit002.PistonHead"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 14
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 16
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_03_piston002",
+   "complexity": 1,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 14
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 16
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 18
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

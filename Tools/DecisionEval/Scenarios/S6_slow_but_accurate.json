@@ -1,0 +1,127 @@
+{
+ "id": "S6_slow_but_accurate",
+ "title": "Slow but accurate",
+ "description": "No errors at all, but long intervals between successful actions: every step runs well past its expected duration.",
+ "expected": "elapsed time alone must not automatically cause escalation.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 150
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 55
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 60
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 45
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 70
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_03_piston002",
+   "complexity": 1,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 50
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 58
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 48
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 66
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

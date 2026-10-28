@@ -1,0 +1,144 @@
+{
+ "id": "S1_consistently_successful",
+ "title": "Consistently successful",
+ "description": "Every action is placed correctly at the first attempt with ordinary pacing; no errors, no wrong parts.",
+ "expected": "mostly L1; no unnecessary escalation.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 28
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 14
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 16
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 18
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_03_piston002",
+   "complexity": 1,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 14
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 16
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 18
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_06_camshaft",
+   "complexity": 2,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_camshaft"
+  },
+  {
+   "t": "advance",
+   "s": 30
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

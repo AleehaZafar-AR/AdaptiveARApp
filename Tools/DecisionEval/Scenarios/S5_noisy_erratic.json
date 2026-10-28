@@ -1,0 +1,185 @@
+{
+ "id": "S5_noisy_erratic",
+ "title": "Noisy / erratic",
+ "description": "Alternating successes and failures across two piston steps, with occasional wrong-component grabs; no sustained run in either direction.",
+ "expected": "no rapid oscillation; hysteresis operates; every decision structurally valid.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 25
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 9
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit003.ConnectingRod"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 11
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 9
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_03_piston002",
+   "complexity": 1,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 7
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 9
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit004.ConnectingPin"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 13
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

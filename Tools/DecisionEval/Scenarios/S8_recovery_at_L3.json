@@ -1,0 +1,177 @@
+{
+ "id": "S8_recovery_at_L3",
+ "title": "Recovery at L3",
+ "description": "Genuine difficulty on the first piston's head action: a first burst (two counted errors, a failed attempt) and, inside the 15 s hysteresis that follows a first increase, a second burst (wrong part, two counted errors, a failed attempt) that is evaluated when the hysteresis ends, so two upward decisions are possible before any success. From the head success on, every remaining action of the step and the whole next step are clean: no error-like event falls after the second decision opportunity.",
+ "expected": "difficulty sufficient to reach L3, then observe the de-escalation behaviour under a clean current support episode. No required number of successes before a decrease is asserted.",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 28
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit002.PistonHead"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 2
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 16
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 13
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 11
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 15
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_03_piston002",
+   "complexity": 1,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 14
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 16
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 18
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}

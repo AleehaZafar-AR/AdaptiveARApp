@@ -1,0 +1,197 @@
+{
+ "id": "S3_persistent_difficulty",
+ "title": "Persistent difficulty",
+ "description": "Repeated counted errors and failed attempts on every action of the first piston, continuing after any support increase; each action is eventually completed.",
+ "expected": "L1 to L2 and potentially L2 to L3; no transition beyond L3 (boundary clamp recorded if attempted).",
+ "events": [
+  {
+   "t": "step",
+   "id": "step_01_crankshaft",
+   "complexity": 3,
+   "expected_s": 120
+  },
+  {
+   "t": "action",
+   "id": "place_crankshaft"
+  },
+  {
+   "t": "advance",
+   "s": 20
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 15
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "step",
+   "id": "step_02_piston001",
+   "complexity": 2,
+   "expected_s": 90
+  },
+  {
+   "t": "action",
+   "id": "head_on_mat"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 4
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "rod_to_head"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "wrong_component",
+   "part": "part.PistonKit003.ConnectingRod"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 7
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 10
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "pin_through_rod"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 5
+  },
+  {
+   "t": "failed_attempt"
+  },
+  {
+   "t": "advance",
+   "s": 8
+  },
+  {
+   "t": "success"
+  },
+  {
+   "t": "action",
+   "id": "install_piston"
+  },
+  {
+   "t": "advance",
+   "s": 7
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 6
+  },
+  {
+   "t": "error"
+  },
+  {
+   "t": "advance",
+   "s": 12
+  },
+  {
+   "t": "success"
+  }
+ ],
+ "operator_experience": "unspecified",
+ "step_count": 6
+}
