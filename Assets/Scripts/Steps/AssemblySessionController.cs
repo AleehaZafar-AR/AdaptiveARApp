@@ -53,6 +53,22 @@ namespace AdaptiveAR.Steps
         [Tooltip("Close the session automatically when the last step is completed.")]
         [SerializeField] private bool endSessionOnComplete = true;
 
+        [Header("Support transition cue")]
+        [Tooltip("When an AI decision raises the support level (L1->L2, L2->L3): a short neutral " +
+                 "message on the participant card, a soft tone, then the current action's " +
+                 "instruction is spoken again with the richer guidance already on the bench. " +
+                 "Never for KEEP, downward, saturated, fallback or failed decisions.")]
+        [SerializeField] private bool transitionCueEnabled = true;
+
+        [Tooltip("Neutral wording. Not anthropomorphic.")]
+        [SerializeField] private string guidanceIncreasedMessage = "Additional guidance enabled";
+
+        [Tooltip("How long the message stays on the card before the live cues take over again.")]
+        [SerializeField] private float transitionMessageSeconds = 4f;
+
+        [Tooltip("Pause between the tone and the replayed instruction so they do not overlap.")]
+        [SerializeField] private float transitionReplayDelaySeconds = 0.7f;
+
         [Header("Completion")]
         [Tooltip("Shown on the caption when every step is done.")]
         [TextArea(2, 4)]
@@ -110,6 +126,8 @@ namespace AdaptiveAR.Steps
         public event Action<AssemblyAction> OnActionEntered;
         /// <summary>A placement attempt was counted as an error.</summary>
         public event Action OnCountedError;
+        /// <summary>A part that cannot satisfy the current action was picked up (one per grab). The decision scheduler listens here.</summary>
+        public event Action<string> OnWrongComponentGrabbed;
 
         /// <summary>True between the first step and the end of the sequence: the window in which decisions make sense.</summary>
         public bool AssemblyRunning { get { return SessionActive && !SequenceFinished && _currentStep != null; } }
@@ -511,6 +529,8 @@ namespace AdaptiveAR.Steps
             _errorsOnStep++;
             _errorsTotal++;
             PushEnvelope();
+
+            try { OnWrongComponentGrabbed?.Invoke(partKey); } catch (Exception e) { Debug.LogError("[Session] OnWrongComponentGrabbed handler threw: " + e); }
 
             // Four independent channels; one failing must not silence the others.
             string requested = validator != null ? validator.PartKey : null;
@@ -1399,8 +1419,70 @@ namespace AdaptiveAR.Steps
             if (logger != null)
                 logger.LogDecision(context, response, before, after, applied);
 
+            // A real upward change only: the level moved, by an applied Ok decision.
+            if (applied && (int)after > (int)before && response.Status == ConstraintStatus.Ok)
+                StartSupportTransitionCue(before, after);
+
             RaiseStateChanged();
             return after;
+        }
+
+        // =====================================================================
+        // Support transition cue (upward AI changes only)
+        // =====================================================================
+
+        private AdaptiveAR.UI.ParticipantCard _card;
+        private Coroutine _transitionCue;
+
+        private void StartSupportTransitionCue(SupportLevel from, SupportLevel to)
+        {
+            if (!transitionCueEnabled) return;
+            if (_transitionCue != null) StopCoroutine(_transitionCue);
+            _transitionCue = StartCoroutine(SupportTransitionCueRoutine(from, to));
+        }
+
+        /// <summary>
+        /// By the time this runs the presenter has already re-rendered the step at the new
+        /// level (it listens to OnSupportLevelChanged synchronously inside ApplyAction), so
+        /// the replayed instruction is heard with the new guidance already visible.
+        /// </summary>
+        private System.Collections.IEnumerator SupportTransitionCueRoutine(SupportLevel from, SupportLevel to)
+        {
+            string actionId = workflow != null && workflow.CurrentAction != null ? workflow.CurrentAction.Id : null;
+            string message = "skipped", tone = "skipped", replay = "skipped";
+
+            try
+            {
+                if (_card == null) _card = FindAnyObjectByType<AdaptiveAR.UI.ParticipantCard>(FindObjectsInactive.Include);
+                if (_card != null) { _card.ShowNotice(guidanceIncreasedMessage, transitionMessageSeconds); message = "card"; }
+                else if (captionText != null) { captionText.text = guidanceIncreasedMessage; message = "caption"; }
+                else message = "no surface";
+            }
+            catch (Exception e) { message = "threw"; Debug.LogError("[Transition] message threw: " + e); }
+
+            var speech = InstructionSpeech.Ensure(null);
+            try
+            {
+                if (speech != null) { speech.PlayTone(ProceduralTones.Kind.Notice); tone = "notice_tone"; }
+                else tone = "no speech component";
+            }
+            catch (Exception e) { tone = "threw"; Debug.LogError("[Transition] tone threw: " + e); }
+
+            if (logger != null) logger.LogSupportTransitionCue(from, to, actionId, guidanceIncreasedMessage, message, tone, "pending", _decisionIndex - 1);
+            Debug.Log($"[Transition] {from} -> {to} action={actionId ?? "<none>"} message={message} tone={tone}; replaying instruction in {transitionReplayDelaySeconds:F1}s");
+
+            yield return new WaitForSeconds(transitionReplayDelaySeconds);
+
+            try
+            {
+                if (presenter == null) replay = "no presenter";
+                else replay = presenter.ReplayCurrentActionInstruction("support_increase") ? "replayed" : "nothing to replay";
+            }
+            catch (Exception e) { replay = "threw"; Debug.LogError("[Transition] replay threw: " + e); }
+
+            if (logger != null) logger.LogSupportTransitionCue(from, to, actionId, guidanceIncreasedMessage, message, tone, replay, _decisionIndex - 1);
+            Debug.Log($"[Transition] replay={replay}");
+            _transitionCue = null;
         }
 
         /// <summary>

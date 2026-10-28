@@ -87,6 +87,9 @@ namespace AdaptiveAR.Logging
             public const string DecisionContextProbe = "decision_context_probe";
             public const string DecisionTrigger = "decision_trigger";
             public const string DecisionConfig = "decision_config";
+
+            // --- participant-facing cue after an applied upward AI support change (message, tone, instruction replay) ---
+            public const string SupportTransitionCue = "support_transition_cue";
         }
 
         /// <summary>Set by the physiology layer before the session opens; written into session_start.</summary>
@@ -664,6 +667,27 @@ namespace AdaptiveAR.Logging
             w.Str("trigger", trigger);
             w.Str("provider_id", providerId);
             w.Num("request_number", requestNumber);
+            Write(w);
+        }
+
+        /// <summary>
+        /// The cue that told the participant guidance increased. Written twice per transition:
+        /// replay="pending" when the message and tone go out, then with the replay outcome.
+        /// </summary>
+        public void LogSupportTransitionCue(SupportLevel from, SupportLevel to, string actionId, string message,
+                                            string messageSurface, string tone, string replay, int decisionIndex)
+        {
+            var w = NewLine(Events.SupportTransitionCue);
+            w.Str("from_level", from.ToString());
+            w.Num("from_level_num", (int)from);
+            w.Str("to_level", to.ToString());
+            w.Num("to_level_num", (int)to);
+            w.Str("action_id", actionId);
+            w.Str("message", message);
+            w.Str("message_surface", messageSurface);
+            w.Str("tone", tone);
+            w.Str("instruction_replay", replay);
+            w.Num("decision_index", decisionIndex);
             Write(w);
         }
 

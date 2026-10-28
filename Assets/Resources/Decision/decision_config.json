@@ -5,6 +5,7 @@
   "schedule": {
     "onActionEnter": true,
     "onCountedError": true,
+    "onWrongComponent": true,
     "periodicSeconds": 0,
     "minIntervalSeconds": 20,
     "firstDecisionAfterStepMs": 15000

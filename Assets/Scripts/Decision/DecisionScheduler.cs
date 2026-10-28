@@ -107,10 +107,10 @@ namespace AdaptiveAR.Decision
 
         private void Bind()
         {
-            if (_session != null) { _session.OnActionEntered -= HandleActionEntered; _session.OnCountedError -= HandleCountedError; }
+            if (_session != null) { _session.OnActionEntered -= HandleActionEntered; _session.OnCountedError -= HandleCountedError; _session.OnWrongComponentGrabbed -= HandleWrongComponent; }
             _session = FindAnyObjectByType<AssemblySessionController>(FindObjectsInactive.Include);
             _logger = FindAnyObjectByType<SessionLogger>(FindObjectsInactive.Include);
-            if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; }
+            if (_session != null) { _session.OnActionEntered += HandleActionEntered; _session.OnCountedError += HandleCountedError; _session.OnWrongComponentGrabbed += HandleWrongComponent; }
             _inFlight = false;
             _nextPeriodicAt = Config != null && Config.Schedule.PeriodicSeconds > 0 ? Time.realtimeSinceStartup + (float)Config.Schedule.PeriodicSeconds : 1e9f;
             if (_logger != null) _logger.LogDecisionConfig(Config != null ? Config.Describe() : "none", Status, ProviderId);
@@ -125,6 +125,17 @@ namespace AdaptiveAR.Decision
         private void HandleCountedError()
         {
             if (Config != null && Config.Schedule.OnCountedError) TryRequest("counted_error", ignoreStepMinimum: true);
+        }
+
+        /// <summary>
+        /// Wrong-component selection is behavioural evidence of needing guidance. It goes
+        /// through the same gate as every trigger: one request in flight, the minimum
+        /// interval, and the minimum time on the step, so repeated wrong grabs can never
+        /// spam the provider. The context carries the cumulative error/attempt counts.
+        /// </summary>
+        private void HandleWrongComponent(string partKey)
+        {
+            if (Config != null && Config.Schedule.OnWrongComponent) TryRequest("wrong_component_grabbed:" + (partKey ?? "?"), ignoreStepMinimum: false);
         }
 
         private void Update()

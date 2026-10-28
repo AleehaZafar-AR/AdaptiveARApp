@@ -540,6 +540,25 @@ namespace AdaptiveAR.Steps
             return step.instructionAudio;
         }
 
+        private bool _replaying;
+
+        /// <summary>
+        /// Speaks the current action's authored instruction again, through the same path
+        /// that spoke it on entry (authored clip, else the sentence's clip, else the stage
+        /// clip), bypassing the repeat guard. Used after an upward support transition so
+        /// the operator hears the instruction with the richer guidance now on the bench.
+        /// Returns false when no action is current.
+        /// </summary>
+        public bool ReplayCurrentActionInstruction(string reason)
+        {
+            if (_currentAction == null) return false;
+            Debug.Log($"[StepPresenter] replaying instruction for '{_currentAction.Id}' ({reason}) at {CurrentLevel()}");
+            _replaying = true;
+            try { SpeakAction(_currentAction); }
+            finally { _replaying = false; }
+            return true;
+        }
+
         /// <summary>
         /// Speaks the instruction exactly as the card shows it, once, when the action is
         /// entered. An authored action clip wins; then the sentence's clip; then the
@@ -593,7 +612,7 @@ namespace AdaptiveAR.Steps
                 return;
             }
 
-            if (_speech != null && _speech.SpeakInstruction(action.instruction))
+            if (_speech != null && _speech.SpeakInstruction(action.instruction, _replaying))
             {
                 _pendingStageClip = null;
                 return;

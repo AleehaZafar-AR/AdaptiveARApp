@@ -11,6 +11,8 @@ namespace AdaptiveAR.Decision
     {
         public bool OnActionEnter = true;
         public bool OnCountedError = true;
+        /// <summary>A part that cannot satisfy the current action was picked up (behavioural error). Same throttling as every other trigger.</summary>
+        public bool OnWrongComponent = true;
         /// <summary>0 = no periodic requests.</summary>
         public double PeriodicSeconds = 0;
         public double MinIntervalSeconds = 20;
@@ -23,6 +25,7 @@ namespace AdaptiveAR.Decision
             if (o == null) return c;
             c.OnActionEnter = MiniJson.GetBool(o, "onActionEnter", c.OnActionEnter);
             c.OnCountedError = MiniJson.GetBool(o, "onCountedError", c.OnCountedError);
+            c.OnWrongComponent = MiniJson.GetBool(o, "onWrongComponent", c.OnWrongComponent);
             c.PeriodicSeconds = MiniJson.GetDouble(o, "periodicSeconds", c.PeriodicSeconds);
             c.MinIntervalSeconds = MiniJson.GetDouble(o, "minIntervalSeconds", c.MinIntervalSeconds);
             c.FirstDecisionAfterStepMs = MiniJson.GetDouble(o, "firstDecisionAfterStepMs", c.FirstDecisionAfterStepMs);
@@ -31,7 +34,7 @@ namespace AdaptiveAR.Decision
 
         public string Describe()
         {
-            return $"onActionEnter={OnActionEnter};onCountedError={OnCountedError};periodicSeconds={PeriodicSeconds};minIntervalSeconds={MinIntervalSeconds};firstDecisionAfterStepMs={FirstDecisionAfterStepMs}";
+            return $"onActionEnter={OnActionEnter};onCountedError={OnCountedError};onWrongComponent={OnWrongComponent};periodicSeconds={PeriodicSeconds};minIntervalSeconds={MinIntervalSeconds};firstDecisionAfterStepMs={FirstDecisionAfterStepMs}";
         }
     }
 

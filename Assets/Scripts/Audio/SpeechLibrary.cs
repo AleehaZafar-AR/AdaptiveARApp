@@ -110,7 +110,7 @@ namespace AdaptiveAR.Audio
     /// <summary>Short synthesised cues built once with AudioClip.Create (no asset involved).</summary>
     public static class ProceduralTones
     {
-        public enum Kind { Success = 0, Invalid = 1, Wrong = 2, Complete = 3, Timer = 4 }
+        public enum Kind { Success = 0, Invalid = 1, Wrong = 2, Complete = 3, Timer = 4, Notice = 5 }
 
         private static readonly Dictionary<Kind, AudioClip> _clips = new Dictionary<Kind, AudioClip>();
 
@@ -132,6 +132,7 @@ namespace AdaptiveAR.Audio
                 case Kind.Invalid:   samples = Sequence(rate, (330f, 0.12f), (0f, 0.04f), (330f, 0.12f)); break; // low double blip
                 case Kind.Complete:  samples = Sequence(rate, (523f, 0.14f), (659f, 0.14f), (784f, 0.16f), (1047f, 0.36f)); break; // rising major arpeggio
                 case Kind.Timer:     samples = Sequence(rate, (880f, 0.22f), (0f, 0.08f), (660f, 0.22f), (0f, 0.08f), (880f, 0.22f), (0f, 0.08f), (660f, 0.40f)); break; // alternating, clearly different
+                case Kind.Notice:    samples = Sequence(rate, (523f, 0.10f), (0f, 0.04f), (784f, 0.18f)); break;   // soft rising fifth: guidance changed, nothing is wrong
                 default:             samples = Sequence(rate, (220f, 0.16f), (0f, 0.05f), (220f, 0.16f)); break; // lower, longer
             }
             var clip = AudioClip.Create("tone_" + kind, samples.Length, 1, rate, false);
@@ -283,11 +284,14 @@ namespace AdaptiveAR.Audio
         }
 
         /// <summary>Speaks an instruction once, replacing any instruction still playing.</summary>
-        public bool SpeakInstruction(string text)
+        public bool SpeakInstruction(string text) { return SpeakInstruction(text, false); }
+
+        /// <summary>As above; ignoreRepeatGuard lets a deliberate replay of the same sentence through.</summary>
+        public bool SpeakInstruction(string text, bool ignoreRepeatGuard)
         {
             if (!enabledSpeech || string.IsNullOrEmpty(text)) return false;
 
-            if (text == _lastText && Time.time - _lastAt < repeatGuardSeconds)
+            if (!ignoreRepeatGuard && text == _lastText && Time.time - _lastAt < repeatGuardSeconds)
             {
                 Debug.Log($"[Speech] instruction \"{text}\" skipped: repeat guard.");
                 return false;
@@ -340,7 +344,7 @@ namespace AdaptiveAR.Audio
             if (!enabledSpeech || _feedbackSource == null) return;
             AudioClip clip = ProceduralTones.Get(kind);
             if (clip == null) return;
-            if (kind == ProceduralTones.Kind.Timer) StopFeedback("tone: " + kind);   // the timer never cuts narration
+            if (kind == ProceduralTones.Kind.Timer || kind == ProceduralTones.Kind.Notice) StopFeedback("tone: " + kind);   // timer and notice never cut narration
             else StopAll("tone: " + kind);
             _feedbackSource.PlayOneShot(clip, 0.8f);
             NotePlay("tone:" + kind, clip);

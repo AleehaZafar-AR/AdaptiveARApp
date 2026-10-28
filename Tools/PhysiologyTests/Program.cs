@@ -94,6 +94,14 @@ namespace AdaptiveAR.Physiology.Tests
                   && sys.Contains("exactly one of these three tokens") && sys.Contains("no JSON") && sys.Contains("no reason") && !sys.Contains("\"reason\"") && !sys.Contains("{\"action\"")
                   && prodUser.EndsWith(AdaptiveAR.Decision.LlmDecisionCore.UserTurnInstruction) && prodUser.StartsWith("{")
                   && AdaptiveAR.Decision.MiniJson.GetDouble(prodBody, "max_tokens", 0) == 16 && new AdaptiveAR.Decision.LlmConfig().MaxTokens == 16, prodSystem);
+            // 13h physiology's role is explicit: primary task evidence, corroborating only, never alone, missing/stale/low-quality never penalises, no threshold
+            Check("13h prompt states the physiology role", sys.Contains("Task performance evidence is always primary") && sys.Contains("corroborating context only")
+                  && sys.Contains("must never by itself cause a support change") && sys.Contains("must never count against the operator")
+                  && sys.Contains("no fixed physiological threshold") && !sys.ToLowerInvariant().Contains("stress level"), sys);
+            // 13i schedule config: wrong-component trigger is on by default and configurable
+            var schedDefault = new AdaptiveAR.Decision.DecisionScheduleConfig();
+            var schedOff = AdaptiveAR.Decision.DecisionScheduleConfig.FromJson(AdaptiveAR.Decision.MiniJson.ParseObject("{\"onWrongComponent\":false,\"minIntervalSeconds\":30}"));
+            Check("13i wrong-component trigger config", schedDefault.OnWrongComponent && !schedOff.OnWrongComponent && schedOff.MinIntervalSeconds == 30 && schedDefault.Describe().Contains("onWrongComponent=True"), schedDefault.Describe());
             Check("13g default config asset uses the token budget", AdaptiveAR.Decision.DecisionConfig.FromJson(System.IO.File.ReadAllText(System.IO.Path.Combine(Program.RepoRoot(), "Assets", "Resources", "Decision", "decision_config.json")), "file").Llm.MaxTokens == 16);
             Check("13e friendly model name", AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-sonnet-5-5") == "Claude Sonnet 5.5"
                   && AdaptiveAR.Decision.LlmDecisionCore.FriendlyModelName("claude-opus-5-5") == "Claude Opus 5.5" && sonnet.DisplayName == "Claude Sonnet 5.5", sonnet.DisplayName);

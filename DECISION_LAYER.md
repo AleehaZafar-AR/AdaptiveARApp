@@ -29,7 +29,7 @@ Status 2026-10-27: implemented on branch `hrv-integration`; compiles; headless t
 `decision_config.json` (override on the headset: `persistentDataPath/AdaptiveAR/config/decision_config.json`):
 
 - `enabled`, `provider`: `llm` | `reference` | `none`
-- `schedule`: `onActionEnter`, `onCountedError`, `periodicSeconds` (0 = off), `minIntervalSeconds`, `firstDecisionAfterStepMs`
+- `schedule`: `onActionEnter`, `onCountedError`, `onWrongComponent` (a wrong part picked up; same gate as every trigger: one request in flight, `minIntervalSeconds`, `firstDecisionAfterStepMs`, so repeated wrong grabs cannot spam the provider), `periodicSeconds` (0 = off), `minIntervalSeconds`, `firstDecisionAfterStepMs`
 - `llm`: `provider` (anthropic), `model`, `endpoint`, `apiVersion`, `maxTokens` (16: one bare token), `timeoutMs`, `systemPrompt` (null = built-in). No sampling parameters are sent: `temperature` is rejected by `claude-sonnet-5-5` (HTTP 400, found on the 2026-10-27 Quest run) and the request builder never emits it; a `temperature` key in a config file is ignored.
 - `referencePolicy`: `name`, `slowRatioIncrease`, `errorsOnStepIncrease`, `attemptsOnStepIncrease`, `fastRatioDecrease`, `minStepElapsedMsForIncrease`, `minStepElapsedMsForDecrease`, `clampAtBoundaries`, `fallbackExpectedMs` — **placeholders pending the literature review**; the `name` is written into every decision and evaluation output.
 
@@ -43,11 +43,19 @@ or copy `ai_provider.local.example.json` → `Assets/Resources/Decision/ai_provi
 
 The model's whole reply must be one bare token: `KEEP_SUPPORT`, `INCREASE_SUPPORT` or `DECREASE_SUPPORT`. The system prompt and a one-line user-turn instruction both say so; no reason is requested; `maxTokens` is 16. The parser is strict: a bare token or a complete `{"action": ...}` object parses, everything else (prose, truncated JSON, unknown tokens) is a recorded violation with fallback `KEEP_SUPPORT`. History: the 2026-10-28 Quest run asked for `{"action","reason"}` under 64 tokens; every reason was cut mid-sentence, the object never closed, and all five decisions were (correctly) `Unparseable`. The contract changed; the parser did not.
 
+## Physiology in the contract
+
+The system prompt states the role explicitly: task performance evidence is primary; the optional physiological block is corroborating context that may strengthen or weaken a task-supported conclusion but never causes a change by itself; missing, stale or low-quality physiology is absent evidence and never counts against the operator; there is no fixed threshold or stress cut-off. The reference policy (`placeholder_v0`) still has no physiological rule.
+
+## Support transition cue
+
+When an applied Ok decision raises the level (L1→L2 or L2→L3) the session shows "Additional guidance enabled" on the participant card for a few seconds, plays a soft notice tone that does not cut narration, waits briefly, then replays the current action's authored instruction through the normal speech path (repeat guard bypassed) with the new guidance already rendered. Nothing happens for KEEP, downward, saturated, fallback or failed decisions. Logged as `support_transition_cue` (twice: `instruction_replay=pending`, then the outcome) with `from_level`, `to_level`, `action_id`, `message_surface`, `tone`, `decision_index`. Wording, hold time and delay are inspector fields on `AssemblySessionController`.
+
 ## Live flow
 
 `DecisionScheduler` (persistent, binds each scene) → on a trigger → `AssemblySessionController.RequestAndApplyDecisionRoutine(provider)` → `BuildDecisionContext()` (task state + physiology snapshot or null) → `LlmDecisionProvider` → `LlmDecisionCore.Interpret` → `ApplyDecision` (constrained set, fallback, `decision` log line with `context`, `ai_input`, `response.raw_output`, `constraint_status`, `latency_ms`, `level_before/after`, `applied`) → `SupportLevelController.ApplyAction("ai_decision")` → presenter / panels re-render the level.
 
-Log lines added: `decision_config` (at bind, no secrets), `decision_trigger` (why a request was made), `decision` (existing, now also carries `ai_input`), `decision_context_probe` (full context at every action entry, replayable).
+Log lines added: `decision_config` (at bind, no secrets), `decision_trigger` (why a request was made: `action_enter:<id>`, `counted_error`, `wrong_component_grabbed:<part>`, `periodic`), `decision` (existing, now also carries `ai_input`), `decision_context_probe` (full context at every action entry, replayable).
 
 ## Technical evaluation (CLAUDE.md §3)
 

@@ -113,10 +113,11 @@ namespace AdaptiveAR.UI
 
         [SerializeField] private float refreshInterval = 0.12f;
 
-        private enum FeedbackKind { None, Cue, WrongPart, Failed, Success }
+        private enum FeedbackKind { None, Cue, WrongPart, Failed, Success, Notice }
 
         private float _timer;
         private float _successUntil;
+        private float _noticeUntil;
         private FeedbackKind _feedbackKind;
         private string _lastActionKey;
         private string _lastLoggedText;
@@ -417,6 +418,16 @@ namespace AdaptiveAR.UI
             SetFeedback(FeedbackKind.Failed, nearMessage, MrTheme.Warning);
         }
 
+        /// <summary>
+        /// A brief neutral notice on the feedback line (e.g. "Additional guidance enabled").
+        /// Holds for holdSeconds over the live cues, then the usual cues resume.
+        /// </summary>
+        public void ShowNotice(string text, float holdSeconds)
+        {
+            SetFeedback(FeedbackKind.Notice, text, MrTheme.Accent);
+            _noticeUntil = Time.time + Mathf.Max(0.5f, holdSeconds);
+        }
+
         private void SetFeedback(FeedbackKind kind, string text, Color color)
         {
             _feedbackKind = kind;
@@ -444,9 +455,10 @@ namespace AdaptiveAR.UI
         {
             if (validator == null || !validator.IsActive) return;
 
-            // Sticky states (wrong part held, success hold) win over the live cue.
+            // Sticky states (wrong part held, success hold, notice hold) win over the live cue.
             if (_feedbackKind == FeedbackKind.WrongPart && validator.WrongPartHeld) return;
             if (_feedbackKind == FeedbackKind.Success && Time.time < _successUntil) return;
+            if (_feedbackKind == FeedbackKind.Notice && Time.time < _noticeUntil) return;
 
             // FAR / NEAR from the distance to the actual target while the part is held.
             switch (validator.CurrentProximity)
@@ -486,6 +498,7 @@ namespace AdaptiveAR.UI
             _timer += Time.deltaTime;
             if (_timer < refreshInterval) return;
             _timer = 0f;
+            if (_feedbackKind == FeedbackKind.Notice && Time.time >= _noticeUntil) ClearFeedback();
             Refresh();
         }
 
@@ -510,7 +523,7 @@ namespace AdaptiveAR.UI
             if (actionKey != _lastActionKey)
             {
                 _lastActionKey = actionKey;
-                if (_feedbackKind != FeedbackKind.Success) ClearFeedback();
+                if (_feedbackKind != FeedbackKind.Success && _feedbackKind != FeedbackKind.Notice) ClearFeedback();
             }
 
             if (stageText != null)
