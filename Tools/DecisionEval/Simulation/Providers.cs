@@ -106,7 +106,12 @@ namespace AdaptiveAR.Decision.Simulation
                         string body = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                         sw.Stop();
                         ReadUsage(body);
-                        return LlmDecisionCore.Interpret(_cfg, (long)resp.StatusCode, body, (float)sw.Elapsed.TotalMilliseconds, false, null);
+                        DecisionResponse r = LlmDecisionCore.Interpret(_cfg, (long)resp.StatusCode, body, (float)sw.Elapsed.TotalMilliseconds, false, null);
+                        // Harness-only diagnostics: keep an excerpt of the HTTP body for any non-Ok reply so a
+                        // malformed output can be explained from the record (never done on the headset).
+                        if (r.Status != ConstraintStatus.Ok && r.Status != ConstraintStatus.SaturatedAtBoundary && body != null)
+                            r.ProviderReason = "body: " + (body.Length > 900 ? body.Substring(0, 900) + "..." : body);
+                        return r;
                     }
                 }
             }

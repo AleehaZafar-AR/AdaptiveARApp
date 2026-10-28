@@ -62,7 +62,7 @@ namespace AdaptiveAR.Decision.Simulation
         public int PendingEvents, PendingErrors, PendingSuccesses;
         public DecisionContext Context;
         public string AiInput, Evidence;
-        public string RawOutput;
+        public string RawOutput, ProviderReason;
         public SupportAction ParsedAction, AppliedAction;
         public string ConstraintApplied;
         public ConstraintStatus Status;
@@ -328,7 +328,7 @@ namespace AdaptiveAR.Decision.Simulation
                 StepId = _stepId, ActionId = _actionId, LevelBefore = before, AllowedActions = DecisionConstraints.AllowedActions(before),
                 Trigger = r.Trigger, DeferredFrom = r.DeferredFrom, PendingEvents = r.PendingEvents, PendingErrors = r.PendingErrors, PendingSuccesses = r.PendingSuccesses,
                 Context = ctx, AiInput = aiInput, Evidence = DecisionEvidence.Summarise(ctx), AiInputKey = AiInputKeyOf(aiInput),
-                RawOutput = response.RawOutput, ParsedAction = response.ParsedAction, Status = response.Status, UsedFallback = response.UsedFallback, LatencyMs = response.LatencyMs,
+                RawOutput = response.RawOutput, ParsedAction = response.ParsedAction, Status = response.Status, UsedFallback = response.UsedFallback, LatencyMs = response.LatencyMs, ProviderReason = response.ProviderReason,
                 ReferenceAction = refResp != null ? (SupportAction?)refResp.ParsedAction : null, ReferenceReason = refResp != null ? refResp.ProviderReason : null
             };
             var usage = _provider as IUsageReporting;

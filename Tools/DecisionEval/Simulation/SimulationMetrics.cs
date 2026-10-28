@@ -96,7 +96,7 @@ namespace AdaptiveAR.Decision.Simulation
                 { "allowed_actions", new List<object>(r.AllowedActions) }, { "trigger", r.Trigger }, { "deferred_from", r.DeferredFrom },
                 { "pending_events", (double)r.PendingEvents }, { "pending_errors", (double)r.PendingErrors }, { "pending_successes", (double)r.PendingSuccesses },
                 { "context", MiniJson.ParseObject(r.AiInput) }, { "ai_input", r.AiInput }, { "evidence", r.Evidence },
-                { "response", new Dictionary<string, object> { { "raw_output", r.RawOutput }, { "parsed_action", r.ParsedAction.ToString() }, { "constraint_status", r.Status.ToString() }, { "used_fallback", r.UsedFallback }, { "latency_ms", (double)r.LatencyMs },
+                { "response", new Dictionary<string, object> { { "raw_output", r.RawOutput }, { "parsed_action", r.ParsedAction.ToString() }, { "constraint_status", r.Status.ToString() }, { "used_fallback", r.UsedFallback }, { "latency_ms", (double)r.LatencyMs }, { "provider_reason", r.ProviderReason },
                     { "input_tokens", r.InputTokens.HasValue ? (object)(double)r.InputTokens.Value : null }, { "output_tokens", r.OutputTokens.HasValue ? (object)(double)r.OutputTokens.Value : null }, { "cost_usd", r.CostUsd.HasValue ? (object)r.CostUsd.Value : null } } },
                 { "applied", r.Applied }, { "applied_action", r.AppliedAction.ToString() }, { "constraint_applied", r.ConstraintApplied },
                 { "reference_action", r.ReferenceAction.HasValue ? r.ReferenceAction.Value.ToString() : null }, { "reference_reason", r.ReferenceReason }
