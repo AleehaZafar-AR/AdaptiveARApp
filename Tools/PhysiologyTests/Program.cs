@@ -534,6 +534,8 @@ namespace AdaptiveAR.Physiology.Tests
 
             DecisionTests.Run(Check);
 
+            SimulationTests.Run(Check);
+
             Console.WriteLine($"\n{_passed} passed, {_failed} failed");
             return _failed == 0 ? 0 : 1;
         }
