@@ -2857,5 +2857,97 @@ namespace AdaptiveAR.Steps
             positionError = PositionError(_active);
             rotationError = OrientationError(_active);
         }
+
+        // =====================================================================
+        // Technical-validation entry points (Level 2 automated in-engine validation)
+        // =====================================================================
+        // Called ONLY by AdaptiveAR.TechnicalValidation.TechnicalValidationRunner, which
+        // exists only when persistentDataPath/AdaptiveAR/config/technical_validation.json
+        // enables it. Nothing in the participant flow calls these. Each one raises exactly
+        // the outcome the live evaluation raises at the end of a real attempt (same
+        // OnAttemptEvaluated / OnStepValidated / OnWrongPartGrabbed events, same snap,
+        // lock, join and log paths), so the session controller, ledger, scheduler, support
+        // controller, presenter and logger downstream cannot tell them apart. No hand or
+        // controller motion is simulated. Each returns false, and changes nothing, when the
+        // validator is not in a state where a real participant could have produced the
+        // outcome (not armed, action already complete).
+
+        /// <summary>
+        /// Technical validation only: the armed action's part is accepted exactly as if it had
+        /// been placed within tolerance (snap, lock, join, success events).
+        /// </summary>
+        public bool TechnicalValidationSucceed(string trigger)
+        {
+            if (!IsActive || _completed || _active == null || _active.tf == null || CurrentTarget == null) return false;
+            Debug.Log($"[TechnicalValidation] injected SUCCESS on '{_active.key}' (action {CurrentActionId()}): production Succeed() path.");
+            Succeed("technical_validation:" + (trigger ?? "success"), 0f, 0f);
+            return true;
+        }
+
+        /// <summary>
+        /// Technical validation only: one unsuccessful attempt on the armed action. counted =
+        /// true is a deliberate failed placement (released in the zone, a counted error);
+        /// false is an abandoned attempt (carried out of the zone, no counted error).
+        /// </summary>
+        public bool TechnicalValidationFailAttempt(bool counted, string trigger)
+        {
+            if (!IsActive || _completed || _active == null || _active.tf == null) return false;
+            if (_inAttempt) { Debug.Log("[TechnicalValidation] an attempt is already open; the injected outcome closes it."); }
+            else
+            {
+                _inAttempt = true;
+                AttemptId++;
+                _attemptBestPos = float.MaxValue;
+                _attemptRotAtBestPos = float.MaxValue;
+                _attemptReachedPosition = false;
+                _attemptBestRotWhenPositioned = float.MaxValue;
+            }
+            // Closest approach: just outside position tolerance, orientation off by the
+            // tolerance as well: "incorrect_position_and_orientation", not far away.
+            _attemptBestPos = _posTol * 1.5f;
+            _attemptRotAtBestPos = _rotTol * 1.5f;
+            _attemptReachedPosition = false;
+            Debug.Log($"[TechnicalValidation] injected {(counted ? "COUNTED ERROR" : "FAILED ATTEMPT")} on '{_active.key}' (action {CurrentActionId()}): production FailAttempt() path.");
+            FailAttempt("technical_validation:" + (trigger ?? (counted ? "released_in_zone" : "left_zone")), counted);
+            return true;
+        }
+
+        /// <summary>
+        /// Technical validation only: a wrong component picked up and put down again. The
+        /// part is a real selectable part that the current action does not accept (the one
+        /// whose key is given, else the first such part). Raises the same grab and release
+        /// events as a real wrong grab; nothing is moved.
+        /// </summary>
+        public bool TechnicalValidationWrongComponent(string preferredKey, out string usedKey)
+        {
+            usedKey = null;
+            if (!monitorWrongParts) return false;
+            bool physical = IsActive && !_completed;
+            if (!physical && !_ackArmed) return false;
+            Candidate chosen = null;
+            foreach (Candidate c in _watchedList)
+            {
+                if (c == null || c.tf == null) continue;
+                GameObject go = c.tf.gameObject;
+                if (_toleratedObjects.Contains(go) || _acceptedObjects.Contains(go) || _ackObjects.Contains(go)) continue;
+                if (_consumed.Contains(c.key)) continue;
+                var padlock = go.GetComponent<PlacementLock>();
+                if (padlock != null && padlock.IsLocked) continue;
+                if (preferredKey != null && c.key == preferredKey) { chosen = c; break; }
+                if (chosen == null) chosen = c;
+            }
+            if (chosen == null) return false;
+            usedKey = chosen.key;
+            _wrongEpisodeObject = chosen.tf.gameObject;
+            _wrongHeld = chosen;
+            Debug.Log($"[TechnicalValidation] injected WRONG COMPONENT '{chosen.key}' ({chosen.tf.name}) during action {CurrentActionId()}: production OnWrongPartGrabbed path.");
+            try { OnWrongPartGrabbed?.Invoke(chosen.key, chosen.tf); }
+            catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartGrabbed handler threw: " + e); }
+            _wrongEpisodeObject = null;
+            _wrongHeld = null;
+            try { OnWrongPartReleased?.Invoke(chosen.key, chosen.tf); }
+            catch (Exception e) { Debug.LogError("[WrongPart] OnWrongPartReleased handler threw: " + e); }
+            return true;
+        }
     }
 }
