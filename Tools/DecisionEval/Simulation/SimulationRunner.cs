@@ -19,7 +19,8 @@ namespace AdaptiveAR.Decision.Simulation
         public List<ScenarioScript> Scenarios = new List<ScenarioScript>();
         public string[] Physiology = PhysiologyProfiles.All;
         public int Repetitions = 1;
-        public bool AdvanceClockByLatency = true;
+        /// <summary>Default false: provider wall-clock latency is a performance metric and never advances simulated participant time, so variants and repetitions share identical scripted timelines.</summary>
+        public bool AdvanceClockByLatency = false;
         public List<string> ReplayFiles = new List<string>();
         public int ReplayRepeats = 5;
         public bool Metamorphic = true;

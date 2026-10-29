@@ -9,7 +9,7 @@
 //   replay=<session.jsonl>[;more]    real headset sessions to replay (default none)
 //   replay_reps=<n>                  resubmissions per recorded context (default 5)
 //   metamorphic=true|false           (default true)   metamorphic_reps=<n> (default 3)
-//   latency_clock=true|false         advance the fake clock by measured latency (default true)
+//   latency_clock=true|false         advance the fake clock by measured latency (default false: latency is a metric, not simulated time)
 //   price_in=<usd per M input tokens> price_out=<usd per M output tokens> (cost estimate assumptions)
 //   config=<decision_config.json>    keyfile=<ai_provider.local.json> (live-llm; never printed)
 //   out=<dir>                        (default eval_out/<utc timestamp>_<provider>)
@@ -107,7 +107,7 @@ namespace AdaptiveAR.Decision.Eval
                 Config = LoadConfig(a),
                 Physiology = PhysiologyProfiles.ParseList(Get(a, "physiology", "all")),
                 Repetitions = int.Parse(Get(a, "reps", "1")),
-                AdvanceClockByLatency = bool.Parse(Get(a, "latency_clock", "true")),
+                AdvanceClockByLatency = bool.Parse(Get(a, "latency_clock", "false")),
                 ReplayRepeats = int.Parse(Get(a, "replay_reps", "5")),
                 Metamorphic = bool.Parse(Get(a, "metamorphic", "true")),
                 MetamorphicRepeats = int.Parse(Get(a, "metamorphic_reps", "3")),
