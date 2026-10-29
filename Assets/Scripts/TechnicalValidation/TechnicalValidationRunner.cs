@@ -364,7 +364,8 @@ namespace AdaptiveAR.TechnicalValidation
                     yield return FinishSequence(i);
                     continue;
                 }
-                Inject(ev, i, false);
+                if (ev.Kind == ValidationEventKind.Success && PlacementMotion.Enabled(Config)) yield return AnimatedSuccess(ev, i, false);   // presentation only
+                else Inject(ev, i, false);
                 yield return null;
             }
 
@@ -454,6 +455,63 @@ namespace AdaptiveAR.TechnicalValidation
             Seq.Close(injected, detail, partKey, _session.CurrentActionId);
         }
 
+        // ------------------------------------------------------------------ presentation-only placement motion
+
+        /// <summary>
+        /// Presentation mode only (PlacementMotion.Enabled): stage the scripted success visually
+        /// (brief highlight, eased move + rotate to the pose the production snap will produce) and
+        /// THEN inject the same production success path that validation mode injects immediately.
+        /// The logical event is recorded at that injection, exactly as in validation mode; the
+        /// motion itself is diagnostic-only (presentation_motion_* lines in the .tv.jsonl). Nothing
+        /// here touches support, decision, scheduler, gate or timing state.
+        /// </summary>
+        private IEnumerator AnimatedSuccess(ValidationEvent ev, int index, bool tail)
+        {
+            Transform part; Vector3 targetPos; Quaternion targetRot;
+            if (_validator == null || !_validator.TechnicalValidationTryGetPlacement(out part, out targetPos, out targetRot))
+            {
+                string reason = _validator == null ? "no validator" : "validator not armed";
+                WriteTv("presentation_motion_skipped", w => { w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("reason", reason); });
+                Inject(ev, index, tail);
+                yield break;
+            }
+            var run = new PlacementMotionRun(Config.EffectivePlacementMotionSeconds, Config.EffectivePlacementHighlightSeconds);
+            Vector3 fromPos = part.position;
+            float angleDeg = Quaternion.Angle(part.rotation, targetRot);
+            float distanceM = Vector3.Distance(fromPos, targetPos);
+            string partName = part.name;
+            string actionId = _session.CurrentActionId;
+            double startedMs = SessionMs();
+            string savedText = CurrentEventText;
+            CurrentEventText = savedText + " [motion]";
+            WriteTv("presentation_motion_started", w =>
+            {
+                w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("action_id", actionId); w.Str("part", partName);
+                w.Num("duration_s", (float)run.DurationSeconds); w.Num("highlight_s", (float)run.HighlightSeconds); w.Num("distance_m", distanceM); w.Num("angle_deg", angleDeg);
+            });
+            if (Config.Verbose) Debug.Log("[TechnicalValidation] presentation motion for event #" + (index + 1) + " on '" + partName + "': " + distanceM.ToString("F3", CultureInfo.InvariantCulture) + " m / " + angleDeg.ToString("F0", CultureInfo.InvariantCulture) + " deg over " + run.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + " s");
+
+            bool wasKinematic = PresentationPlacementAnimator.PrepareBody(part);
+            yield return PresentationPlacementAnimator.Animate(part, targetPos, targetRot, run, () => Time.realtimeSinceStartup);
+
+            float residualPos = part != null ? Vector3.Distance(part.position, targetPos) : -1f;
+            float residualRot = part != null ? Quaternion.Angle(part.rotation, targetRot) : -1f;
+            double elapsedMs = SessionMs() - startedMs;
+            WriteTv("presentation_motion_completed", w =>
+            {
+                w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("part", partName); w.Num("elapsed_ms", (float)elapsedMs);
+                w.Num("residual_pos_m", residualPos); w.Num("residual_rot_deg", residualRot); w.Bool("motion_finished", run.MotionFinished);
+            });
+            CurrentEventText = savedText;
+
+            // The same production pathway validation mode uses, recorded as the logical event.
+            int before = _record.Events.Count;
+            if (!run.Complete(() => Inject(ev, index, tail), Time.realtimeSinceStartup))
+                Inject(ev, index, tail);   // only if the motion could not finish (part destroyed): the logical event is injected regardless
+            var rec = _record.Events.Count > before ? _record.Events[_record.Events.Count - 1] : null;
+            if (rec != null && !rec.Injected) PresentationPlacementAnimator.RestoreBody(part, wasKinematic);
+        }
+
         /// <summary>Clean Continue / success events at the finish delay until the sequence ends (bounded).</summary>
         private IEnumerator FinishSequence(int scriptIndex)
         {
@@ -474,7 +532,9 @@ namespace AdaptiveAR.TechnicalValidation
                 }
                 idle = 0;
                 CurrentEventText = $"finish tail {++guard}: {ValidationEvent.KindToName(kind)}";
-                Inject(new ValidationEvent { Kind = kind, Note = "finish_sequence" }, scriptIndex, true);
+                var tailEvent = new ValidationEvent { Kind = kind, Note = "finish_sequence" };
+                if (kind == ValidationEventKind.Success && PlacementMotion.Enabled(Config)) yield return AnimatedSuccess(tailEvent, scriptIndex, true);   // presentation only
+                else Inject(tailEvent, scriptIndex, true);
                 yield return null;
             }
         }

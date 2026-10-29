@@ -56,6 +56,11 @@ namespace AdaptiveAR.TechnicalValidation
         /// <summary>Delay between the injected events that finish the sequence after the scripted part. Null = mode default (validation 4, presentation 5).</summary>
         public double? FinishDelaySeconds;
 
+        /// <summary>Presentation only: seconds of eased motion from the part's pose to the validated target pose before the production success path runs. Null = 0.9 in presentation. Always 0 (immediate injection) in validation mode, whatever the file says.</summary>
+        public double? PlacementMotionSeconds;
+        /// <summary>Presentation only: brief highlight (scale pulse) of the part before the motion. Null = 0.35 in presentation. Always 0 in validation mode.</summary>
+        public double? PlacementHighlightSeconds;
+
         /// <summary>Seconds after the assembly starts (workspace placed, Begin pressed, first step entered) before the first scripted event.</summary>
         public double StartDelaySeconds = 3.0;
         /// <summary>Participant id written on every production log line. Null = "TV_<scenario>".</summary>
@@ -74,6 +79,26 @@ namespace AdaptiveAR.TechnicalValidation
         public double EffectivePostTransitionHoldSeconds { get { return PostTransitionHoldSeconds ?? (Mode == ValidationMode.Presentation ? 6.0 : 0.0); } }
         public double EffectiveFinishDelaySeconds { get { return FinishDelaySeconds ?? (Mode == ValidationMode.Presentation ? 5.0 : 4.0); } }
         public string EffectiveParticipantId { get { return string.IsNullOrEmpty(ParticipantId) ? "TV_" + (Scenario ?? "unknown") : ParticipantId; } }
+        /// <summary>0 unless technical validation is enabled AND the mode is presentation: formal validation results never depend on animation timing, and a participant session never has a motion.</summary>
+        public double EffectivePlacementMotionSeconds
+        {
+            get
+            {
+                if (!Enabled || Mode != ValidationMode.Presentation) return 0;
+                double v = PlacementMotionSeconds ?? PlacementMotion.DefaultDurationSeconds;
+                return v > 0 && !double.IsNaN(v) ? v : 0;
+            }
+        }
+        /// <summary>0 outside presentation mode, and 0 when the motion itself is off.</summary>
+        public double EffectivePlacementHighlightSeconds
+        {
+            get
+            {
+                if (EffectivePlacementMotionSeconds <= 0) return 0;
+                double v = PlacementHighlightSeconds ?? PlacementMotion.DefaultHighlightSeconds;
+                return v > 0 && !double.IsNaN(v) ? v : 0;
+            }
+        }
 
         /// <summary>The real-time delay for an authored delay: scaled, then floored. Never negative.</summary>
         public double ScaleDelay(double authoredSeconds)
@@ -102,6 +127,8 @@ namespace AdaptiveAR.TechnicalValidation
             cfg.MinDelaySeconds = MiniJson.GetNullableDouble(o, "minDelaySeconds");
             cfg.PostTransitionHoldSeconds = MiniJson.GetNullableDouble(o, "postTransitionHoldSeconds");
             cfg.FinishDelaySeconds = MiniJson.GetNullableDouble(o, "finishDelaySeconds");
+            cfg.PlacementMotionSeconds = MiniJson.GetNullableDouble(o, "placementMotionSeconds");
+            cfg.PlacementHighlightSeconds = MiniJson.GetNullableDouble(o, "placementHighlightSeconds");
             cfg.StartDelaySeconds = MiniJson.GetDouble(o, "startDelaySeconds", 3.0);
             cfg.ParticipantId = MiniJson.GetString(o, "participantId", null);
             cfg.SensorStabilisationSeconds = MiniJson.GetNullableDouble(o, "sensorStabilisationSeconds");
@@ -142,7 +169,8 @@ namespace AdaptiveAR.TechnicalValidation
             return $"enabled={Enabled};scenario={Scenario};mode={ModeName};physiology={PhysiologyName};delayScale={EffectiveDelayScale.ToString("0.##", c)};" +
                    $"minDelay={EffectiveMinDelaySeconds.ToString("0.##", c)}s;postTransitionHold={EffectivePostTransitionHoldSeconds.ToString("0.##", c)}s;" +
                    $"finishDelay={EffectiveFinishDelaySeconds.ToString("0.##", c)}s;startDelay={StartDelaySeconds.ToString("0.##", c)}s;participant={EffectiveParticipantId};" +
-                   $"sensorStabilisation={(SensorStabilisationSeconds.HasValue ? SensorStabilisationSeconds.Value.ToString("0.##", c) + "s" : "unchanged")};source={SourceDescription}";
+                   $"sensorStabilisation={(SensorStabilisationSeconds.HasValue ? SensorStabilisationSeconds.Value.ToString("0.##", c) + "s" : "unchanged")};" +
+                   $"placementMotion={EffectivePlacementMotionSeconds.ToString("0.##", c)}s;placementHighlight={EffectivePlacementHighlightSeconds.ToString("0.##", c)}s;source={SourceDescription}";
         }
     }
 }

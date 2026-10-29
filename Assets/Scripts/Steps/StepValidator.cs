@@ -2885,6 +2885,24 @@ namespace AdaptiveAR.Steps
         }
 
         /// <summary>
+        /// Technical validation only (presentation staging): the armed action's part and the
+        /// pose the production snap (SnapToTarget) will give it on success: EffectiveTargetRotation,
+        /// then the geometric centres aligned. Read-only: nothing is moved or changed, and the
+        /// production snap still owns the final pose when TechnicalValidationSucceed runs.
+        /// </summary>
+        public bool TechnicalValidationTryGetPlacement(out Transform part, out Vector3 targetPosition, out Quaternion targetRotation)
+        {
+            part = null; targetPosition = Vector3.zero; targetRotation = Quaternion.identity;
+            if (!IsActive || _completed || _active == null || _active.tf == null || CurrentTarget == null) return false;
+            part = _active.tf;
+            targetRotation = EffectiveTargetRotation(_active);
+            // CentreWorld(tf, centreLocal) = TransformPoint(centreLocal), evaluated under the target rotation.
+            Vector3 centreUnderTargetRotation = part.position + targetRotation * Vector3.Scale(part.lossyScale, _active.centreLocal);
+            targetPosition = part.position + (TargetCentre(_active, CurrentTarget) - centreUnderTargetRotation);
+            return true;
+        }
+
+        /// <summary>
         /// Technical validation only: one unsuccessful attempt on the armed action. counted =
         /// true is a deliberate failed placement (released in the zone, a counted error);
         /// false is an abandoned attempt (carried out of the zone, no counted error).

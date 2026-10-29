@@ -19,6 +19,7 @@
     <Compile Include="..\..\Assets\Scripts\TechnicalValidation\ValidationScenario.cs" />
     <Compile Include="..\..\Assets\Scripts\TechnicalValidation\Level2Summary.cs" />
     <Compile Include="..\..\Assets\Scripts\TechnicalValidation\CompletionSequencer.cs" />
+    <Compile Include="..\..\Assets\Scripts\TechnicalValidation\PlacementMotion.cs" />
     <Compile Include="..\..\Tools\DecisionEval\Simulation\*.cs" />
     <Compile Include="..\..\Assets\Scripts\Physiology\PpiSample.cs" />
     <Compile Include="..\..\Assets\Scripts\Physiology\HrvMath.cs" />

@@ -162,6 +162,97 @@ namespace AdaptiveAR.Physiology.Tests
             }
 
             CompletionOrdering(check);
+            PlacementMotionTests(check);
+        }
+
+        /// <summary>
+        /// 40n: presentation-only placement motion. Gating (presentation yes, validation no,
+        /// participant never), easing, lifecycle, final pose = target, once-only hand-over to
+        /// the production path, and no reference to support/decision/scheduler state.
+        /// </summary>
+        private static void PlacementMotionTests(Action<string, bool, string> check)
+        {
+            var participant = TechnicalValidationConfig.Parse(null, "none");
+            var notEnabled = TechnicalValidationConfig.Parse("{\"enabled\":false,\"mode\":\"presentation\",\"placementMotionSeconds\":1.0}", "x");
+            var validation = TechnicalValidationConfig.Parse("{\"enabled\":true,\"scenario\":\"TV1\",\"mode\":\"validation\",\"placementMotionSeconds\":1.0,\"placementHighlightSeconds\":0.5}", "x");
+            var presentation = TechnicalValidationConfig.Parse("{\"enabled\":true,\"scenario\":\"TV2\",\"mode\":\"presentation\"}", "x");
+            var presentationCfg = TechnicalValidationConfig.Parse("{\"enabled\":true,\"scenario\":\"TV2\",\"mode\":\"presentation\",\"placementMotionSeconds\":1.2,\"placementHighlightSeconds\":0.2}", "x");
+            var presentationOff = TechnicalValidationConfig.Parse("{\"enabled\":true,\"scenario\":\"TV2\",\"mode\":\"presentation\",\"placementMotionSeconds\":0}", "x");
+            check("40n presentation mode selects animated placement (0.9 s motion, 0.35 s highlight by default)",
+                  PlacementMotion.Enabled(presentation) && Math.Abs(presentation.EffectivePlacementMotionSeconds - 0.9) < 1e-9 && Math.Abs(presentation.EffectivePlacementHighlightSeconds - 0.35) < 1e-9
+                  && PlacementMotion.Enabled(presentationCfg) && Math.Abs(presentationCfg.EffectivePlacementMotionSeconds - 1.2) < 1e-9 && Math.Abs(presentationCfg.EffectivePlacementHighlightSeconds - 0.2) < 1e-9,
+                  presentation.Describe());
+            check("40n2 validation mode keeps immediate placement even when the file configures a motion",
+                  !PlacementMotion.Enabled(validation) && validation.EffectivePlacementMotionSeconds == 0 && validation.EffectivePlacementHighlightSeconds == 0, validation.Describe());
+            check("40n3 participant sessions never enable the animation path",
+                  !PlacementMotion.Enabled(null) && !PlacementMotion.Enabled(participant) && !PlacementMotion.Enabled(notEnabled) && participant.EffectivePlacementMotionSeconds == 0 && notEnabled.EffectivePlacementMotionSeconds == 0, "");
+            check("40n4 presentation motion can be switched off explicitly", !PlacementMotion.Enabled(presentationOff) && presentationOff.EffectivePlacementHighlightSeconds == 0, "");
+
+            bool monotonic = true; double prev = -1;
+            for (int i = 0; i <= 100; i++) { double e = PlacementMotion.EaseInOut(i / 100.0); if (e < prev) monotonic = false; prev = e; }
+            check("40n5 ease-in-out: 0 at start, 0.5 at the midpoint, 1 at the end, monotonic, clamped",
+                  monotonic && PlacementMotion.EaseInOut(0) == 0 && Math.Abs(PlacementMotion.EaseInOut(0.5) - 0.5) < 1e-12 && PlacementMotion.EaseInOut(1) == 1
+                  && PlacementMotion.EaseInOut(-1) == 0 && PlacementMotion.EaseInOut(2) == 1 && PlacementMotion.EaseInOut(0.25) < 0.25 && PlacementMotion.EaseInOut(0.75) > 0.75, "");
+
+            var run = new PlacementMotionRun(0.8, 0.2);
+            run.Begin(10.0);
+            double fHighlight = run.Advance(10.1);
+            bool pulseUp = run.HighlightPulse > 0.99 && run.Current == PlacementMotionRun.Phase.Highlight;
+            double fMid = run.Advance(10.6);
+            bool midMotion = run.Current == PlacementMotionRun.Phase.Motion && run.HighlightPulse == 0;
+            double fEnd = run.Advance(11.0);
+            double[] from = { 0.10, 0.20, 0.30 }, to = { 0.40, 0.00, 0.90 };
+            double[] mid = PlacementMotion.Lerp(from, to, fMid), end = PlacementMotion.Lerp(from, to, fEnd);
+            check("40n6 lifecycle: highlight (no motion), eased motion, done at duration",
+                  fHighlight == 0 && pulseUp && midMotion && fMid > 0 && fMid < 1 && Math.Abs(fMid - 0.5) < 1e-9 && fEnd == 1 && run.MotionFinished && run.Advance(12.0) == 1,
+                  $"f {fHighlight}/{fMid}/{fEnd} phase {run.Current}");
+            check("40n7 final pose equals the target pose exactly; the mid pose lies strictly between",
+                  end[0] == to[0] && end[1] == to[1] && end[2] == to[2] && mid[0] > from[0] && mid[0] < to[0] && mid[1] < from[1] && mid[1] > to[1],
+                  $"end {end[0]},{end[1]},{end[2]}");
+
+            var run2 = new PlacementMotionRun(0.6, 0);
+            int calls = 0;
+            bool beforeBegin = run2.Complete(() => calls++, 0);
+            run2.Begin(0);
+            run2.Advance(0.3);
+            bool during = run2.Complete(() => calls++, 0.3);
+            run2.Advance(0.6);
+            bool now = run2.Complete(() => calls++, 0.6);
+            bool again = run2.Complete(() => calls++, 0.7);
+            check("40n8 the production completion is invoked exactly once, only after the motion finished",
+                  !beforeBegin && !during && now && !again && calls == 1 && run2.CompletionInvocations == 1 && run2.CompletedAt == 0.6, $"calls {calls}");
+
+            var clampLow = new PlacementMotionRun(0.05, -1); var clampHigh = new PlacementMotionRun(9, 5);
+            check("40n9 durations are clamped to a sane band", clampLow.DurationSeconds == PlacementMotion.MinDurationSeconds && clampLow.HighlightSeconds == 0
+                  && clampHigh.DurationSeconds == PlacementMotion.MaxDurationSeconds && clampHigh.HighlightSeconds == PlacementMotion.MaxHighlightSeconds, "");
+
+            // Isolation: the animation layer references no support / decision / scheduler / physiology type.
+            string[] forbidden = { "SupportLevelController", "SupportLevel", "DecisionScheduler", "DecisionResponse", "AdaptationPolicy", "IDecisionProvider", "ContextLedger", "RequestGate", "SetLevel", "ApplyDecision", "PhysiologicalStateProvider", "AdaptiveAR.Support", "AdaptiveAR.Decision", "AssemblySessionController" };
+            var offenders = new List<string>();
+            foreach (var t in new[] { typeof(PlacementMotion), typeof(PlacementMotionRun) })
+            {
+                foreach (var m in t.GetMembers(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly))
+                {
+                    var names = new List<string>();
+                    if (m is System.Reflection.FieldInfo fi) names.Add(fi.FieldType.FullName);
+                    if (m is System.Reflection.PropertyInfo pi) names.Add(pi.PropertyType.FullName);
+                    if (m is System.Reflection.MethodBase mb) foreach (var prm in mb.GetParameters()) names.Add(prm.ParameterType.FullName);
+                    if (m is System.Reflection.MethodInfo mi) names.Add(mi.ReturnType.FullName);
+                    foreach (var n in names) foreach (var f in forbidden) if (n != null && n.Contains(f)) offenders.Add(t.Name + "." + m.Name + ": " + n);
+                }
+            }
+            string scenarioDir = FindScenarioDir();
+            string scriptsDir = scenarioDir != null ? Path.GetFullPath(Path.Combine(scenarioDir, "..", "..", "Scripts", "TechnicalValidation")) : null;
+            var scanned = new List<string>();
+            foreach (var file in new[] { "PlacementMotion.cs", "PresentationPlacementAnimator.cs" })
+            {
+                string path = scriptsDir != null ? Path.Combine(scriptsDir, file) : null;
+                if (path == null || !File.Exists(path)) { offenders.Add(file + ": not found"); continue; }
+                scanned.Add(file);
+                string src = File.ReadAllText(path);
+                foreach (var f in forbidden) if (src.Contains(f)) offenders.Add(file + " mentions " + f);
+            }
+            check("40n10 the animation layer references no support/decision/scheduler/physiology state", offenders.Count == 0 && scanned.Count == 2, string.Join("; ", offenders));
         }
 
         /// <summary>
