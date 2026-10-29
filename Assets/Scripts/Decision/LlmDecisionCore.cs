@@ -223,6 +223,12 @@ namespace AdaptiveAR.Decision
             {
                 { "model", cfg.Model },
                 { "max_tokens", (double)cfg.MaxTokens },
+                // Provider reliability (2026-10-28 smoke test): claude-sonnet-5-5 sometimes opened its reply
+                // with a thinking block whose signature alone consumed the 16-token budget, so no text
+                // block followed and 12.9 % of decisions became Unparseable fallbacks. Thinking is
+                // disabled explicitly so the whole budget is available for the one bare action token.
+                // Prompt, context, contract, parser and budget are unchanged.
+                { "thinking", new Dictionary<string, object> { { "type", "disabled" } } },
                 { "system", string.IsNullOrEmpty(cfg.SystemPrompt) ? DefaultSystemPrompt : cfg.SystemPrompt },
                 { "messages", new List<object> { new Dictionary<string, object> { { "role", "user" }, { "content", ContextToJson(ctx) + "\n\n" + UserTurnInstruction } } } }
             };

@@ -42,6 +42,8 @@ or copy `ai_provider.local.example.json` → `Assets/Resources/Decision/ai_provi
 
 ## Response contract
 
+The request disables extended thinking explicitly (`"thinking": {"type": "disabled"}`): the 2026-10-28 live smoke test showed `claude-sonnet-5-5` sometimes opening its reply with a thinking block whose signature alone exhausted the 16-token budget, so 25 of 194 decisions (12.9 %) became Unparseable fallbacks. Prompt, context, contract, parser and budget are unchanged by this.
+
 The model's whole reply must be one bare token: `KEEP_SUPPORT`, `INCREASE_SUPPORT` or `DECREASE_SUPPORT`. The system prompt and a one-line user-turn instruction both say so; no reason is requested; `maxTokens` is 16. The parser is strict: a bare token or a complete `{"action": ...}` object parses, everything else (prose, truncated JSON, unknown tokens) is a recorded violation with fallback `KEEP_SUPPORT`. History: the 2026-10-28 Quest run asked for `{"action","reason"}` under 64 tokens; every reason was cut mid-sentence, the object never closed, and all five decisions were (correctly) `Unparseable`. The contract changed; the parser did not.
 
 ## Context v2: evidence, not classification
