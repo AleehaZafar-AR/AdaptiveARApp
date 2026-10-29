@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "scenario": "TV1",
+  "mode": "validation",
+  "physiology": "nominal",
+  "participantId": null,
+  "delayScale": null,
+  "minDelaySeconds": null,
+  "postTransitionHoldSeconds": null,
+  "finishDelaySeconds": null,
+  "startDelaySeconds": 3,
+  "sensorStabilisationSeconds": null,
+  "overlay": true,
+  "verbose": true
+}
