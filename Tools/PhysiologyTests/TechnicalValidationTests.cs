@@ -67,7 +67,7 @@ namespace AdaptiveAR.Physiology.Tests
             // 40d assertions on a clean synthetic record: every check passes
             var good = CleanRecord();
             var res = IntegrationAssertions.Evaluate(good);
-            Check("40d clean record passes every assertion", res.Count == 13 && IntegrationAssertions.Failed(res) == 0, Describe(res));
+            Check("40d clean record passes every assertion", res.Count == 16 && IntegrationAssertions.Failed(res) == 0, Describe(res));
 
             // 40e one-level violation detected
             var multi = CleanRecord();
@@ -119,12 +119,12 @@ namespace AdaptiveAR.Physiology.Tests
                   && good.Keep == 1 && good.Increase == 2 && good.Decrease == 0 && good.Oscillations == 0 && good.AiTransitions == 2, good.Trajectory());
             string md = Level2SummaryWriter.ToMarkdown(good, res);
             Check("40k2 markdown summary carries the required items", md.Contains("# Level 2 technical validation: TV2") && md.Contains("provider calls 3") && md.Contains("support trajectory: L1") && md.Contains("maximum level reached: L3")
-                  && md.Contains("integration assertions: 13 passed / 0 failed") && md.Contains("logger output:") && md.Contains("validation log:") && md.Contains("structural violations: 0"), md);
+                  && md.Contains("integration assertions: 16 passed / 0 failed") && md.Contains("logger output:") && md.Contains("validation log:") && md.Contains("structural violations: 0"), md);
             var obj = Level2SummaryWriter.ToObject(good, res);
             string ser = AdaptiveAR.Decision.MiniJson.Serialize(obj);
             var back = AdaptiveAR.Decision.MiniJson.ParseObject(ser);
             Check("40k3 JSON summary round trip", back != null && AdaptiveAR.Decision.MiniJson.GetString(back, "scenario_id") == "TV2" && AdaptiveAR.Decision.MiniJson.GetInt(back, "provider_calls", -1) == 3
-                  && AdaptiveAR.Decision.MiniJson.GetList(back, "assertions").Count == 13 && AdaptiveAR.Decision.MiniJson.GetList(back, "decisions").Count == 3);
+                  && AdaptiveAR.Decision.MiniJson.GetList(back, "assertions").Count == 16 && AdaptiveAR.Decision.MiniJson.GetList(back, "decisions").Count == 3);
             string agg = Level2SummaryWriter.AggregateMarkdown(new List<Dictionary<string, object>> { back, back }, new DateTime(2026, 10, 30, 0, 0, 0, DateTimeKind.Utc));
             Check("40k4 aggregate summary", agg.Contains("scenarios 2") && agg.Contains("| TV2 |") && agg.Contains("totals: calls 6, KEEP 2, INCREASE 4, DECREASE 0"), agg);
 
@@ -163,6 +163,85 @@ namespace AdaptiveAR.Physiology.Tests
 
             CompletionOrdering(check);
             PlacementMotionTests(check);
+            PresentationRegressionTests(check);
+        }
+
+        /// <summary>
+        /// 40o: the two TV2 presentation-mode device regressions (2026-10-29). Both had one cause:
+        /// the animator moved the REAL part, the production validator accepted it as a genuine
+        /// placement when it came within tolerance, and the scripted injection then landed on the
+        /// next armed action (connecting rod "skipped"); for the crankshaft the injection found
+        /// nothing armed and the animator's scale writes hit a part the join had re-parented under
+        /// the turntable (0.6 instead of 0.00246 world scale: "disappeared"). Guarded now by the
+        /// alignment check (nothing injected at another action), by assertions 14-16, and by the
+        /// animator flying a renderer-only proxy instead of the part.
+        /// </summary>
+        private static void PresentationRegressionTests(Action<string, bool, string> check)
+        {
+            // alignment guard
+            string why;
+            bool a1 = InjectionAlignment.ShouldInject("step_02_piston001.PistonHead", "step_02_piston001.PistonHead", out why);
+            bool a2 = InjectionAlignment.ShouldInject("step_02_piston001.PistonHead", "step_02_piston001.ConnectingRod", out string why2);
+            bool a3 = InjectionAlignment.ShouldInject(null, "step_02_piston001.ConnectingRod", out why);
+            bool a4 = InjectionAlignment.ShouldInject("step_01_crankshaft.place", null, out string why4);
+            check("40o a scripted event is injected only at its authored action", a1 && !a2 && a3 && !a4 && why2.Contains("ConnectingRod") && why2.Contains("PistonHead") && why4.Contains("<none>"), why2);
+
+            // regression 1: the connecting rod. Production went PistonHead -> ConnectingPin after the early
+            // acceptance; the rod's scripted success is misaligned. Both new assertions must name it.
+            var r = CleanRecord();
+            r.Actions.Clear(); r.Events.Clear();
+            string head = "step_02_piston001.PistonHead", rod = "step_02_piston001.ConnectingRod", pin = "step_02_piston001.ConnectingPin";
+            r.Actions.Add(new ActionRecord { SessionMs = 40000, ActionId = head, StepIndex = 1, Level = "L1_Minimal" });
+            r.Actions.Add(new ActionRecord { SessionMs = 52000, ActionId = pin, StepIndex = 1, Level = "L1_Minimal" });     // the rod was never entered
+            r.Events.Add(new InjectedEventRecord { Index = 0, Kind = "success", SessionMs = 52000, StepIndex = 1, Injected = true, Aligned = false, Level = "L1_Minimal", ExpectedAction = head, ActionBefore = rod, ActionAfter = pin, ObjectName = "ConnectingRod", ObjectActiveAfter = true, ObjectVisibleAfter = true });
+            r.Events.Add(new InjectedEventRecord { Index = 1, Kind = "success", SessionMs = 60000, StepIndex = 1, Injected = false, Aligned = false, Level = "L1_Minimal", ExpectedAction = rod, ActionBefore = pin, ActionAfter = pin, Detail = "NOT injected: scripted for " + rod });
+            var res = IntegrationAssertions.Evaluate(r);
+            string det14 = DetailOf(res, "acted on its authored action"), det15 = DetailOf(res, "none skipped");
+            check("40o2 regression: a success landing on the connecting rod instead of the head is detected", Fails(r, "acted on its authored action") && det14.Contains("#0") && det14.Contains("INJECTED") && det14.Contains(rod), det14);
+            check("40o3 regression: the connecting rod never being entered is detected as a skipped authored action", Fails(r, "none skipped") && det15.Contains(rod) && !det15.Contains(pin), det15);
+            var good = CleanRecord();
+            good.Events.Clear();
+            good.Events.Add(new InjectedEventRecord { Index = 0, Kind = "success", SessionMs = 50000, StepIndex = 1, Injected = true, Aligned = true, Level = "L1_Minimal", ExpectedAction = "step_02_piston001.PistonHead", ActionBefore = "step_02_piston001.PistonHead", ActionAfter = "step_02_piston001.ConnectingRod", ObjectName = "PistonHead", ObjectActiveAfter = true, ObjectVisibleAfter = true });
+            good.Actions.Add(new ActionRecord { SessionMs = 50000, ActionId = "step_02_piston001.ConnectingRod", StepIndex = 1, Level = "L1_Minimal" });
+            check("40o4 an aligned, in-order run passes the alignment and order assertions", !Fails(good, "acted on its authored action") && !Fails(good, "none skipped"), Describe(IntegrationAssertions.Evaluate(good)));
+            var sub = CleanRecord(); sub.Events.Clear(); sub.Actions.Clear();
+            sub.Events.Add(new InjectedEventRecord { Index = 0, Kind = "success", SessionMs = 1, Injected = true, Aligned = true, ExpectedAction = "a", ActionBefore = "a", ObjectVisibleAfter = true, ObjectActiveAfter = true });
+            sub.Events.Add(new InjectedEventRecord { Index = 1, Kind = "success", SessionMs = 2, Injected = true, Aligned = true, ExpectedAction = "c", ActionBefore = "c", ObjectVisibleAfter = true, ObjectActiveAfter = true });
+            foreach (var id in new[] { "a", "b", "c", "d" }) sub.Actions.Add(new ActionRecord { ActionId = id });
+            var sub2 = CleanRecord(); sub2.Events.Clear(); sub2.Actions.Clear();
+            sub2.Events.Add(new InjectedEventRecord { Index = 0, Kind = "success", SessionMs = 1, Injected = true, Aligned = true, ExpectedAction = "c", ActionBefore = "c", ObjectVisibleAfter = true, ObjectActiveAfter = true });
+            sub2.Events.Add(new InjectedEventRecord { Index = 1, Kind = "success", SessionMs = 2, Injected = true, Aligned = true, ExpectedAction = "a", ActionBefore = "a", ObjectVisibleAfter = true, ObjectActiveAfter = true });
+            foreach (var id in new[] { "a", "b", "c" }) sub2.Actions.Add(new ActionRecord { ActionId = id });
+            check("40o5 order check: scripted actions must be an in-order subsequence of the entered actions", !Fails(sub, "none skipped") && Fails(sub2, "none skipped"), DetailOf(IntegrationAssertions.Evaluate(sub2), "none skipped"));
+
+            // regression 2: the crankshaft. The injected success left the part re-scaled / invisible.
+            var crank = CleanRecord();
+            crank.Events[1].ObjectName = "crankshaft"; crank.Events[1].ObjectVisibleAfter = false; crank.Events[1].ObjectActiveAfter = true; crank.Events[1].ObjectWorldScaleAfter = "0.6,0.6,0.6"; crank.Events[1].ObjectParentAfter = "EngineTurntable";
+            string det16 = DetailOf(IntegrationAssertions.Evaluate(crank), "stayed active and visible");
+            check("40o6 regression: a placed part that is not visible after its injected success is detected", Fails(crank, "stayed active and visible") && det16.Contains("crankshaft") && det16.Contains("0.6,0.6,0.6"), det16);
+            var unobserved = CleanRecord(); unobserved.Events[1].ObjectVisibleAfter = null;
+            check("40o7 an injected success without an object observation does not pass silently", Fails(unobserved, "stayed active and visible") && DetailOf(IntegrationAssertions.Evaluate(unobserved), "stayed active and visible").Contains("without an object observation"), "");
+            check("40o8 the clean reference run passes all assertions (now 16)", IntegrationAssertions.Failed(IntegrationAssertions.Evaluate(CleanRecord())) == 0 && IntegrationAssertions.Evaluate(CleanRecord()).Count == 16, Describe(IntegrationAssertions.Evaluate(CleanRecord())));
+
+            // the animator never touches the real part: it builds and flies a proxy
+            string scenarioDir = FindScenarioDir();
+            string animPath = scenarioDir != null ? Path.GetFullPath(Path.Combine(scenarioDir, "..", "..", "Scripts", "TechnicalValidation", "PresentationPlacementAnimator.cs")) : null;
+            string src = animPath != null && File.Exists(animPath) ? File.ReadAllText(animPath) : "";
+            bool proxyOnly = src.Contains("BuildProxy") && src.Contains("HideRenderers") && src.Contains("ShowRenderers")
+                             && !src.Contains("part.SetPositionAndRotation") && !src.Contains("part.position =") && !src.Contains("part.rotation =") && !src.Contains("part.localScale") && !src.Contains("isKinematic") && !src.Contains("SetParent(part");
+            check("40o9 the presentation animator flies a renderer-only proxy and never writes the real part's pose, scale or body", proxyOnly, animPath ?? "animator source not found");
+
+            // summary carries the diagnostics
+            var obj = Level2SummaryWriter.ToObject(r, res);
+            var events = obj["events"] as List<object>;
+            var first = events != null && events.Count > 0 ? events[0] as Dictionary<string, object> : null;
+            check("40o10 the summary object carries per-event alignment and object diagnostics and the action entries", first != null && (string)first["scripted_action"] == head && (string)first["action_before"] == rod && (string)first["next_action"] == pin && (string)first["object"] == "ConnectingRod" && (obj["actions"] as List<object>).Count == 2, "");
+        }
+
+        private static string DetailOf(List<AssertionResult> res, string nameFragment)
+        {
+            foreach (var a in res) if (a.Name.Contains(nameFragment)) return a.Detail;
+            return "<assertion not found: " + nameFragment + ">";
         }
 
         /// <summary>
@@ -342,7 +421,12 @@ namespace AdaptiveAR.Physiology.Tests
             string[] kinds = { "continue", "success", "continue", "failed_attempt", "error", "wrong_component", "error", "success" };
             int[] steps = { 0, 0, 1, 1, 1, 1, 1, 1 };
             for (int i = 0; i < kinds.Length; i++)
-                r.Events.Add(new InjectedEventRecord { Index = i, Kind = kinds[i], SessionMs = 3000 + i * 9000, StepIndex = steps[i], Injected = true, Aligned = true, Level = "L1_Minimal" });
+                r.Events.Add(new InjectedEventRecord { Index = i, Kind = kinds[i], SessionMs = 3000 + i * 9000, StepIndex = steps[i], Injected = true, Aligned = true, Level = "L1_Minimal",
+                                                       ObjectName = kinds[i] == "success" ? "part" + i : null, ObjectActiveAfter = kinds[i] == "success" ? (bool?)true : null, ObjectVisibleAfter = kinds[i] == "success" ? (bool?)true : null });
+            r.Actions.Add(new ActionRecord { SessionMs = 0, ActionId = "step_01_crankshaft.locate", StepIndex = 0, Level = "L1_Minimal" });
+            r.Actions.Add(new ActionRecord { SessionMs = 3000, ActionId = "step_01_crankshaft.place", StepIndex = 0, Level = "L1_Minimal" });
+            r.Actions.Add(new ActionRecord { SessionMs = 31000, ActionId = "step_02_piston001.locate", StepIndex = 1, Level = "L1_Minimal" });
+            r.Actions.Add(new ActionRecord { SessionMs = 40000, ActionId = "step_02_piston001.PistonHead", StepIndex = 1, Level = "L1_Minimal" });
             r.Requests.Add(new RequestRecord { Number = 1, SessionMs = 44000, Level = "L1_Minimal", StepIndex = 1 });
             r.Requests.Add(new RequestRecord { Number = 2, SessionMs = 84000, Level = "L2_Guided", StepIndex = 1 });
             r.Transitions.Add(new TransitionRecord { SessionMs = 45000, From = "L1_Minimal", To = "L2_Guided", Reason = "ai_decision", StepIndex = 1 });

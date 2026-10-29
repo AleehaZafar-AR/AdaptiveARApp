@@ -2884,6 +2884,9 @@ namespace AdaptiveAR.Steps
             return true;
         }
 
+        /// <summary>Technical validation only (diagnostics): the action the validator is armed for, null when not armed. Read-only.</summary>
+        public string TechnicalValidationArmedActionId { get { return IsActive && !_completed ? CurrentActionId() : null; } }
+
         /// <summary>
         /// Technical validation only (presentation staging): the armed action's part and the
         /// pose the production snap (SnapToTarget) will give it on success: EffectiveTargetRotation,

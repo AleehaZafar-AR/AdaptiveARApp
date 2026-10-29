@@ -31,6 +31,42 @@ namespace AdaptiveAR.TechnicalValidation
         public string PartKey;
         public string Detail;
         public bool FromFinishTail;
+
+        // Diagnostics (device finding 2026-10-29): the authored action before the injection is
+        // ActionBefore, the scripted one ExpectedAction; the validator's armed action, the object
+        // acted on and its state before/after make a skipped action or a vanished part visible.
+        public string ArmedAction;
+        public string ObjectName;
+        public bool? ObjectActiveBefore;
+        public bool? ObjectActiveAfter;
+        public bool? ObjectVisibleAfter;
+        public string ObjectParentAfter;
+        public string ObjectWorldScaleAfter;
+    }
+
+    /// <summary>One production action entry (AssemblySessionController.OnActionEntered).</summary>
+    public sealed class ActionRecord
+    {
+        public double SessionMs;
+        public string ActionId;
+        public int StepIndex;
+        public string Level;
+    }
+
+    /// <summary>
+    /// Whether a scripted event may be injected now. A scripted event names the authored action
+    /// it belongs to; if the production flow is at another action the injection would act on a
+    /// later (or earlier) action and must not happen. Plain C#, tested.
+    /// </summary>
+    public static class InjectionAlignment
+    {
+        public static bool ShouldInject(string scriptedAction, string productionAction, out string reason)
+        {
+            if (string.IsNullOrEmpty(scriptedAction)) { reason = "no authored action named by the script"; return true; }
+            if (scriptedAction == productionAction) { reason = "production action matches the scripted action"; return true; }
+            reason = "scripted for " + scriptedAction + " but the production flow is at " + (productionAction ?? "<none>") + ": not injected (it would act on another action)";
+            return false;
+        }
     }
 
     public sealed class RequestRecord
@@ -105,6 +141,7 @@ namespace AdaptiveAR.TechnicalValidation
         public readonly List<DecisionRecord> Decisions = new List<DecisionRecord>();
         public readonly List<TransitionRecord> Transitions = new List<TransitionRecord>();
         public readonly List<StepRecord> Steps = new List<StepRecord>();
+        public readonly List<ActionRecord> Actions = new List<ActionRecord>();
         public readonly List<PresentationCheck> Presentation = new List<PresentationCheck>();
 
         public int ExceptionCount;
@@ -329,6 +366,42 @@ namespace AdaptiveAR.TechnicalValidation
             Add("support-change hysteresis respected; no rapid oscillation", fast.Count == 0 && r.Oscillations == 0,
                 $"{r.AiTransitions} AI transition(s), oscillations {r.Oscillations}, cooldown {(r.ChangeCooldownMs / 1000.0).ToString("0.#", c)} s" + (fast.Count > 0 ? "; too fast: " + string.Join("; ", fast) : ""));
 
+            // 14 every scripted event acted on its authored action (none injected on, or blocked at, another action)
+            var misalignedEvents = new List<string>();
+            foreach (var e in r.Events)
+                if (!string.IsNullOrEmpty(e.ExpectedAction) && !e.Aligned)
+                    misalignedEvents.Add($"#{e.Index} {e.Kind} scripted {e.ExpectedAction} while at {e.ActionBefore ?? "<none>"}" + (e.Injected ? " (INJECTED)" : " (not injected)"));
+            Add("every scripted event acted on its authored action", misalignedEvents.Count == 0,
+                misalignedEvents.Count == 0 ? $"{r.Events.Count} event(s) all at their authored action" : string.Join("; ", misalignedEvents));
+
+            // 15 authored actions were entered in script order; none skipped
+            var scripted = new List<string>();
+            foreach (var e in r.Events) if (!e.FromFinishTail && !string.IsNullOrEmpty(e.ExpectedAction) && (scripted.Count == 0 || scripted[scripted.Count - 1] != e.ExpectedAction)) scripted.Add(e.ExpectedAction);
+            var skipped = new List<string>(); int cursor = 0;
+            foreach (var a in scripted)
+            {
+                int found = -1;
+                for (int i = cursor; i < r.Actions.Count; i++) if (r.Actions[i].ActionId == a) { found = i; break; }
+                if (found < 0) skipped.Add(a); else cursor = found + 1;
+            }
+            bool orderOk = scripted.Count == 0 || (r.Actions.Count > 0 && skipped.Count == 0);
+            Add("authored actions entered in script order; none skipped", orderOk,
+                scripted.Count == 0 ? "the script names no authored actions" : (r.Actions.Count == 0 ? "no action entry was observed" : (skipped.Count == 0 ? $"{scripted.Count} scripted action(s) all entered in order among {r.Actions.Count} action entr(ies)" : "never entered in order: " + string.Join(", ", skipped))));
+
+            // 16 the placed part stayed active and visible after every injected success
+            var vanished = new List<string>(); int observed = 0, successes = 0;
+            foreach (var e in r.Events)
+            {
+                if (!e.Injected || e.Kind != "success") continue;
+                successes++;
+                if (!e.ObjectVisibleAfter.HasValue) continue;
+                observed++;
+                if (!e.ObjectVisibleAfter.Value || (e.ObjectActiveAfter.HasValue && !e.ObjectActiveAfter.Value))
+                    vanished.Add($"#{e.Index} {e.ObjectName ?? "?"} after {e.ExpectedAction ?? e.ActionBefore}: active={e.ObjectActiveAfter} visible={e.ObjectVisibleAfter} scale={e.ObjectWorldScaleAfter ?? "?"} parent={e.ObjectParentAfter ?? "?"}");
+            }
+            Add("placed parts stayed active and visible after every injected success", vanished.Count == 0 && observed == successes,
+                successes == 0 ? "no injected success" : (observed < successes ? $"{successes - observed} of {successes} success(es) without an object observation" : (vanished.Count == 0 ? $"{successes} success(es), every placed part active and visible" : string.Join("; ", vanished))));
+
             return list;
         }
 
@@ -355,6 +428,7 @@ namespace AdaptiveAR.TechnicalValidation
             sb.Append("structural violations: ").Append(structural).Append('\n');
             sb.Append("logger output: ").Append(r.LoggerPath ?? "?").Append('\n');
             sb.Append("validation log: ").Append(r.ValidationLogPath ?? "?").Append('\n');
+            if (r.Actions.Count > 0) sb.Append("actions entered: ").Append(r.Actions.Count).Append(" (").Append(r.Actions[0].ActionId).Append(" .. ").Append(r.Actions[r.Actions.Count - 1].ActionId).Append(")\n");
             sb.Append("integration assertions: ").Append(assertions.Count - failed).Append(" passed / ").Append(failed).Append(" failed\n");
             foreach (var a in assertions) sb.Append(a.Passed ? "  PASS  " : "  FAIL  ").Append(a.Name).Append(": ").Append(a.Detail).Append('\n');
             if (r.Decisions.Count > 0)
@@ -395,6 +469,15 @@ namespace AdaptiveAR.TechnicalValidation
             var tl = new List<object>();
             foreach (var t in r.Transitions) tl.Add(new Dictionary<string, object> { { "t_session_ms", t.SessionMs }, { "from", t.From }, { "to", t.To }, { "reason", t.Reason }, { "step_index", (double)t.StepIndex } });
             o["transitions"] = tl;
+            var el = new List<object>();
+            foreach (var e in r.Events)
+                el.Add(new Dictionary<string, object> { { "index", (double)e.Index }, { "kind", e.Kind }, { "t_session_ms", e.SessionMs }, { "step_index", (double)e.StepIndex }, { "finish_tail", e.FromFinishTail }, { "injected", e.Injected }, { "aligned", e.Aligned },
+                                                        { "action_before", e.ActionBefore }, { "scripted_action", e.ExpectedAction }, { "armed_action", e.ArmedAction }, { "next_action", e.ActionAfter }, { "object", e.ObjectName },
+                                                        { "object_active_after", e.ObjectActiveAfter }, { "object_visible_after", e.ObjectVisibleAfter }, { "detail", e.Detail } });
+            o["events"] = el;
+            var acl = new List<object>();
+            foreach (var a in r.Actions) acl.Add(new Dictionary<string, object> { { "t_session_ms", a.SessionMs }, { "action_id", a.ActionId }, { "step_index", (double)a.StepIndex }, { "level", a.Level } });
+            o["actions"] = acl;
             return o;
         }
 

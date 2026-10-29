@@ -259,7 +259,8 @@ namespace AdaptiveAR.TechnicalValidation
 
         private void HandleActionEntered(AssemblyAction action)
         {
-            WriteTv("action_entered", w => { w.Str("action_id", action != null ? action.Id : null); w.Str("level", _level.CurrentLevel.ToString()); });
+            _record.Actions.Add(new ActionRecord { SessionMs = SessionMs(), ActionId = action != null ? action.Id : null, StepIndex = _session != null ? _session.CurrentStepIndex : -1, Level = _level.CurrentLevel.ToString() });
+            WriteTv("action_entered", w => { w.Str("action_id", action != null ? action.Id : null); w.Num("step_index", _session != null ? _session.CurrentStepIndex : -1); w.Str("level", _level.CurrentLevel.ToString()); });
             StartCoroutine(PresentationCheckAfter(0.6f, "after_action_enter"));
         }
 
@@ -404,11 +405,28 @@ namespace AdaptiveAR.TechnicalValidation
             // The production call below can complete the sequence synchronously (the last
             // Success). HandleSessionComplete then commits `rec` first and writes the completion
             // record afterwards, before the session controller ends the production logger session.
+            rec.ArmedAction = _validator != null ? _validator.TechnicalValidationArmedActionId : null;
+            Transform obj = null;
+            {
+                Vector3 p; Quaternion q;
+                if (_validator != null && _validator.TechnicalValidationTryGetPlacement(out obj, out p, out q) && obj != null)
+                {
+                    rec.ObjectName = obj.name;
+                    rec.ObjectActiveBefore = obj.gameObject.activeInHierarchy;
+                }
+            }
             Seq.Open(rec);
             bool injected = false; string detail = null; string partKey = null;
+            // A scripted event belongs to its authored action. If the production flow is at another
+            // action, injecting would act on that other action (device finding 2026-10-29: a success
+            // meant for the piston head landed on the connecting rod). Blocked, recorded, asserted.
+            string alignReason;
+            bool mayInject = InjectionAlignment.ShouldInject(ev.ExpectedActionId, actionBefore, out alignReason);
+            if (!mayInject) Debug.LogWarning("[TechnicalValidation] event #" + (index + 1) + " " + ev.KindName + " " + alignReason + " (armed: " + (rec.ArmedAction ?? "<none>") + ")");
             try
             {
-                switch (ev.Kind)
+                if (!mayInject) { injected = false; detail = "NOT injected: " + alignReason; }
+                else switch (ev.Kind)
                 {
                     case ValidationEventKind.Continue:
                         if (introBefore || _session.IsReadState || _session.CurrentActionType == AssemblySessionController.ActionType.AUTO)
@@ -450,6 +468,15 @@ namespace AdaptiveAR.TechnicalValidation
                 injected = false; detail = "threw: " + e.Message;
                 Debug.LogError("[TechnicalValidation] injection threw: " + e);
             }
+            if (obj != null)
+            {
+                rec.ObjectActiveAfter = obj.gameObject.activeInHierarchy;
+                var rend = obj.GetComponentInChildren<Renderer>(false);
+                rec.ObjectVisibleAfter = obj.gameObject.activeInHierarchy && rend != null && rend.enabled;
+                rec.ObjectParentAfter = obj.parent != null ? obj.parent.name : "<root>";
+                Vector3 ws = obj.lossyScale;
+                rec.ObjectWorldScaleAfter = ws.x.ToString("0.#####", CultureInfo.InvariantCulture) + "," + ws.y.ToString("0.#####", CultureInfo.InvariantCulture) + "," + ws.z.ToString("0.#####", CultureInfo.InvariantCulture);
+            }
             // Returns false when the sequence completed inside this injection: HandleSessionComplete
             // already committed the record (as injected) ahead of the completion record.
             Seq.Close(injected, detail, partKey, _session.CurrentActionId);
@@ -467,6 +494,14 @@ namespace AdaptiveAR.TechnicalValidation
         /// </summary>
         private IEnumerator AnimatedSuccess(ValidationEvent ev, int index, bool tail)
         {
+            // Alignment first: a success scripted for another action is not staged and not injected.
+            string alignReason;
+            if (!InjectionAlignment.ShouldInject(ev.ExpectedActionId, _session.CurrentActionId, out alignReason))
+            {
+                WriteTv("presentation_motion_skipped", w => { w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("reason", alignReason); });
+                Inject(ev, index, tail);                     // records the blocked event
+                yield break;
+            }
             Transform part; Vector3 targetPos; Quaternion targetRot;
             if (_validator == null || !_validator.TechnicalValidationTryGetPlacement(out part, out targetPos, out targetRot))
             {
@@ -477,39 +512,47 @@ namespace AdaptiveAR.TechnicalValidation
             }
             var run = new PlacementMotionRun(Config.EffectivePlacementMotionSeconds, Config.EffectivePlacementHighlightSeconds);
             Vector3 fromPos = part.position;
-            float angleDeg = Quaternion.Angle(part.rotation, targetRot);
+            Quaternion fromRot = part.rotation;
+            Vector3 fromScale = part.localScale;
+            Transform fromParent = part.parent;
+            float angleDeg = Quaternion.Angle(fromRot, targetRot);
             float distanceM = Vector3.Distance(fromPos, targetPos);
             string partName = part.name;
             string actionId = _session.CurrentActionId;
+            string armed = _validator.TechnicalValidationArmedActionId;
             double startedMs = SessionMs();
             string savedText = CurrentEventText;
             CurrentEventText = savedText + " [motion]";
             WriteTv("presentation_motion_started", w =>
             {
-                w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("action_id", actionId); w.Str("part", partName);
+                w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("action_id", actionId); w.Str("armed_action", armed); w.Str("scripted_action", ev.ExpectedActionId); w.Str("part", partName);
                 w.Num("duration_s", (float)run.DurationSeconds); w.Num("highlight_s", (float)run.HighlightSeconds); w.Num("distance_m", distanceM); w.Num("angle_deg", angleDeg);
+                w.Bool("proxy", true); w.Bool("real_part_moved", false);
             });
-            if (Config.Verbose) Debug.Log("[TechnicalValidation] presentation motion for event #" + (index + 1) + " on '" + partName + "': " + distanceM.ToString("F3", CultureInfo.InvariantCulture) + " m / " + angleDeg.ToString("F0", CultureInfo.InvariantCulture) + " deg over " + run.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + " s");
+            if (Config.Verbose) Debug.Log("[TechnicalValidation] presentation motion (proxy) for event #" + (index + 1) + " on '" + partName + "': " + distanceM.ToString("F3", CultureInfo.InvariantCulture) + " m / " + angleDeg.ToString("F0", CultureInfo.InvariantCulture) + " deg over " + run.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture) + " s");
 
-            bool wasKinematic = PresentationPlacementAnimator.PrepareBody(part);
+            // The flight is carried by a renderer-only proxy; the real part is hidden and untouched.
             yield return PresentationPlacementAnimator.Animate(part, targetPos, targetRot, run, () => Time.realtimeSinceStartup);
 
-            float residualPos = part != null ? Vector3.Distance(part.position, targetPos) : -1f;
-            float residualRot = part != null ? Quaternion.Angle(part.rotation, targetRot) : -1f;
+            // The real part must be exactly where it was, under the same parent, and the production
+            // flow must still be at the same action: nothing was accepted early.
+            bool realPartUntouched = part != null && (part.position - fromPos).sqrMagnitude < 1e-10f && Quaternion.Angle(part.rotation, fromRot) < 0.01f && part.localScale == fromScale && part.parent == fromParent;
+            bool stillSameAction = _session.CurrentActionId == actionId;
+            string armedAfter = _validator.TechnicalValidationArmedActionId;
             double elapsedMs = SessionMs() - startedMs;
             WriteTv("presentation_motion_completed", w =>
             {
-                w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("part", partName); w.Num("elapsed_ms", (float)elapsedMs);
-                w.Num("residual_pos_m", residualPos); w.Num("residual_rot_deg", residualRot); w.Bool("motion_finished", run.MotionFinished);
+                w.Num("event_index", index); w.Bool("finish_tail", tail); w.Str("part", partName); w.Num("elapsed_ms", (float)elapsedMs); w.Bool("motion_finished", run.MotionFinished);
+                w.Bool("real_part_untouched", realPartUntouched); w.Bool("production_action_unchanged", stillSameAction); w.Str("action_id_after", _session.CurrentActionId); w.Str("armed_action_after", armedAfter);
             });
+            if (!realPartUntouched || !stillSameAction)
+                Debug.LogError("[TechnicalValidation] presentation motion for event #" + (index + 1) + ": real part untouched=" + realPartUntouched + ", production action unchanged=" + stillSameAction + " (" + actionId + " -> " + _session.CurrentActionId + "). The injection below is alignment-guarded.");
             CurrentEventText = savedText;
 
-            // The same production pathway validation mode uses, recorded as the logical event.
-            int before = _record.Events.Count;
+            // The same production pathway validation mode uses, recorded as the logical event
+            // (alignment-guarded again inside Inject).
             if (!run.Complete(() => Inject(ev, index, tail), Time.realtimeSinceStartup))
-                Inject(ev, index, tail);   // only if the motion could not finish (part destroyed): the logical event is injected regardless
-            var rec = _record.Events.Count > before ? _record.Events[_record.Events.Count - 1] : null;
-            if (rec != null && !rec.Injected) PresentationPlacementAnimator.RestoreBody(part, wasKinematic);
+                Inject(ev, index, tail);   // only if the motion could not finish (part destroyed / nothing to show): the logical event is injected regardless
         }
 
         /// <summary>Clean Continue / success events at the finish delay until the sequence ends (bounded).</summary>
@@ -598,6 +641,12 @@ namespace AdaptiveAR.TechnicalValidation
                 w.Num("event_index", rec.Index); w.Str("kind", rec.Kind); w.Bool("finish_tail", rec.FromFinishTail); w.Bool("injected", rec.Injected); w.Bool("aligned", rec.Aligned);
                 w.Num("step_index", rec.StepIndex); w.Str("step_id", rec.StepId); w.Str("action_before", rec.ActionBefore); w.Str("action_after", rec.ActionAfter); w.Str("expected_action", rec.ExpectedAction);
                 w.Str("level", rec.Level); w.Str("part_key", rec.PartKey); w.Str("detail", rec.Detail);
+                // diagnostics: authored (production) action before = action_before; scripted = expected_action
+                w.Str("scripted_action", rec.ExpectedAction); w.Str("armed_action", rec.ArmedAction); w.Str("next_action", rec.ActionAfter); w.Str("object", rec.ObjectName);
+                if (rec.ObjectActiveBefore.HasValue) w.Bool("object_active_before", rec.ObjectActiveBefore.Value);
+                if (rec.ObjectActiveAfter.HasValue) w.Bool("object_active_after", rec.ObjectActiveAfter.Value);
+                if (rec.ObjectVisibleAfter.HasValue) w.Bool("object_visible_after", rec.ObjectVisibleAfter.Value);
+                w.Str("object_parent_after", rec.ObjectParentAfter); w.Str("object_world_scale_after", rec.ObjectWorldScaleAfter);
             });
         }
 
