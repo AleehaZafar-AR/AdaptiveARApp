@@ -83,6 +83,19 @@ namespace AdaptiveAR.Physiology.Tests
             Check("13c sonnet-5-5 request has no temperature", sonnet.Model == "claude-sonnet-5-5" && !sonnetBody.ContainsKey("temperature") && !sonnetSpec.Body.Contains("temperature")
                   && sonnetBody.ContainsKey("model") && sonnetBody.ContainsKey("max_tokens") && sonnetBody.ContainsKey("system") && sonnetBody.ContainsKey("messages"), sonnetSpec.Body);
             Check("13d provider id has no sampling suffix", sonnet.ProviderId == "anthropic:claude-sonnet-5-5", sonnet.ProviderId);
+            // 13j provider reliability: thinking.type = between_tools exactly, no other thinking field, no sampling/effort fields, every other property unchanged
+            var thinking = AdaptiveAR.Decision.MiniJson.GetObject(sonnetBody, "thinking");
+            Check("13j sonnet-5-5 request sends exactly thinking.type=between_tools; nothing else new", thinking != null && thinking.Count == 1 && AdaptiveAR.Decision.MiniJson.GetString(thinking, "type", "") == "between_tools"
+                  && !sonnetBody.ContainsKey("temperature") && !sonnetBody.ContainsKey("top_p") && !sonnetBody.ContainsKey("top_k") && !sonnetBody.ContainsKey("output_config") && !sonnetBody.ContainsKey("tools")
+                  && sonnetBody.Count == 5 && sonnetBody.ContainsKey("model") && sonnetBody.ContainsKey("max_tokens") && sonnetBody.ContainsKey("system") && sonnetBody.ContainsKey("messages")
+                  && AdaptiveAR.Decision.MiniJson.GetDouble(AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(new AdaptiveAR.Decision.LlmConfig(), "k", ctx).Body), "max_tokens", 0) == 16, sonnetSpec.Body);
+            // 13k regression: the observed smoke-test body (a thinking block, no text block, budget exhausted) stays an Unparseable fallback; a text token after a thinking block still parses
+            string thinkOnly = "{\"model\":\"claude-sonnet-5-5\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"CAQS\"}],\"stop_reason\":\"max_tokens\",\"usage\":{\"input_tokens\":2500,\"output_tokens\":16}}";
+            var thinkResp = AdaptiveAR.Decision.LlmDecisionCore.Interpret(sonnet, 200, thinkOnly, 900, false, null);
+            string tokenAfterThink = "{\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"x\"},{\"type\":\"text\",\"text\":\"DECREASE_SUPPORT\"}],\"stop_reason\":\"end_turn\"}";
+            var afterThink = AdaptiveAR.Decision.LlmDecisionCore.Interpret(sonnet, 200, tokenAfterThink, 900, false, null);
+            Check("13k thinking-only body -> Unparseable fallback KEEP; a text token after a thinking block still parses", thinkResp.Status == AdaptiveAR.Decision.ConstraintStatus.Unparseable && thinkResp.UsedFallback && thinkResp.ParsedAction == AdaptiveAR.Support.SupportAction.KEEP_SUPPORT
+                  && afterThink.Status == AdaptiveAR.Decision.ConstraintStatus.Ok && afterThink.ParsedAction == AdaptiveAR.Support.SupportAction.DECREASE_SUPPORT, thinkResp.Status + " / " + afterThink.Status);
             // 13f the production prompt targets one bare token: all three tokens named, no reason/JSON requested, user turn carries the instruction, small budget
             string sys = AdaptiveAR.Decision.LlmDecisionCore.DefaultSystemPrompt;
             var prodBody = AdaptiveAR.Decision.MiniJson.ParseObject(AdaptiveAR.Decision.LlmDecisionCore.BuildRequest(new AdaptiveAR.Decision.LlmConfig(), "k", ctx).Body);
