@@ -89,7 +89,7 @@ namespace AdaptiveAR.TechnicalValidation
         private int _transitionsAtLastPoll;
         private float _runStartedAt = -1f;
         private bool _started, _finishing, _finished;
-        private bool _completionNoteWritten;
+        private CompletionSequencer _seq;   // orders event commit vs. completion record (see CompletionSequencer.cs)
         private double _lastAiTransitionMs = -1;
         private int _aiTransitionsSeen;
         private bool _sensorOverrideDone;
@@ -267,8 +267,10 @@ namespace AdaptiveAR.TechnicalValidation
         {
             _record.SequenceFinished = true;
             // Raised before the session controller ends the logger session: the completion
-            // note lands inside the production JSONL, before session_end.
-            WriteCompletionNote("sequence_complete");
+            // record lands inside the production JSONL, before session_end. When the sequence
+            // completed inside an injection (the last Success), the sequencer commits that
+            // event first so its records precede the completion record and the count is final.
+            Seq.Complete("sequence_complete", _session != null ? _session.CurrentActionId : null);
         }
 
         private void OnLog(string condition, string stackTrace, LogType type)
@@ -398,6 +400,11 @@ namespace AdaptiveAR.TechnicalValidation
                 ActionBefore = actionBefore, ExpectedAction = ev.ExpectedActionId, Level = _level.CurrentLevel.ToString(), FromFinishTail = tail,
                 Aligned = string.IsNullOrEmpty(ev.ExpectedActionId) || ev.ExpectedActionId == actionBefore
             };
+            // The production call below can complete the sequence synchronously (the last
+            // Success). HandleSessionComplete then commits `rec` first and writes the completion
+            // record afterwards, before the session controller ends the production logger session.
+            Seq.Open(rec);
+            bool injected = false; string detail = null; string partKey = null;
             try
             {
                 switch (ev.Kind)
@@ -406,57 +413,45 @@ namespace AdaptiveAR.TechnicalValidation
                         if (introBefore || _session.IsReadState || _session.CurrentActionType == AssemblySessionController.ActionType.AUTO)
                         {
                             _session.AdvanceStepManually();          // the Continue button's production method
-                            rec.Injected = _session.StepIntroPending != introBefore || _session.CurrentActionId != actionBefore || _session.CurrentStepIndex != stepBefore || _session.SequenceFinished;
-                            rec.Detail = rec.Injected ? "continue accepted" : "continue did not advance";
+                            injected = _session.StepIntroPending != introBefore || _session.CurrentActionId != actionBefore || _session.CurrentStepIndex != stepBefore || _session.SequenceFinished;
+                            detail = injected ? "continue accepted" : "continue did not advance";
                         }
-                        else { rec.Injected = false; rec.Detail = "Continue unavailable: current action is " + _session.CurrentActionType; }
+                        else { injected = false; detail = "Continue unavailable: current action is " + _session.CurrentActionType; }
                         break;
                     case ValidationEventKind.Success:
-                        rec.Injected = _validator != null && _validator.TechnicalValidationSucceed(ev.Note);
-                        rec.Detail = rec.Injected ? "validator Succeed()" : "validator not armed (" + (_validator != null ? _validator.ArmFailureReason ?? "inactive" : "no validator") + ")";
+                        injected = _validator != null && _validator.TechnicalValidationSucceed(ev.Note);
+                        detail = injected ? "validator Succeed()" : "validator not armed (" + (_validator != null ? _validator.ArmFailureReason ?? "inactive" : "no validator") + ")";
                         break;
                     case ValidationEventKind.FailedAttempt:
-                        rec.Injected = _validator != null && _validator.TechnicalValidationFailAttempt(false, ev.Note);
-                        rec.Detail = rec.Injected ? "validator FailAttempt(counted=false)" : "validator not armed";
+                        injected = _validator != null && _validator.TechnicalValidationFailAttempt(false, ev.Note);
+                        detail = injected ? "validator FailAttempt(counted=false)" : "validator not armed";
                         break;
                     case ValidationEventKind.Error:
-                        rec.Injected = _validator != null && _validator.TechnicalValidationFailAttempt(true, ev.Note);
-                        rec.Detail = rec.Injected ? "validator FailAttempt(counted=true)" : "validator not armed";
+                        injected = _validator != null && _validator.TechnicalValidationFailAttempt(true, ev.Note);
+                        detail = injected ? "validator FailAttempt(counted=true)" : "validator not armed";
                         break;
                     case ValidationEventKind.WrongComponent:
                         {
                             string used = null;
-                            rec.Injected = _validator != null && _validator.TechnicalValidationWrongComponent(ev.PartKey, out used);
-                            rec.PartKey = used;
-                            rec.Detail = rec.Injected ? "validator wrong-part events for " + used : "no non-accepted selectable part available";
+                            injected = _validator != null && _validator.TechnicalValidationWrongComponent(ev.PartKey, out used);
+                            partKey = used;
+                            detail = injected ? "validator wrong-part events for " + used : "no non-accepted selectable part available";
                             break;
                         }
                     case ValidationEventKind.Wait:
-                        rec.Injected = true; rec.Detail = "wait"; break;
+                        injected = true; detail = "wait"; break;
                     case ValidationEventKind.Note:
-                        rec.Injected = true; rec.Detail = ev.Note ?? ""; break;
+                        injected = true; detail = ev.Note ?? ""; break;
                 }
             }
             catch (Exception e)
             {
-                rec.Injected = false; rec.Detail = "threw: " + e.Message;
+                injected = false; detail = "threw: " + e.Message;
                 Debug.LogError("[TechnicalValidation] injection threw: " + e);
             }
-            rec.ActionAfter = _session.CurrentActionId;
-            _record.Events.Add(rec);
-            string misaligned = rec.Aligned ? "" : " MISALIGNED expected " + ev.ExpectedActionId + " but at " + (actionBefore ?? "<none>");
-            string tailText = tail ? " (finish tail)" : "";
-            string atSeconds = (rec.SessionMs / 1000.0).ToString("F1", CultureInfo.InvariantCulture);
-            string outcome = rec.Injected ? "injected" : "NOT injected";
-            if (Config.Verbose || !rec.Injected || !rec.Aligned)
-                Debug.Log("[TechnicalValidation] event #" + (index + 1) + " " + ev.KindName + tailText + " at " + atSeconds + "s step " + rec.StepIndex + " action " + (actionBefore ?? "<none>") + " level " + rec.Level + ": " + outcome + " (" + rec.Detail + ")" + misaligned);
-            Note("tv_event", $"idx={index} kind={ev.KindName} injected={rec.Injected} step={rec.StepIndex} action={actionBefore ?? "none"} level={rec.Level}{(rec.PartKey != null ? " part=" + rec.PartKey : "")}{(rec.Aligned ? "" : " misaligned_expected=" + ev.ExpectedActionId)}");
-            WriteTv("injected_event", w =>
-            {
-                w.Num("event_index", index); w.Str("kind", ev.KindName); w.Bool("finish_tail", tail); w.Bool("injected", rec.Injected); w.Bool("aligned", rec.Aligned);
-                w.Num("step_index", rec.StepIndex); w.Str("step_id", rec.StepId); w.Str("action_before", actionBefore); w.Str("action_after", rec.ActionAfter); w.Str("expected_action", ev.ExpectedActionId);
-                w.Str("level", rec.Level); w.Str("part_key", rec.PartKey); w.Str("detail", rec.Detail);
-            });
+            // Returns false when the sequence completed inside this injection: HandleSessionComplete
+            // already committed the record (as injected) ahead of the completion record.
+            Seq.Close(injected, detail, partKey, _session.CurrentActionId);
         }
 
         /// <summary>Clean Continue / success events at the finish delay until the sequence ends (bounded).</summary>
@@ -502,11 +497,11 @@ namespace AdaptiveAR.TechnicalValidation
             if (!_session.SequenceFinished)
             {
                 // The script ended before the sequence did: close the session here so the
-                // production JSONL closes correctly (the note goes in first).
-                WriteCompletionNote("script_complete");
+                // production JSONL closes correctly (the completion record goes in first).
+                Seq.Complete("script_complete", _session.CurrentActionId);
                 _session.EndSession("technical_validation_complete");
             }
-            else if (!_completionNoteWritten) WriteCompletionNote("sequence_complete");
+            else Seq.Complete("sequence_complete", _session.CurrentActionId);   // no-op when already written
             yield return null;
 
             _record.SessionEnded = _logger == null || !_logger.IsOpen;
@@ -523,12 +518,34 @@ namespace AdaptiveAR.TechnicalValidation
             Debug.Log($"[TechnicalValidation] RUN {Scenario.Id} finished: calls {_record.Requests.Count} K{_record.Keep}/I{_record.Increase}/D{_record.Decrease} fallbacks {_record.Fallbacks} trajectory {_record.Trajectory()} assertions {ResultText}");
         }
 
-        private void WriteCompletionNote(string how)
+        private CompletionSequencer Seq
         {
-            if (_completionNoteWritten) return;
-            _completionNoteWritten = true;
+            get { if (_seq == null) _seq = new CompletionSequencer(_record, CommitInjection, WriteCompletionRecord); return _seq; }
+        }
+
+        /// <summary>Console line + production note + validation-log line for one committed event (the sequencer calls this exactly once per event, right after the ledger append).</summary>
+        private void CommitInjection(InjectedEventRecord rec)
+        {
+            string misaligned = rec.Aligned ? "" : " MISALIGNED expected " + rec.ExpectedAction + " but at " + (rec.ActionBefore ?? "<none>");
+            string tailText = rec.FromFinishTail ? " (finish tail)" : "";
+            string atSeconds = (rec.SessionMs / 1000.0).ToString("F1", CultureInfo.InvariantCulture);
+            string outcome = rec.Injected ? "injected" : "NOT injected";
+            if (Config.Verbose || !rec.Injected || !rec.Aligned)
+                Debug.Log("[TechnicalValidation] event #" + (rec.Index + 1) + " " + rec.Kind + tailText + " at " + atSeconds + "s step " + rec.StepIndex + " action " + (rec.ActionBefore ?? "<none>") + " level " + rec.Level + ": " + outcome + " (" + rec.Detail + ")" + misaligned);
+            Note("tv_event", $"idx={rec.Index} kind={rec.Kind} injected={rec.Injected} step={rec.StepIndex} action={rec.ActionBefore ?? "none"} level={rec.Level}{(rec.PartKey != null ? " part=" + rec.PartKey : "")}{(rec.Aligned ? "" : " misaligned_expected=" + rec.ExpectedAction)}");
+            WriteTv("injected_event", w =>
+            {
+                w.Num("event_index", rec.Index); w.Str("kind", rec.Kind); w.Bool("finish_tail", rec.FromFinishTail); w.Bool("injected", rec.Injected); w.Bool("aligned", rec.Aligned);
+                w.Num("step_index", rec.StepIndex); w.Str("step_id", rec.StepId); w.Str("action_before", rec.ActionBefore); w.Str("action_after", rec.ActionAfter); w.Str("expected_action", rec.ExpectedAction);
+                w.Str("level", rec.Level); w.Str("part_key", rec.PartKey); w.Str("detail", rec.Detail);
+            });
+        }
+
+        /// <summary>The completion record (production note + validation-log line). The sequencer writes it exactly once, after every injected event has been committed, so events_injected is the final count.</summary>
+        private void WriteCompletionRecord(string how)
+        {
             Note("technical_validation_completed", $"scenario={Scenario.Id} how={how} events_injected={_record.InjectedCount}/{_record.Events.Count} requests={_record.Requests.Count} decisions={_record.Decisions.Count} keep={_record.Keep} increase={_record.Increase} decrease={_record.Decrease} fallbacks={_record.Fallbacks} max_level={_record.MaxLevel} ai_transitions={_record.AiTransitions} exceptions={_record.ExceptionCount}");
-            WriteTv("technical_validation_completed", w => { w.Str("scenario_id", Scenario.Id); w.Str("how", how); w.Num("events_injected", _record.InjectedCount); w.Num("requests", _record.Requests.Count); w.Num("decisions", _record.Decisions.Count); w.Str("trajectory", _record.Trajectory()); });
+            WriteTv("technical_validation_completed", w => { w.Str("scenario_id", Scenario.Id); w.Str("how", how); w.Num("events_injected", _record.InjectedCount); w.Num("events_total", _record.Events.Count); w.Num("requests", _record.Requests.Count); w.Num("decisions", _record.Decisions.Count); w.Str("trajectory", _record.Trajectory()); });
         }
 
         // ------------------------------------------------------------------ files

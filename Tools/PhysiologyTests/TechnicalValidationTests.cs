@@ -160,6 +160,65 @@ namespace AdaptiveAR.Physiology.Tests
                       && tv5.CountOf(ValidationEventKind.Error) == 0 && tv5.AuthoredSeconds > 400 && tv6.CountOf(ValidationEventKind.Error) == 4 && tv6.CountOf(ValidationEventKind.WrongComponent) == 1 && tv6.CountOf(ValidationEventKind.FailedAttempt) == 2,
                       $"tv5 authored {tv5.AuthoredSeconds}s tv6 err {tv6.CountOf(ValidationEventKind.Error)}");
             }
+
+            CompletionOrdering(check);
+        }
+
+        /// <summary>
+        /// 40m: completion ordering. The event whose injection completes the sequence is committed
+        /// BEFORE the completion record, the completion record is written once and carries the
+        /// final count, and the summary reports the same count (device finding: TV1 wrote
+        /// technical_validation_completed with events_injected 29 and the 30th injected_event after it).
+        /// </summary>
+        private static void CompletionOrdering(Action<string, bool, string> check)
+        {
+            var r = new ScenarioRunRecord { ScenarioId = "TV1", ScenarioTitle = "Clean", Mode = "validation", Physiology = "nominal", BuildLabel = "test", LevelAtStart = "L1_Minimal", SequenceFinished = true, SessionEnded = true };
+            var log = new List<string>();
+            int countAtCompletion = -1, totalAtCompletion = -1;
+            var seq = new CompletionSequencer(r,
+                rec => log.Add("injected_event:" + rec.Index + ":" + (rec.Injected ? "ok" : "no")),
+                how => { countAtCompletion = r.InjectedCount; totalAtCompletion = r.Events.Count; log.Add("technical_validation_completed:" + how + ":" + r.InjectedCount); });
+
+            for (int i = 0; i < 29; i++)
+            {
+                seq.Open(new InjectedEventRecord { Index = i, Kind = i % 2 == 0 ? "continue" : "success", SessionMs = i * 1000 });
+                bool closed = seq.Close(true, "validator Succeed()", null, "a");
+                if (!closed) log.Add("UNEXPECTED close=false at " + i);
+            }
+            check("40m ordinary events are committed on Close, in order", r.Events.Count == 29 && r.InjectedCount == 29 && log.Count == 29 && log[0] == "injected_event:0:ok" && log[28] == "injected_event:28:ok" && !seq.InjectionOpen && !seq.CompletionWritten,
+                  $"events {r.Events.Count} injected {r.InjectedCount} log {log.Count}");
+
+            // The 30th injection completes the sequence inside the production call: Complete() arrives before Close().
+            var last = new InjectedEventRecord { Index = 29, Kind = "success", SessionMs = 29000 };
+            seq.Open(last);
+            bool openDuring = seq.InjectionOpen;
+            bool wroteNow = seq.Complete("sequence_complete", "<none>");
+            bool lateClose = seq.Close(true, "validator Succeed()", null, "<none>");
+            check("40m2 the final injected event is recorded before the completion record", openDuring && log.Count == 31 && log[29] == "injected_event:29:ok" && log[30].StartsWith("technical_validation_completed:sequence_complete"),
+                  string.Join(" | ", log.GetRange(Math.Max(0, log.Count - 3), Math.Min(3, log.Count))));
+            check("40m3 the completion record carries the final count", wroteNow && countAtCompletion == 30 && totalAtCompletion == 30 && log[30] == "technical_validation_completed:sequence_complete:30" && r.Events.Count == 30 && r.InjectedCount == 30,
+                  $"at completion {countAtCompletion}/{totalAtCompletion}, final {r.InjectedCount}/{r.Events.Count}");
+            check("40m4 the late Close neither duplicates nor overwrites the committed event", !lateClose && r.Events.Count == 30 && ReferenceEquals(r.Events[29], last) && last.Injected && last.ActionAfter == "<none>" && last.Detail.Contains("sequence completed during this injection"),
+                  $"closed {lateClose} events {r.Events.Count} detail '{last.Detail}'");
+            bool again1 = seq.Complete("sequence_complete", null), again2 = seq.Complete("script_complete", null);
+            check("40m5 the completion record is written exactly once", !again1 && !again2 && seq.CompletionWritten && seq.CompletionHow == "sequence_complete" && log.Count == 31, $"log {log.Count}");
+
+            // The script finishing before the sequence: no open injection, the completion record alone, count unchanged.
+            var r2 = new ScenarioRunRecord { ScenarioId = "TV5", LevelAtStart = "L1_Minimal" };
+            var log2 = new List<string>();
+            var seq2 = new CompletionSequencer(r2, rec => log2.Add("e" + rec.Index + (rec.Injected ? "+" : "-")), how => log2.Add("c:" + how + ":" + r2.InjectedCount + "/" + r2.Events.Count));
+            seq2.Open(new InjectedEventRecord { Index = 0, Kind = "continue" }); seq2.Close(true, "continue accepted", null, "x");
+            seq2.Open(new InjectedEventRecord { Index = 1, Kind = "success" }); seq2.Close(false, "validator not armed", null, "x");
+            bool wrote2 = seq2.Complete("script_complete", "x");
+            check("40m6 script_complete with no open injection writes only the completion record", wrote2 && log2.Count == 3 && log2[0] == "e0+" && log2[1] == "e1-" && log2[2] == "c:script_complete:1/2" && !r2.Events[1].Injected,
+                  string.Join(" | ", log2));
+
+            // Summary generation reports the same (final) count.
+            r.StartUtc = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc); r.EndUtc = r.StartUtc.AddSeconds(252);
+            string md = Level2SummaryWriter.ToMarkdown(r, IntegrationAssertions.Evaluate(r));
+            var obj = Level2SummaryWriter.ToObject(r, IntegrationAssertions.Evaluate(r));
+            check("40m7 the summary reports the final injected count", md.Contains("injected 30 / 30") && Convert.ToInt32(obj["events_injected"]) == 30 && Convert.ToInt32(obj["events_total"]) == 30,
+                  md.Length > 300 ? md.Substring(0, 300) : md);
         }
 
         private static bool Fails(ScenarioRunRecord r, string nameFragment)
