@@ -71,7 +71,7 @@ switch ($Action) {
     }
     "off" {
         Invoke-Adb @("shell", "rm", "-f", $configPath)
-        Write-Host "removed $configPath: the next launch is a participant session."
+        Write-Host "removed ${configPath}: the next launch is a participant session."
     }
     "status" {
         Write-Host "device:"; Invoke-Adb @("devices")
