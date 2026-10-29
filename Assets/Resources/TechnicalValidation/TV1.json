@@ -1,0 +1,73 @@
+{
+ "id": "TV1",
+ "title": "Clean successful assembly",
+ "description": "Every action acknowledged or placed correctly at the first attempt with ordinary pacing across the crankshaft and the first piston; the rest of the sequence is completed cleanly.",
+ "expected": "remain L1; no unnecessary escalation; normal step reset behaviour at each step entry.",
+ "events": [
+  {
+   "t": "continue",
+   "after": 3,
+   "action": "step_01_crankshaft.locate"
+  },
+  {
+   "t": "success",
+   "after": 28,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_02_piston001.locate"
+  },
+  {
+   "t": "success",
+   "after": 14,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 16,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 12,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 18,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "success",
+   "after": 10,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNutOther"
+  },
+  {
+   "t": "finish_sequence",
+   "after": 4
+  }
+ ],
+ "physiology": null
+}

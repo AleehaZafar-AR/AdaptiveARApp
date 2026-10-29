@@ -1,0 +1,98 @@
+{
+ "id": "TV2",
+ "title": "Initial difficulty then recovery",
+ "description": "Crankshaft clean. On the first piston's head-on-mat action: a failed attempt, a counted error, a wrong part, a counted error, a failed attempt, then success; every remaining action of the step and the rest of the sequence is clean.",
+ "expected": "L1 to L2 during the burst and, if the model chooses it, L2 to L3; recovery behaviour observed naturally; no DECREASE is prescribed.",
+ "events": [
+  {
+   "t": "continue",
+   "after": 3,
+   "action": "step_01_crankshaft.locate"
+  },
+  {
+   "t": "success",
+   "after": 30,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_02_piston001.locate"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 6,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 4,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "wrong_component",
+   "after": 5,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 8,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 12,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 14,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 12,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 16,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "success",
+   "after": 10,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNutOther"
+  },
+  {
+   "t": "finish_sequence",
+   "after": 4
+  }
+ ],
+ "physiology": null
+}

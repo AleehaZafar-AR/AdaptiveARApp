@@ -1,0 +1,188 @@
+{
+ "id": "TV4",
+ "title": "Noisy / erratic",
+ "description": "Alternating successes and failures across the first two piston steps with occasional wrong-part grabs; no sustained run in either direction.",
+ "expected": "scheduler and hysteresis integration; no rapid oscillation or invalid state; every decision structurally valid.",
+ "events": [
+  {
+   "t": "continue",
+   "after": 3,
+   "action": "step_01_crankshaft.locate"
+  },
+  {
+   "t": "success",
+   "after": 25,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_02_piston001.locate"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 9,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "wrong_component",
+   "after": 5,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 11,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "success",
+   "after": 9,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 7,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 9,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "wrong_component",
+   "after": 5,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 13,
+   "action": "step_02_piston001.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNutOther"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_03_piston002.locate"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 7,
+   "action": "step_03_piston002.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_03_piston002.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_03_piston002.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 9,
+   "action": "step_03_piston002.ConnectingRod"
+  },
+  {
+   "t": "wrong_component",
+   "after": 5,
+   "action": "step_03_piston002.ConnectingPin"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_03_piston002.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_03_piston002.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 13,
+   "action": "step_03_piston002.install"
+  },
+  {
+   "t": "success",
+   "after": 9,
+   "action": "step_03_piston002.PistonEnd"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_03_piston002.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_03_piston002.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_03_piston002.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_03_piston002.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_03_piston002.PistonNutOther"
+  },
+  {
+   "t": "finish_sequence",
+   "after": 4
+  }
+ ],
+ "physiology": null
+}

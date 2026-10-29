@@ -1,0 +1,163 @@
+{
+ "id": "TV3",
+ "title": "Persistent difficulty",
+ "description": "Counted errors and failed attempts on the crankshaft and on every placement of the first piston's sub-assembly, continuing after any support increase; each action is eventually completed.",
+ "expected": "escalation through the real runtime, L1 to L2 and potentially L2 to L3; the L3 presentation applied; no transition beyond L3.",
+ "events": [
+  {
+   "t": "continue",
+   "after": 3,
+   "action": "step_01_crankshaft.locate"
+  },
+  {
+   "t": "error",
+   "after": 20,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "error",
+   "after": 8,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "success",
+   "after": 15,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_02_piston001.locate"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 4,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 12,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "wrong_component",
+   "after": 5,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 7,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 10,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 5,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "error",
+   "after": 7,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "success",
+   "after": 12,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "error",
+   "after": 6,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 9,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNutOther"
+  },
+  {
+   "t": "finish_sequence",
+   "after": 4
+  }
+ ],
+ "physiology": null
+}

@@ -1,0 +1,73 @@
+{
+ "id": "TV5",
+ "title": "Slow but accurate",
+ "description": "No errors at all, but long intervals between successful actions: the crankshaft and the first piston run well past their expected durations (120 s and 90 s).",
+ "expected": "elapsed time alone must not produce inappropriate escalation.",
+ "events": [
+  {
+   "t": "continue",
+   "after": 3,
+   "action": "step_01_crankshaft.locate"
+  },
+  {
+   "t": "success",
+   "after": 150,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_02_piston001.locate"
+  },
+  {
+   "t": "success",
+   "after": 55,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 60,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 45,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 70,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "success",
+   "after": 40,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 30,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 30,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 30,
+   "action": "step_02_piston001.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 30,
+   "action": "step_02_piston001.PistonNutOther"
+  },
+  {
+   "t": "finish_sequence",
+   "after": 4
+  }
+ ],
+ "physiology": null
+}

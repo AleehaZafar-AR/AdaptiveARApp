@@ -1,0 +1,108 @@
+{
+ "id": "TV6",
+ "title": "L3 recovery",
+ "description": "Genuine difficulty on the first piston's head action: a first burst (two counted errors, a failed attempt) and, inside the hysteresis after a first increase, a second burst (wrong part, two counted errors, a failed attempt); from the head success on, every remaining action of the step and the rest of the sequence is clean.",
+ "expected": "difficulty sufficient to reach L3 through the real runtime, then the frozen model's recovery behaviour under a clean current support episode; no DECREASE is required.",
+ "events": [
+  {
+   "t": "continue",
+   "after": 3,
+   "action": "step_01_crankshaft.locate"
+  },
+  {
+   "t": "success",
+   "after": 28,
+   "action": "step_01_crankshaft.place"
+  },
+  {
+   "t": "continue",
+   "after": 5,
+   "action": "step_02_piston001.locate"
+  },
+  {
+   "t": "error",
+   "after": 5,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 4,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 4,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "wrong_component",
+   "after": 5,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 4,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "failed_attempt",
+   "after": 2,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "error",
+   "after": 2,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 16,
+   "action": "step_02_piston001.PistonHead"
+  },
+  {
+   "t": "success",
+   "after": 13,
+   "action": "step_02_piston001.ConnectingRod"
+  },
+  {
+   "t": "success",
+   "after": 11,
+   "action": "step_02_piston001.ConnectingPin"
+  },
+  {
+   "t": "success",
+   "after": 15,
+   "action": "step_02_piston001.install"
+  },
+  {
+   "t": "success",
+   "after": 10,
+   "action": "step_02_piston001.PistonEnd"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBolt"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.pistonBoltOther"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNut"
+  },
+  {
+   "t": "success",
+   "after": 8,
+   "action": "step_02_piston001.PistonNutOther"
+  },
+  {
+   "t": "finish_sequence",
+   "after": 4
+  }
+ ],
+ "physiology": null
+}
