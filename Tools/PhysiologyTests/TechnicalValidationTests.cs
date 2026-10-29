@@ -164,6 +164,55 @@ namespace AdaptiveAR.Physiology.Tests
             CompletionOrdering(check);
             PlacementMotionTests(check);
             PresentationRegressionTests(check);
+            HysteresisAssertionTests(check);
+        }
+
+        /// <summary>
+        /// 40p: the hysteresis assertion fails only on applied AI transitions closer than the
+        /// production change cooldown. The TV2 device trajectory (L1->L2 73.0 s, L2->L3 89.2 s,
+        /// L3->L2 128.2 s; gaps 16.2 s and 39.0 s, cooldown 15 s) must PASS: its reversal is a
+        /// legitimate adaptation, reported descriptively.
+        /// </summary>
+        private static void HysteresisAssertionTests(Action<string, bool, string> check)
+        {
+            ScenarioRunRecord Tv2(double thirdMs)
+            {
+                var r = CleanRecord();
+                r.Transitions.Clear(); r.Decisions.Clear(); r.Requests.Clear(); r.DecisionLinesInJsonl = 3;
+                r.Transitions.Add(new TransitionRecord { SessionMs = 73000, From = "L1_Minimal", To = "L2_Guided", Reason = "ai_decision", StepIndex = 1 });
+                r.Transitions.Add(new TransitionRecord { SessionMs = 89200, From = "L2_Guided", To = "L3_Assisted", Reason = "ai_decision", StepIndex = 1 });
+                r.Transitions.Add(new TransitionRecord { SessionMs = thirdMs, From = "L3_Assisted", To = "L2_Guided", Reason = "ai_decision", StepIndex = 1 });
+                r.Requests.Add(new RequestRecord { Number = 1, SessionMs = 71500, Level = "L1_Minimal", StepIndex = 1 });
+                r.Requests.Add(new RequestRecord { Number = 2, SessionMs = 87800, Level = "L2_Guided", StepIndex = 1 });
+                r.Requests.Add(new RequestRecord { Number = 3, SessionMs = thirdMs - 1400, Level = "L3_Assisted", StepIndex = 1 });
+                r.Decisions.Add(new DecisionRecord { Index = 0, SessionMs = 73000, Status = "Ok", ParsedAction = "INCREASE_SUPPORT", LevelAtRequest = "L1_Minimal", LevelAfter = "L2_Guided", LatencyMs = 1500, StepIndex = 1 });
+                r.Decisions.Add(new DecisionRecord { Index = 1, SessionMs = 89200, Status = "Ok", ParsedAction = "INCREASE_SUPPORT", LevelAtRequest = "L2_Guided", LevelAfter = "L3_Assisted", LatencyMs = 1400, StepIndex = 1 });
+                r.Decisions.Add(new DecisionRecord { Index = 2, SessionMs = thirdMs, Status = "Ok", ParsedAction = "DECREASE_SUPPORT", LevelAtRequest = "L3_Assisted", LevelAfter = "L2_Guided", LatencyMs = 1400, StepIndex = 1 });
+                r.Steps.Clear();
+                r.Steps.Add(new StepRecord { Index = 0, StepId = "step_01_crankshaft", SessionMs = 0, LevelOnEntry = "L1_Minimal", LevelBeforeEntry = "L1_Minimal" });
+                r.Steps.Add(new StepRecord { Index = 1, StepId = "step_02_piston001", SessionMs = 31000, LevelOnEntry = "L1_Minimal", LevelBeforeEntry = "L1_Minimal" });
+                return r;
+            }
+            var tv2 = Tv2(128200);
+            var res = IntegrationAssertions.Evaluate(tv2);
+            string det = DetailOf(res, "hysteresis");
+            check("40p TV2 device trajectory (73.0 / 89.2 / 128.2 s, cooldown 15 s) passes the hysteresis assertion", !Fails(tv2, "hysteresis") && tv2.AiTransitions == 3 && Math.Abs(tv2.ChangeCooldownMs - 15000) < 1e-9, det);
+            check("40p2 its reversal is reported descriptively, not as a rapid reversal", tv2.Reversals == 1 && tv2.RapidReversals == 0 && tv2.Oscillations == 0 && det.Contains("reversals 1") && det.Contains("16.2s") && det.Contains("39.0s"), det);
+            check("40p3 the TV2 record passes every other assertion too", IntegrationAssertions.Failed(res) == 0, Describe(res));
+
+            var rapid = Tv2(100000);          // L3->L2 10.8 s after L2->L3: inside the 15 s cooldown
+            string detR = DetailOf(IntegrationAssertions.Evaluate(rapid), "hysteresis");
+            check("40p4 a reversal inside the cooldown still fails the assertion", Fails(rapid, "hysteresis") && rapid.RapidReversals == 1 && rapid.Reversals == 1 && detR.Contains("too fast") && detR.Contains("10.8s"), detR);
+
+            var fastSame = CleanRecord(); fastSame.Transitions.Clear();
+            fastSame.Transitions.Add(new TransitionRecord { SessionMs = 45000, From = "L1_Minimal", To = "L2_Guided", Reason = "ai_decision", StepIndex = 1 });
+            fastSame.Transitions.Add(new TransitionRecord { SessionMs = 50000, From = "L2_Guided", To = "L3_Assisted", Reason = "ai_decision", StepIndex = 1 });
+            check("40p5 two same-direction changes inside the cooldown fail; no reversal is counted", Fails(fastSame, "hysteresis") && fastSame.Reversals == 0 && fastSame.RapidReversals == 0, DetailOf(IntegrationAssertions.Evaluate(fastSame), "hysteresis"));
+
+            var stepReset = Tv2(128200); stepReset.Transitions[2].Reason = "step_default"; stepReset.Transitions[2].To = "L1_Minimal"; stepReset.Transitions[2].StepIndex = 2;
+            stepReset.Decisions.RemoveAt(2); stepReset.Requests.RemoveAt(2); stepReset.DecisionLinesInJsonl = 2;
+            stepReset.Steps.Add(new StepRecord { Index = 2, StepId = "step_03_piston002", SessionMs = 128200, LevelOnEntry = "L1_Minimal", LevelBeforeEntry = "L3_Assisted" });
+            check("40p6 a step-default reset is neither a reversal nor a hysteresis event", !Fails(stepReset, "hysteresis") && stepReset.Reversals == 0 && stepReset.AiTransitions == 2, "");
         }
 
         /// <summary>

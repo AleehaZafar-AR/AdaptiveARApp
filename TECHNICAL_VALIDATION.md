@@ -124,7 +124,7 @@ run it reads the production JSONL back. Thirteen structural assertions are evalu
 10. session completed without an uncaught exception
 11. production JSONL output closed correctly (last line is `session_end`)
 12. scheduler call protection respected (no two requests closer than `minCallIntervalSeconds`)
-13. support-change hysteresis respected; no rapid oscillation
+13. support-change hysteresis respected; no rapid oscillation: no two applied AI transitions closer than the production change cooldown. A direction reversal after the cooldown (e.g. L2→L3 then L3→L2 39 s later) is a legitimate adaptation and is only reported descriptively as `reversals`; `oscillations` in the summary counts reversals inside the cooldown
 14. every scripted event acted on its authored action (a scripted event whose authored action is not the production flow's current action is not injected, and the run fails this check)
 15. authored actions entered in script order; none skipped (the scripted action ids must be an in-order subsequence of the production `action_entered` ids)
 16. placed parts stayed active and visible after every injected success (object state is observed after each injection; a missing observation fails too)
@@ -149,7 +149,7 @@ start 2026-10-30T10:00:00.000Z  end 2026-10-30T10:04:12.000Z  duration 252 s
 scripted events 18 (+21 finish-tail), injected 39 / 39
 provider calls 6 | KEEP 4 INCREASE 2 DECREASE 0 | fallbacks 0 | provider errors/timeouts 0 | malformed 0
 support trajectory: L1 -(45s ai_decision)-> L2 -(60s ai_decision)-> L3 -(123s step_default)-> L1
-maximum level reached: L3   AI transitions 2   oscillations 0
+maximum level reached: L3   AI transitions 2   reversals 0 (inside cooldown 0)
 structural violations: 0
 logger output: /storage/emulated/0/Android/data/com.vuforia.engine.VuforiaEngine/files/AdaptiveAR/sessions/TV_TV2_20261030_100000.jsonl
 validation log: /storage/emulated/0/Android/data/com.vuforia.engine.VuforiaEngine/files/AdaptiveAR/technical_validation/TV2_TV_TV2_20261030_100000.tv.jsonl

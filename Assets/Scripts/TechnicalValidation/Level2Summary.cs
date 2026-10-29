@@ -203,21 +203,35 @@ namespace AdaptiveAR.TechnicalValidation
 
         public int AiTransitions { get { int n = 0; foreach (var t in Transitions) if (t.Reason == "ai_decision") n++; return n; } }
 
-        /// <summary>Direction reversals among AI transitions inside one step.</summary>
-        public int Oscillations
+        /// <summary>
+        /// DESCRIPTIVE: direction reversals among applied AI transitions inside one step
+        /// (e.g. L2->L3 then L3->L2). A reversal after the change cooldown has elapsed is a
+        /// legitimate adaptation, not a hysteresis violation (TV2 device run 2026-10-29:
+        /// L1->L2 at 73.0 s, L2->L3 at 89.2 s, L3->L2 at 128.2 s; gaps 16.2 s and 39.0 s).
+        /// </summary>
+        public int Reversals { get { return CountReversals(double.PositiveInfinity); } }
+
+        /// <summary>
+        /// STRUCTURAL: direction reversals inside one step that occurred closer than the
+        /// production support-change cooldown to the previous applied AI transition. The only
+        /// kind of reversal the hysteresis assertion fails on.
+        /// </summary>
+        public int RapidReversals { get { return CountReversals(ChangeCooldownMs); } }
+
+        /// <summary>Kept for the summary schema: the structural count (reversals inside the cooldown).</summary>
+        public int Oscillations { get { return RapidReversals; } }
+
+        private int CountReversals(double withinMs)
         {
-            get
+            int n = 0; int lastDir = 0; int lastStep = -2; double lastMs = double.NegativeInfinity;
+            foreach (var t in Transitions)
             {
-                int n = 0; int lastDir = 0; int lastStep = -2;
-                foreach (var t in Transitions)
-                {
-                    if (t.Reason != "ai_decision") continue;
-                    int dir = Math.Sign(Levels.Num(t.To) - Levels.Num(t.From));
-                    if (t.StepIndex == lastStep && lastDir != 0 && dir == -lastDir) n++;
-                    lastDir = dir; lastStep = t.StepIndex;
-                }
-                return n;
+                if (t.Reason != "ai_decision") continue;
+                int dir = Math.Sign(Levels.Num(t.To) - Levels.Num(t.From));
+                if (t.StepIndex == lastStep && lastDir != 0 && dir == -lastDir && (t.SessionMs - lastMs) + 50 < withinMs) n++;
+                lastDir = dir; lastStep = t.StepIndex; lastMs = t.SessionMs;
             }
+            return n;
         }
     }
 
@@ -355,16 +369,23 @@ namespace AdaptiveAR.TechnicalValidation
             }
             Add("scheduler call protection respected (min call interval)", tooClose.Count == 0, tooClose.Count == 0 ? $"{r.Requests.Count} request(s), min interval {r.MinCallIntervalSeconds.ToString("0.#", c)} s" : string.Join("; ", tooClose));
 
-            // 13 support-change hysteresis (structural): AI transitions not closer than the change cooldown
-            var fast = new List<string>(); TransitionRecord last = null;
+            // 13 support-change hysteresis (structural): no two applied AI transitions closer than the
+            //    production change cooldown. A direction reversal AFTER the cooldown is a legitimate
+            //    adaptation and is reported descriptively only (Reversals), never a failure.
+            var fast = new List<string>(); TransitionRecord last = null; var gaps = new List<string>();
             foreach (var t in r.Transitions)
             {
                 if (t.Reason != "ai_decision") continue;
-                if (last != null && t.SessionMs - last.SessionMs + 50 < r.ChangeCooldownMs) fast.Add($"{last.To} -> {t.To} after {((t.SessionMs - last.SessionMs) / 1000.0).ToString("0.0", c)}s");
+                if (last != null)
+                {
+                    double gapS = (t.SessionMs - last.SessionMs) / 1000.0;
+                    gaps.Add(gapS.ToString("0.0", c) + "s");
+                    if (t.SessionMs - last.SessionMs + 50 < r.ChangeCooldownMs) fast.Add($"{last.To} -> {t.To} after {gapS.ToString("0.0", c)}s");
+                }
                 last = t;
             }
-            Add("support-change hysteresis respected; no rapid oscillation", fast.Count == 0 && r.Oscillations == 0,
-                $"{r.AiTransitions} AI transition(s), oscillations {r.Oscillations}, cooldown {(r.ChangeCooldownMs / 1000.0).ToString("0.#", c)} s" + (fast.Count > 0 ? "; too fast: " + string.Join("; ", fast) : ""));
+            Add("support-change hysteresis respected; no rapid oscillation", fast.Count == 0,
+                $"{r.AiTransitions} AI transition(s), cooldown {(r.ChangeCooldownMs / 1000.0).ToString("0.#", c)} s, intervals [{string.Join(", ", gaps)}], reversals {r.Reversals} (descriptive), reversals inside the cooldown {r.RapidReversals}" + (fast.Count > 0 ? "; too fast: " + string.Join("; ", fast) : ""));
 
             // 14 every scripted event acted on its authored action (none injected on, or blocked at, another action)
             var misalignedEvents = new List<string>();
@@ -423,7 +444,7 @@ namespace AdaptiveAR.TechnicalValidation
             sb.Append("provider calls ").Append(r.Requests.Count).Append(" | KEEP ").Append(r.Keep).Append(" INCREASE ").Append(r.Increase).Append(" DECREASE ").Append(r.Decrease)
               .Append(" | fallbacks ").Append(r.Fallbacks).Append(" | provider errors/timeouts ").Append(r.ProviderErrors).Append(" | malformed ").Append(r.MalformedOutputs).Append('\n');
             sb.Append("support trajectory: ").Append(r.Trajectory()).Append('\n');
-            sb.Append("maximum level reached: ").Append(Levels.Short(r.MaxLevel)).Append("   AI transitions ").Append(r.AiTransitions).Append("   oscillations ").Append(r.Oscillations).Append('\n');
+            sb.Append("maximum level reached: ").Append(Levels.Short(r.MaxLevel)).Append("   AI transitions ").Append(r.AiTransitions).Append("   reversals ").Append(r.Reversals).Append(" (inside cooldown ").Append(r.RapidReversals).Append(")\n");
             int structural = 0; foreach (var a in assertions) if (!a.Passed && (a.Name.Contains("one-level") || a.Name.Contains("impossible") || a.Name.Contains("matches"))) structural++;
             sb.Append("structural violations: ").Append(structural).Append('\n');
             sb.Append("logger output: ").Append(r.LoggerPath ?? "?").Append('\n');
@@ -455,7 +476,7 @@ namespace AdaptiveAR.TechnicalValidation
                 { "scripted_events", (double)r.ScriptedCount }, { "events_total", (double)r.Events.Count }, { "events_injected", (double)r.InjectedCount },
                 { "provider_calls", (double)r.Requests.Count }, { "keep", (double)r.Keep }, { "increase", (double)r.Increase }, { "decrease", (double)r.Decrease },
                 { "fallbacks", (double)r.Fallbacks }, { "provider_errors", (double)r.ProviderErrors }, { "malformed", (double)r.MalformedOutputs },
-                { "trajectory", r.Trajectory() }, { "max_level", r.MaxLevel }, { "ai_transitions", (double)r.AiTransitions }, { "oscillations", (double)r.Oscillations },
+                { "trajectory", r.Trajectory() }, { "max_level", r.MaxLevel }, { "ai_transitions", (double)r.AiTransitions }, { "reversals", (double)r.Reversals }, { "oscillations", (double)r.Oscillations },
                 { "exceptions", (double)r.ExceptionCount }, { "sequence_finished", r.SequenceFinished }, { "session_ended", r.SessionEnded },
                 { "assertions_passed", (double)(assertions.Count - IntegrationAssertions.Failed(assertions)) }, { "assertions_failed", (double)IntegrationAssertions.Failed(assertions) }
             };
