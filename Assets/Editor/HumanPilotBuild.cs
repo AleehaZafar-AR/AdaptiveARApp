@@ -1,12 +1,17 @@
 // File: HumanPilotBuild.cs (Editor only)
 //
-// Reproducible build of the human-pilot study APK. It builds the one live scene with the
-// project's global Player Settings (product AdaptiveARPrototype, IL2CPP, ARM64, OpenXR) and
-// adds ONE scripting define for this build only - ADAPTIVEAR_DISABLE_TECHNICAL_VALIDATION -
-// which compiles the Level 2 technical-validation bootstrap out of the player, so no
-// technical_validation.json left on a headset can ever start the runner in a participant
-// session. Nothing in ProjectSettings is modified; the define is passed through
-// BuildPlayerOptions.extraScriptingDefines.
+// Reproducible build of the human-pilot study APK. It builds with the committed build
+// profile Assets/Settings/Build Profiles/HumanPilot.asset, which has
+//   - NO Player Settings overrides: the global ProjectSettings apply (product
+//     AdaptiveARPrototype, com.vuforia.engine.VuforiaEngine, IL2CPP, ARM64, OpenXR);
+//     the Quest3 profile's uncommitted override carries a "TechnicalValidation" product
+//     name for validation builds and must not label the study app;
+//   - the one live scene (Assets/1 - ArUcoMarkerTracking.unity);
+//   - ONE extra scripting define, ADAPTIVEAR_DISABLE_TECHNICAL_VALIDATION, which compiles
+//     the Level 2 technical-validation bootstrap out of the player, so no
+//     technical_validation.json left on a headset can ever start the runner in a
+//     participant session.
+// Nothing in ProjectSettings is modified and the active build profile is left alone.
 //
 // Editor:   AdaptiveAR > Build > Human pilot APK  (writes Builds/AdaptiveAR_HumanPilot_Final.apk)
 // Headless: Unity.exe -batchmode -nographics -projectPath <project> -buildTarget Android
@@ -17,6 +22,7 @@ using System;
 using System.IO;
 using System.Text;
 using UnityEditor;
+using UnityEditor.Build.Profile;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -25,6 +31,7 @@ namespace AdaptiveAR.EditorTools
     public static class HumanPilotBuild
     {
         public const string Scene = "Assets/1 - ArUcoMarkerTracking.unity";
+        public const string ProfilePath = "Assets/Settings/Build Profiles/HumanPilot.asset";
         public const string DisableTechnicalValidationDefine = "ADAPTIVEAR_DISABLE_TECHNICAL_VALIDATION";
         public const string DefaultApkName = "AdaptiveAR_HumanPilot_Final.apk";
 
@@ -42,33 +49,31 @@ namespace AdaptiveAR.EditorTools
             Directory.CreateDirectory(Path.GetDirectoryName(apk));
 
             if (!File.Exists(Scene)) throw new FileNotFoundException("live scene missing: " + Scene);
-
-            // Classic Android player settings: a plain APK, not an app bundle or a Gradle project.
-            EditorUserBuildSettings.buildAppBundle = false;
-            EditorUserBuildSettings.exportAsGoogleAndroidProject = false;
-
-            var options = new BuildPlayerOptions
-            {
-                scenes = new[] { Scene },
-                locationPathName = apk,
-                target = BuildTarget.Android,
-                targetGroup = BuildTargetGroup.Android,
-                options = BuildOptions.None,
-                extraScriptingDefines = new[] { DisableTechnicalValidationDefine }
-            };
+            var profile = AssetDatabase.LoadAssetAtPath<BuildProfile>(ProfilePath);
+            if (profile == null) throw new FileNotFoundException("human-pilot build profile missing: " + ProfilePath);
+            if (profile.scriptingDefines == null || Array.IndexOf(profile.scriptingDefines, DisableTechnicalValidationDefine) < 0)
+                throw new InvalidOperationException(ProfilePath + " must carry the scripting define " + DisableTechnicalValidationDefine);
 
             var header = new StringBuilder();
+            header.AppendLine("[HumanPilotBuild] profile: " + ProfilePath + " (no Player Settings overrides; global ProjectSettings apply)");
             header.AppendLine("[HumanPilotBuild] scene: " + Scene);
             header.AppendLine("[HumanPilotBuild] output: " + apk);
-            header.AppendLine("[HumanPilotBuild] product: " + PlayerSettings.productName + " " + PlayerSettings.bundleVersion
-                              + " (" + PlayerSettings.GetApplicationIdentifier(BuildTargetGroup.Android) + ", versionCode " + PlayerSettings.Android.bundleVersionCode + ")");
+            header.AppendLine("[HumanPilotBuild] profile defines: " + string.Join(";", profile.scriptingDefines));
+            header.AppendLine("[HumanPilotBuild] global product: " + PlayerSettings.productName + " " + PlayerSettings.bundleVersion
+                              + " (" + PlayerSettings.GetApplicationIdentifier(BuildTargetGroup.Android) + ", versionCode " + PlayerSettings.Android.bundleVersionCode + ")"
+                              + " - as read with the currently active profile; the APK's label is checked with aapt after the build");
             header.AppendLine("[HumanPilotBuild] scripting backend: " + PlayerSettings.GetScriptingBackend(BuildTargetGroup.Android)
                               + ", architectures: " + PlayerSettings.Android.targetArchitectures
                               + ", min/target SDK: " + PlayerSettings.Android.minSdkVersion + "/" + PlayerSettings.Android.targetSdkVersion);
-            header.AppendLine("[HumanPilotBuild] project defines (Android): " + PlayerSettings.GetScriptingDefineSymbols(UnityEditor.Build.NamedBuildTarget.Android));
-            header.AppendLine("[HumanPilotBuild] extra define for this build: " + DisableTechnicalValidationDefine);
             header.AppendLine("[HumanPilotBuild] Unity " + Application.unityVersion + ", " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz"));
             Debug.Log(header.ToString());
+
+            var options = new BuildPlayerWithProfileOptions
+            {
+                buildProfile = profile,
+                locationPathName = apk,
+                options = BuildOptions.None
+            };
 
             BuildReport report = BuildPipeline.BuildPlayer(options);
             BuildSummary s = report.summary;
