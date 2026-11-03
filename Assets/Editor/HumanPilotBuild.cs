@@ -6,7 +6,8 @@
 //     AdaptiveARPrototype, com.vuforia.engine.VuforiaEngine, IL2CPP, ARM64, OpenXR);
 //     the Quest3 profile's uncommitted override carries a "TechnicalValidation" product
 //     name for validation builds and must not label the study app;
-//   - the one live scene (Assets/1 - ArUcoMarkerTracking.unity);
+//   - the global scene list, which enables only the live scene (Assets/1 - ArUcoMarkerTracking.unity),
+//     checked before the build;
 //   - ONE extra scripting define, ADAPTIVEAR_DISABLE_TECHNICAL_VALIDATION, which compiles
 //     the Level 2 technical-validation bootstrap out of the player, so no
 //     technical_validation.json left on a headset can ever start the runner in a
@@ -49,6 +50,12 @@ namespace AdaptiveAR.EditorTools
             Directory.CreateDirectory(Path.GetDirectoryName(apk));
 
             if (!File.Exists(Scene)) throw new FileNotFoundException("live scene missing: " + Scene);
+            // The profile uses the global scene list (ProjectSettings/EditorBuildSettings.asset),
+            // which must contain exactly the one live scene.
+            var enabled = new System.Collections.Generic.List<string>();
+            foreach (EditorBuildSettingsScene sc in EditorBuildSettings.scenes) if (sc.enabled) enabled.Add(sc.path);
+            if (enabled.Count != 1 || enabled[0] != Scene)
+                throw new InvalidOperationException("the global scene list must enable exactly " + Scene + "; it enables: " + string.Join(", ", enabled));
             var profile = AssetDatabase.LoadAssetAtPath<BuildProfile>(ProfilePath);
             if (profile == null) throw new FileNotFoundException("human-pilot build profile missing: " + ProfilePath);
             if (profile.scriptingDefines == null || Array.IndexOf(profile.scriptingDefines, DisableTechnicalValidationDefine) < 0)
