@@ -283,10 +283,11 @@ namespace AdaptiveAR.EditorTests
                 Assert.AreEqual(0f, Quaternion.Angle(b, target * Quaternion.AngleAxis(180f, capAxis)), 1e-4f);
                 Assert.AreEqual(0f, angA, 1e-4f);
                 Assert.AreEqual(180f, angB, 0.01f);
-                // ties go to A
-                Quaternion midway = target * Quaternion.AngleAxis(90f, capAxis);
-                StepValidator.HalfTurnOrientationError(midway, target, capAxis, out bool variantB);
-                Assert.IsFalse(variantB);
+                // the nearer variant is chosen either side of the midway point
+                StepValidator.HalfTurnOrientationError(target * Quaternion.AngleAxis(89f, capAxis), target, capAxis, out bool nearA);
+                Assert.IsFalse(nearA);
+                StepValidator.HalfTurnOrientationError(target * Quaternion.AngleAxis(91f, capAxis), target, capAxis, out bool nearB);
+                Assert.IsTrue(nearB);
             }
         }
     }
