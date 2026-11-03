@@ -31,8 +31,10 @@
 // distance. A pin or bolt is round: rotation about its own axis is ignored, and the
 // axis may point either way. A rod or a cap is judged on its long axis plus roll
 // modulo a half turn. The crank and cam rotate in their bearings, so roll about
-// their axis is free but the axis direction must match. Anything without an entry
-// uses the action's own tolerance with full orientation matching.
+// their axis is free but the axis direction must match. The rod end cap and the
+// piston head on the mat are accepted in either of two orientations a half turn
+// apart about their physical symmetry axis. Anything without an entry uses the
+// action's own tolerance with full orientation matching.
 //
 // Attempts and errors
 // -------------------
@@ -84,7 +86,7 @@ namespace AdaptiveAR.Steps
         {
             /// <summary>Longest extent (shafts, pins, rods).</summary>
             Longest = 0,
-            /// <summary>Shortest extent (a nut's insertion axis is its thickness, not its width).</summary>
+            /// <summary>Shortest extent (a nut's insertion axis is its thickness, not its width; a piston head's bore axis is its height, the axis its round skirt turns about).</summary>
             Shortest = 1,
             /// <summary>Direction from the part to the piston head in the assembled piston (rod end cap).</summary>
             TowardsHeadInAssembly = 2,
@@ -147,7 +149,7 @@ namespace AdaptiveAR.Steps
         [Tooltip("Revision of the default table above. When the code's defaults are newer than " +
                  "the values serialized in the scene, the table is reset to the defaults at start.")]
         [SerializeField] private int roleToleranceRevision = 0;
-        private const int CurrentRoleToleranceRevision = 7;   // 7: holders use the PlateFlip rule (same numbers)
+        private const int CurrentRoleToleranceRevision = 8;   // 7: holders use the PlateFlip rule (same numbers); 8: piston head on the mat accepted either way round about its bore axis (same numbers)
 
         [Tooltip("Attempt zone radius as a multiple of the position tolerance.")]
         [SerializeField] private float attemptZoneMultiplier = 3f;
@@ -407,7 +409,13 @@ namespace AdaptiveAR.Steps
                 // Revision 6: POSITION tightened across the assembly (deliberate alignment with the
                 // guide); every angle and every symmetry rule unchanged. Small hardware is tuned
                 // on its own line. Holders get their own entry (any holder, slot in sequence).
-                new RoleTolerance { role = "PistonHead",      positionMeters = 0.020f, rotationDegrees = 22f, symmetry = AxisSymmetry.None },
+                // Revision 8 (human pilot): the piston head laid flat on the mat is accepted in the
+                // authored orientation OR turned 180 degrees about its bore axis (the wrist-pin
+                // opening facing either way); both are mechanically acceptable there, and the
+                // kit's rod/pin targets follow the head's accepted pose. Position and angle
+                // numbers unchanged. The bore axis is the head's shortest mesh extent (its round
+                // skirt is 35.2 wide and 17.8 high in mesh units), read from the model itself.
+                new RoleTolerance { role = "PistonHead",      positionMeters = 0.020f, rotationDegrees = 22f, symmetry = AxisSymmetry.HalfTurnAboutAxis, axis = AxisSelect.Shortest },
                 new RoleTolerance { role = "ConnectingRod",   positionMeters = 0.020f, rotationDegrees = 22f, symmetry = AxisSymmetry.AxialHalfTurn },
                 new RoleTolerance { role = "ConnectingPin",   positionMeters = 0.015f, rotationDegrees = 28f, symmetry = AxisSymmetry.AxialFreeFlip, insertionAxis = true },
                 new RoleTolerance { role = "PistonEnd",       positionMeters = 0.020f, rotationDegrees = 25f, symmetry = AxisSymmetry.HalfTurnAboutAxis, axis = AxisSelect.TowardsHeadInAssembly },
@@ -739,9 +747,11 @@ namespace AdaptiveAR.Steps
                 if (c.tf == CurrentTarget)
                     Debug.LogError($"[StepValidator] Action '{action.Id}': part '{c.key}' and target '{TargetKey}' are the SAME object.", this);
 
-            // Mechanical axes per candidate under the role's rule (longest / shortest / towards
-            // the head in the assembled piston for the cap).
-            if (_axisSelect == AxisSelect.TowardsHeadInAssembly || _symmetry == AxisSymmetry.HalfTurnAboutAxis) ResolveAssemblyAxis(action, "PistonHead");
+            // Mechanical axes per candidate under the role's rule: read from the assembled piston
+            // for the assembly-relative modes (cap -> head, bolt <-> nut); from the part's own
+            // mesh extents otherwise (a round part's axis of revolution: the piston head's bore
+            // axis is its shortest extent, a shaft's its longest).
+            if (_axisSelect == AxisSelect.TowardsHeadInAssembly) ResolveAssemblyAxis(action, "PistonHead");
             else if (_axisSelect == AxisSelect.TowardsPairedPart) ResolveAssemblyAxis(action, PairedRole(RoleNameOf(action.partKey)));
             foreach (Candidate c in _candidates) c.axisLocal = AxisFor(c.tf);
 
@@ -831,9 +841,19 @@ namespace AdaptiveAR.Steps
             if (_hasCapAxis && (_symmetry == AxisSymmetry.HalfTurnAboutAxis || _axisSelect == AxisSelect.TowardsPairedPart || _axisSelect == AxisSelect.TowardsHeadInAssembly)) return _capAxisLocal;
             var mf = t.GetComponent<MeshFilter>();
             if (mf == null || mf.sharedMesh == null) return Vector3.forward;
-            Vector3 s = Vector3.Scale(mf.sharedMesh.bounds.size, t.localScale);
-            s = new Vector3(Mathf.Abs(s.x), Mathf.Abs(s.y), Mathf.Abs(s.z));
-            if (_axisSelect == AxisSelect.Shortest)
+            return ExtentAxisFor(Vector3.Scale(mf.sharedMesh.bounds.size, t.localScale), _axisSelect);
+        }
+
+        /// <summary>
+        /// Mesh-extent axis rule (unit-tested): the shortest scaled extent for
+        /// <see cref="AxisSelect.Shortest"/>, the longest for every other selection (the
+        /// assembly-relative modes fall back to it when the assembled ghost is unavailable).
+        /// Ties resolve x, then y, then z.
+        /// </summary>
+        public static Vector3 ExtentAxisFor(Vector3 scaledSize, AxisSelect select)
+        {
+            Vector3 s = new Vector3(Mathf.Abs(scaledSize.x), Mathf.Abs(scaledSize.y), Mathf.Abs(scaledSize.z));
+            if (select == AxisSelect.Shortest)
             {
                 if (s.x <= s.y && s.x <= s.z) return Vector3.right;
                 if (s.y <= s.x && s.y <= s.z) return Vector3.up;
@@ -2201,11 +2221,31 @@ namespace AdaptiveAR.Steps
         /// </summary>
         private void HalfTurnVariants(Candidate c, out Quaternion a, out Quaternion b, out float angA, out float angB)
         {
-            Vector3 axis = AxisFor(c.tf);
-            a = CurrentTarget.rotation;
-            b = CurrentTarget.rotation * Quaternion.AngleAxis(180f, axis);
-            angA = Quaternion.Angle(c.tf.rotation, a);
-            angB = Quaternion.Angle(c.tf.rotation, b);
+            HalfTurnVariants(c.tf.rotation, CurrentTarget.rotation, AxisFor(c.tf), out a, out b, out angA, out angB);
+        }
+
+        /// <summary>
+        /// The half-turn rule as a pure function (unit-tested): A = the authored target rotation,
+        /// B = A turned 180 degrees about <paramref name="axisLocal"/>, the part's physical
+        /// symmetry axis in its own space (the rod axis for the cap, the bore axis for the head
+        /// on the mat). angA / angB are the part's full orientation errors against each; the part
+        /// is judged against the nearer one (ties go to A), so a 90-degree turn, an upside-down
+        /// or a sideways pose stays as far from acceptance as it was without the rule.
+        /// </summary>
+        public static void HalfTurnVariants(Quaternion part, Quaternion target, Vector3 axisLocal, out Quaternion a, out Quaternion b, out float angA, out float angB)
+        {
+            a = target;
+            b = target * Quaternion.AngleAxis(180f, axisLocal);
+            angA = Quaternion.Angle(part, a);
+            angB = Quaternion.Angle(part, b);
+        }
+
+        /// <summary>Orientation error under the half-turn rule: the smaller of the errors against A and B. variantB says which one was nearer.</summary>
+        public static float HalfTurnOrientationError(Quaternion part, Quaternion target, Vector3 axisLocal, out bool variantB)
+        {
+            HalfTurnVariants(part, target, axisLocal, out _, out _, out float angA, out float angB);
+            variantB = angB < angA;
+            return variantB ? angB : angA;
         }
 
         /// <summary>[PistonEndValidation] variant=A|B angleError= accepted= (half-turn roles only).</summary>
@@ -2225,7 +2265,7 @@ namespace AdaptiveAR.Steps
                 return Quaternion.Angle(c.tf.rotation, CurrentTarget.rotation);
 
             if (_symmetry == AxisSymmetry.HalfTurnAboutAxis)
-                return Quaternion.Angle(c.tf.rotation, EffectiveTargetRotation(c));
+                return HalfTurnOrientationError(c.tf.rotation, CurrentTarget.rotation, AxisFor(c.tf), out _);
 
             if (_symmetry == AxisSymmetry.PlateFlip)
             {
